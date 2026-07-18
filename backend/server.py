@@ -524,109 +524,140 @@ async def dashboard(user: dict = Depends(get_current_user)):
     }
 
 # --------------- Invoice endpoints -----------------
-def _generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
-                          payments: list, summary: dict, start: Optional[str],
-                          end: Optional[str]) -> bytes:
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=18 * mm, rightMargin=18 * mm,
-                            topMargin=18 * mm, bottomMargin=18 * mm)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("t", parent=styles["Title"], fontSize=22,
-                                 textColor=colors.HexColor("#D48464"))
-    label_style = ParagraphStyle("l", parent=styles["Normal"], fontSize=9,
-                                 textColor=colors.HexColor("#666666"))
-    body_style = styles["Normal"]
+_PDF_ACCENT = colors.HexColor("#D48464")
+_PDF_MUTED = colors.HexColor("#666666")
+_PDF_HEADER_BG = colors.HexColor("#F5E6D3")
+_PDF_TEXT_DARK = colors.HexColor("#1A1816")
+_PDF_GRID = colors.HexColor("#DDDDDD")
+_PDF_DUE = colors.HexColor("#B85C5C")
+_PDF_RULE = colors.HexColor("#888888")
 
-    story = []
-    story.append(Paragraph("Invoice", title_style))
-    story.append(Paragraph(f"From <b>{teacher_name}</b> — Dance Classes", label_style))
-    story.append(Spacer(1, 8 * mm))
 
-    inv_num = f"INV-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-    period = f"{start or 'All time'} to {end or 'Today'}"
-    meta = [
-        ["Invoice #", inv_num],
-        ["Date", datetime.now(timezone.utc).strftime("%d %b %Y")],
+def _pdf_styles():
+    base = getSampleStyleSheet()
+    return {
+        "title": ParagraphStyle("t", parent=base["Title"], fontSize=22, textColor=_PDF_ACCENT),
+        "label": ParagraphStyle("l", parent=base["Normal"], fontSize=9, textColor=_PDF_MUTED),
+        "body": base["Normal"],
+    }
+
+
+def _pdf_header(styles, teacher_name: str):
+    return [
+        Paragraph("Invoice", styles["title"]),
+        Paragraph(f"From <b>{teacher_name}</b> — Dance Classes", styles["label"]),
+        Spacer(1, 8 * mm),
+    ]
+
+
+def _pdf_meta_table(student: dict, start: Optional[str], end: Optional[str]):
+    now = datetime.now(timezone.utc)
+    rows = [
+        ["Invoice #", f"INV-{now.strftime('%Y%m%d%H%M%S')}"],
+        ["Date", now.strftime("%d %b %Y")],
         ["Billed to", student.get("name", "")],
         ["Contact", f"{student.get('email','') or ''} {student.get('phone','') or ''}"],
-        ["Period", period],
+        ["Period", f"{start or 'All time'} to {end or 'Today'}"],
     ]
-    t = Table(meta, colWidths=[35 * mm, 130 * mm])
+    t = Table(rows, colWidths=[35 * mm, 130 * mm])
     t.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
         ("FONTSIZE", (0, 0), (-1, -1), 10),
         ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#888888")),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
-    story.append(t)
-    story.append(Spacer(1, 8 * mm))
+    return t
 
-    story.append(Paragraph("<b>Classes</b>", body_style))
-    story.append(Spacer(1, 3 * mm))
-    header = ["Date", "Hours", "Rate (INR/hr)", "Amount (INR)", "Notes"]
-    rows = [header]
+
+def _pdf_classes_table(classes: list) -> Table:
+    rows = [["Date", "Hours", "Rate (INR/hr)", "Amount (INR)", "Notes"]]
     for c in classes:
-        rows.append([c.get("class_date", ""), f"{c.get('hours', 0)}",
-                     f"{c.get('rate', 0)}", f"{c.get('amount', 0)}",
-                     c.get("notes") or ""])
+        rows.append([
+            c.get("class_date", ""),
+            f"{c.get('hours', 0)}",
+            f"{c.get('rate', 0)}",
+            f"{c.get('amount', 0)}",
+            c.get("notes") or "",
+        ])
     tbl = Table(rows, colWidths=[28 * mm, 18 * mm, 30 * mm, 30 * mm, 60 * mm], repeatRows=1)
     tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F5E6D3")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1A1816")),
+        ("BACKGROUND", (0, 0), (-1, 0), _PDF_HEADER_BG),
+        ("TEXTCOLOR", (0, 0), (-1, 0), _PDF_TEXT_DARK),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#DDDDDD")),
+        ("GRID", (0, 0), (-1, -1), 0.25, _PDF_GRID),
         ("ALIGN", (1, 1), (3, -1), "RIGHT"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
     ]))
-    story.append(tbl)
-    story.append(Spacer(1, 6 * mm))
+    return tbl
 
-    if payments:
-        story.append(Paragraph("<b>Payments Received</b>", body_style))
-        story.append(Spacer(1, 3 * mm))
-        prows = [["Date", "Method", "Amount (INR)", "Notes"]]
-        for p in payments:
-            prows.append([p.get("paid_on", ""), p.get("method") or "-",
-                          f"{p.get('amount', 0)}", p.get("notes") or ""])
-        ptbl = Table(prows, colWidths=[28 * mm, 32 * mm, 30 * mm, 76 * mm], repeatRows=1)
-        ptbl.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F5E6D3")),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#DDDDDD")),
-            ("ALIGN", (2, 1), (2, -1), "RIGHT"),
-        ]))
-        story.append(ptbl)
-        story.append(Spacer(1, 6 * mm))
 
-    # Summary
-    total = summary.get("total_billed", 0)
-    paid = summary.get("total_paid", 0)
-    due = summary.get("balance_due", 0)
-    srows = [
-        ["Total billed", f"INR {total}"],
-        ["Total paid", f"INR {paid}"],
-        ["Balance due", f"INR {due}"],
+def _pdf_payments_table(payments: list) -> Table:
+    rows = [["Date", "Method", "Amount (INR)", "Notes"]]
+    for p in payments:
+        rows.append([
+            p.get("paid_on", ""),
+            p.get("method") or "-",
+            f"{p.get('amount', 0)}",
+            p.get("notes") or "",
+        ])
+    tbl = Table(rows, colWidths=[28 * mm, 32 * mm, 30 * mm, 76 * mm], repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), _PDF_HEADER_BG),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.25, _PDF_GRID),
+        ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+    ]))
+    return tbl
+
+
+def _pdf_summary_table(summary: dict) -> Table:
+    rows = [
+        ["Total billed", f"INR {summary.get('total_billed', 0)}"],
+        ["Total paid", f"INR {summary.get('total_paid', 0)}"],
+        ["Balance due", f"INR {summary.get('balance_due', 0)}"],
     ]
-    stbl = Table(srows, colWidths=[60 * mm, 40 * mm], hAlign="RIGHT")
-    stbl.setStyle(TableStyle([
+    tbl = Table(rows, colWidths=[60 * mm, 40 * mm], hAlign="RIGHT")
+    tbl.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
         ("FONTNAME", (0, 2), (-1, 2), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 11),
-        ("TEXTCOLOR", (0, 2), (-1, 2), colors.HexColor("#B85C5C")),
+        ("TEXTCOLOR", (0, 2), (-1, 2), _PDF_DUE),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("LINEABOVE", (0, 2), (-1, 2), 0.6, colors.HexColor("#888888")),
+        ("LINEABOVE", (0, 2), (-1, 2), 0.6, _PDF_RULE),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
     ]))
-    story.append(stbl)
+    return tbl
+
+
+def _generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
+                          payments: list, summary: dict, start: Optional[str],
+                          end: Optional[str]) -> bytes:
+    styles = _pdf_styles()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            leftMargin=18 * mm, rightMargin=18 * mm,
+                            topMargin=18 * mm, bottomMargin=18 * mm)
+    story = []
+    story.extend(_pdf_header(styles, teacher_name))
+    story.append(_pdf_meta_table(student, start, end))
+    story.append(Spacer(1, 8 * mm))
+    story.append(Paragraph("<b>Classes</b>", styles["body"]))
+    story.append(Spacer(1, 3 * mm))
+    story.append(_pdf_classes_table(classes))
+    story.append(Spacer(1, 6 * mm))
+    if payments:
+        story.append(Paragraph("<b>Payments Received</b>", styles["body"]))
+        story.append(Spacer(1, 3 * mm))
+        story.append(_pdf_payments_table(payments))
+        story.append(Spacer(1, 6 * mm))
+    story.append(_pdf_summary_table(summary))
     story.append(Spacer(1, 10 * mm))
     story.append(Paragraph(
         "<i>Thank you for learning with us. Please remit any balance at your earliest convenience.</i>",
-        label_style))
-
+        styles["label"]))
     doc.build(story)
     buf.seek(0)
     return buf.read()
@@ -850,6 +881,52 @@ def _build_invoice_email_html(inv: dict, public_link: str, pdf_link: str,
 </table>
 """.strip()
 
+def _origin_from_public_link(public_link: str) -> str:
+    if "/invoice/" not in public_link:
+        return ""
+    return public_link.split("/invoice/")[0]
+
+
+def _build_email_payload(inv: dict, body: SendInvoiceRequest, invoice_id: str) -> dict:
+    origin = _origin_from_public_link(body.public_link)
+    api_pdf_link = (
+        f"{origin}/api/invoices/{invoice_id}/pdf?token={inv['share_token']}"
+        if origin else ""
+    )
+    teacher = inv.get("teacher_name") or EMAIL_FROM_NAME
+    html = _build_invoice_email_html(inv, body.public_link, api_pdf_link, teacher, body.message)
+    payload = {
+        "to": [body.to_email],
+        "subject": f"Invoice from {teacher}",
+        "html": html,
+        "from_name": EMAIL_FROM_NAME,
+    }
+    if body.reply_to:
+        payload["contact_email"] = body.reply_to
+    return payload
+
+
+async def _dispatch_email(payload: dict) -> dict:
+    async with httpx.AsyncClient(timeout=30) as c:
+        resp = await c.post(
+            f"{EMAIL_BASE_URL}/api/v1/email/send",
+            headers={"X-Email-Key": EMAIL_KEY},
+            json=payload,
+        )
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def _mark_invoice_sent(invoice_id: str, to_email: str):
+    await db.invoices.update_one(
+        {"invoice_id": invoice_id},
+        {"$set": {
+            "last_sent_to": to_email,
+            "last_sent_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+
+
 @api_router.post("/invoices/{invoice_id}/send")
 async def send_invoice(invoice_id: str, body: SendInvoiceRequest,
                        user: dict = Depends(get_current_user)):
@@ -859,50 +936,20 @@ async def send_invoice(invoice_id: str, body: SendInvoiceRequest,
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
-    pdf_link = body.public_link.split("/invoice/")[0].rstrip("/") if "/invoice/" in body.public_link else ""
-    # Better: build pdf link from public link's origin
-    origin = body.public_link.split("/invoice/")[0] if "/invoice/" in body.public_link else ""
-    api_pdf_link = f"{origin}/api/invoices/{invoice_id}/pdf?token={inv['share_token']}" if origin else ""
-
-    html = _build_invoice_email_html(
-        inv, body.public_link, api_pdf_link,
-        inv.get("teacher_name") or EMAIL_FROM_NAME, body.message,
-    )
-    student_name = inv.get("student_snapshot", {}).get("name") or "student"
-    subject = f"Invoice from {inv.get('teacher_name') or EMAIL_FROM_NAME}"
-
-    payload = {
-        "to": [body.to_email],
-        "subject": subject,
-        "html": html,
-        "from_name": EMAIL_FROM_NAME,
-    }
-    if body.reply_to:
-        payload["contact_email"] = body.reply_to
-
+    payload = _build_email_payload(inv, body, invoice_id)
     try:
-        async with httpx.AsyncClient(timeout=30) as c:
-            resp = await c.post(
-                f"{EMAIL_BASE_URL}/api/v1/email/send",
-                headers={"X-Email-Key": EMAIL_KEY},
-                json=payload,
-            )
-        resp.raise_for_status()
-        await db.invoices.update_one(
-            {"invoice_id": invoice_id},
-            {"$set": {
-                "last_sent_to": body.to_email,
-                "last_sent_at": datetime.now(timezone.utc).isoformat(),
-            }},
-        )
-        return {"status": "sent", "to": body.to_email, "student": student_name,
-                "email_id": resp.json().get("id")}
+        result = await _dispatch_email(payload)
     except httpx.HTTPStatusError as e:
         logger.error(f"Email send failed: {e.response.status_code} {e.response.text}")
         raise HTTPException(status_code=502, detail="Failed to send email")
     except Exception as e:
         logger.error(f"Email error: {e}")
         raise HTTPException(status_code=500, detail="Failed to send email")
+
+    await _mark_invoice_sent(invoice_id, body.to_email)
+    student_name = inv.get("student_snapshot", {}).get("name") or "student"
+    return {"status": "sent", "to": body.to_email, "student": student_name,
+            "email_id": result.get("id")}
 
 # --------------- App wiring -----------------
 app.include_router(api_router)
