@@ -1,0 +1,61 @@
+{
+  "summary": "Iteration 6: verified the bulk-outstanding invoicing flow end-to-end. Created /app/backend/tests/test_bulk_send.py (16 tests, 14 pass, 2 skipped) exercising GET /api/invoices/bulk-preview (auth, fields, channels reachability, sort-by-balance-desc, window-narrowing) and POST /api/invoices/bulk-send (auth, empty/unknown-channel 400s, real-invoice creation + Resend email sent to delivered@resend.dev, skip semantics for no-email / no-phone / neither, student_ids omitted = only outstanding, generate-regression, ownership isolation). Also ran full Playwright E2E on /invoices: login → open modal → row pre-checked → send-btn disable rule → POST /invoices/bulk-send → results screen (bulk-summary=1, email status=sent, bulk-wa-* link with %20-encoded query) → close → new invoice visible in history. All TEST_-prefixed data cleaned up.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/invoices/bulk-send",
+        "issue": "When student_ids is provided (explicit selection), invoices are ALWAYS created even for students whose window/overall balance_due == 0. This matches the code path in server.py L1090-1093 (the balance-check only runs when body.student_ids is None) and is arguably intentional — the UI even disables such rows unless the user manually re-checks them — but it means a caller with a hand-picked student list will create noise invoices with 0 balance. Consider gating creation on balance_due>0 unconditionally OR document the behavior."
+      },
+      {
+        "endpoint": "POST /api/invoices/bulk-send",
+        "issue": "Owner isolation is enforced solely via the {owner_id, _id: {$in:[...]}} query — for a totally new user the endpoint silently returns {summary:{students:0}, results:[]} rather than 404/403 when foreign student_ids are passed. Ownership guarantee holds (verified via query filter), but callers might expect an explicit error. Low priority."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "BulkSendModal preview useEffect",
+        "issue": "The modal fires the GET /invoices/bulk-preview request FOUR times on open (not 2). Root cause: BulkSendModal.jsx has two useEffects that both call loadPreview() — (1) empty-deps initial and (2) [range.start, range.end] change effect — and the app is wrapped in <React.StrictMode> (src/index.js L18). In a development build StrictMode intentionally double-invokes each effect on mount, so 2 effects × 2 = 4 identical calls with the same query string. In a production build StrictMode does NOT double-invoke effects and this collapses to 2 calls, matching the problem-statement tolerance. Recommended fix: merge into a single useEffect with [range.start, range.end] deps (drop the empty-deps one) — that would give 2 calls in dev/StrictMode and 1 in prod. Not blocking, but visible.",
+        "affected_selectors": ["bulk-send-modal", "bulk-start-input", "bulk-end-input"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bulk_send.py",
+    "/app/test_reports/pytest/iter6_bulk_send.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: collapse BulkSendModal.jsx's two useEffects (L38 + L40) into a single useEffect keyed on [range.start, range.end] so the preview fires 1× in prod / 2× in StrictMode dev (currently 2× / 4×).",
+    "OPTIONAL: in server.py bulk_send (L1088-1093), consider always skipping students whose in-window balance_due<=0 even when student_ids is explicit — otherwise the endpoint will create 0-balance invoices for hand-picked students.",
+    "OPTIONAL: consider a register/signup endpoint (or a fixture-user seeder) so cross-tenant ownership tests are executable in CI. Currently /api/auth has no register endpoint — the app is single-admin — so the two TestOwnershipIsolation cases skip. Owner isolation is nonetheless enforced at the mongo-query level (verified by reading server.py L1073-1078)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 1405 lines (up from 1249 last iteration) — bulk-preview + bulk-send + _create_invoice_for_student together add ~200 LOC. Still recommend splitting into services/invoices.py, services/email.py, services/pdf.py.",
+    "_create_invoice_for_student (L859) refetches the owner_id user via db.users.find_one on every invoice creation to build studio_snapshot. In bulk-send this happens once per student — for a large roster this is N extra DB round-trips. Consider fetching the full user once at the top of bulk_send and passing studio_snapshot into the helper.",
+    "bulk_preview (L1029-1039) rewrites the inner filter loop by hand instead of delegating to _filter_by_date (which already exists at L847). Duplicate logic — should reuse the helper.",
+    "bulk_send accepts public_link_base from the client verbatim (L1070). The frontend passes window.location.origin, which is fine, but a malicious authenticated caller could plant an attacker-controlled origin into the WhatsApp/email message body. Consider whitelisting to the server's APP_URL or the request origin instead of trusting the request body.",
+    "BulkSendModal.jsx L38: `useEffect(loadPreview, [])` passes the function reference directly — this actually works because loadPreview returns undefined (setLoading is discarded) but the pattern is fragile; if loadPreview ever returned a promise or a cleanup, this signature would silently break. Prefer `useEffect(() => { loadPreview(); }, [])`.",
+    "BulkSendModal.jsx L68: `if (waLinks.length === 1) window.open(waLinks[0], '_blank', 'noreferrer')` auto-opens WA for exactly ONE link (skipped for 0 or 2+). This matches the design comment about wa.me requiring a user gesture — but the asymmetry (1 auto-open, 2+ manual) may confuse users testing with a single recipient vs. many. Consider always requiring the click; the results-list already renders per-row buttons.",
+    "BulkSendModal.jsx L33: preview.data.forEach uses s.balance_due (overall) to pre-select, not s.window_balance. If the user narrows the date range, students whose overall balance>0 remain pre-checked even when their in-window balance is 0. This may or may not be desired — the invoice generated will use the requested window and might be empty (see bulk_send minor issue #1). Recommend clarifying.",
+    "server.py L1075 `[ObjectId(sid) for sid in body.student_ids]` — no try/except around ObjectId construction. A malformed id from a client will 500 with `bson.errors.InvalidId`. Wrap in a validator or 400 on bad ids.",
+    "server.py L1116 `elif not EMAIL_KEY` short-circuits when the env var is unset — matches the spec skip reason 'email not configured'. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bulk_send.py (new)",
+    "/app/scripts/_ui_cleanup.py (helper for cleaning TEST_ data)"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 executed; 2 owner-isolation cases skipped because the app has no register endpoint — isolation still verified at the db-query level by reading server.py)",
+    "frontend": "100% for all listed UI flows (open modal, pre-check rule, send-btn disable rule, POST fires once, results screen with summary + email=sent + WA %20-encoded href, new invoice appears in history)"
+  },
+  "test_credentials": "lpathreya@gmail.com / prashanth — verified working. Password preserved throughout the run.",
+  "seed_data_creation": "Backend pytest creates and tears down TEST_bulk_full/emailonly/phoneonly/none/paid students with classes on 2026-02-10 (autouse module fixture). UI test also created TEST_ui_full (email delivered@resend.dev, phone +919999911111, class 2026-07-05) — cleaned via /app/scripts/_ui_cleanup.py at end of run. Verified via GET /api/students that no TEST_-prefixed rows remain.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Bulk-preview / bulk-send are fully wired. The one behavioural quirk worth remembering: (a) with student_ids omitted, bulk-send only picks students whose overall balance_due > 0 (checked via compute_student_summary, not window balance); (b) with student_ids provided, bulk-send creates an invoice for every listed student regardless of balance. The UI defaults selection to overall balance>0 and disables the row when balance<=0, so the two behaviours reconcile via the UI, but any programmatic caller should be aware. Also: preview fires 4× (2× in prod-build) due to two useEffects × React.StrictMode. Container clock shows 2026-07-18 — remember to use current-year dates. Resend delivered@resend.dev works reliably; email dispatch confirmed via last_sent_to/last_sent_at fields being set on the created invoice document.",
+  "rca of the issue": "N/A — no bugs to reproduce this iteration. Only two minor observations flagged (see backend_issues.minor and frontend_issues.integration_issues)."
+}

@@ -856,20 +856,17 @@ def _filter_by_date(items: list, start: Optional[str], end: Optional[str], key: 
         out.append(it)
     return out
 
-@api_router.post("/invoices/generate")
-async def generate_invoice(body: InvoiceRequest, user: dict = Depends(get_current_user)):
-    student = await db.students.find_one({"_id": ObjectId(body.student_id), "owner_id": user["_id"]})
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
-
+async def _create_invoice_for_student(owner_id: str, student: dict,
+                                       start_date: Optional[str], end_date: Optional[str]) -> dict:
+    student_id = str(student["_id"])
     classes = []
-    async for c in db.classes.find({"owner_id": user["_id"], "student_id": body.student_id}).sort("class_date", 1):
+    async for c in db.classes.find({"owner_id": owner_id, "student_id": student_id}).sort("class_date", 1):
         classes.append(ser_class(c))
     payments = []
-    async for p in db.payments.find({"owner_id": user["_id"], "student_id": body.student_id}).sort("paid_on", 1):
+    async for p in db.payments.find({"owner_id": owner_id, "student_id": student_id}).sort("paid_on", 1):
         payments.append(ser_payment(p))
-    classes = _filter_by_date(classes, body.start_date, body.end_date, "class_date")
-    payments = _filter_by_date(payments, body.start_date, body.end_date, "paid_on")
+    classes = _filter_by_date(classes, start_date, end_date, "class_date")
+    payments = _filter_by_date(payments, start_date, end_date, "paid_on")
 
     total_billed = round(sum(float(c["amount"]) for c in classes), 2)
     total_paid = round(sum(float(p["amount"]) for p in payments), 2)
@@ -881,7 +878,7 @@ async def generate_invoice(body: InvoiceRequest, user: dict = Depends(get_curren
 
     invoice_id = str(uuid.uuid4())
     share_token = uuid.uuid4().hex
-    full_user = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    full_user = await db.users.find_one({"_id": ObjectId(owner_id)})
     studio_snapshot = {
         "studio_name": (full_user or {}).get("studio_name"),
         "teacher_name": (full_user or {}).get("teacher_name") or (full_user or {}).get("name"),
@@ -893,21 +890,31 @@ async def generate_invoice(body: InvoiceRequest, user: dict = Depends(get_curren
     invoice_doc = {
         "invoice_id": invoice_id,
         "share_token": share_token,
-        "owner_id": user["_id"],
-        "student_id": body.student_id,
+        "owner_id": owner_id,
+        "student_id": student_id,
         "student_snapshot": ser_student(student),
         "teacher_name": studio_snapshot["teacher_name"] or "Dance Teacher",
         "studio_snapshot": studio_snapshot,
         "classes": classes,
         "payments": payments,
         "summary": summary,
-        "start_date": body.start_date,
-        "end_date": body.end_date,
+        "start_date": start_date,
+        "end_date": end_date,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.invoices.insert_one(invoice_doc)
-    return {"invoice_id": invoice_id, "share_token": share_token, "summary": summary,
-            "class_count": len(classes), "payment_count": len(payments)}
+    return invoice_doc
+
+
+@api_router.post("/invoices/generate")
+async def generate_invoice(body: InvoiceRequest, user: dict = Depends(get_current_user)):
+    student = await db.students.find_one({"_id": ObjectId(body.student_id), "owner_id": user["_id"]})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    doc = await _create_invoice_for_student(user["_id"], student, body.start_date, body.end_date)
+    return {"invoice_id": doc["invoice_id"], "share_token": doc["share_token"],
+            "summary": doc["summary"],
+            "class_count": len(doc["classes"]), "payment_count": len(doc["payments"])}
 
 @api_router.get("/invoices")
 async def list_invoices(user: dict = Depends(get_current_user)):
@@ -996,6 +1003,152 @@ async def shared_invoice_logo(share_token: str):
     except Exception:
         raise HTTPException(status_code=404, detail="Logo unavailable")
     return Response(content=data, media_type=ct or "image/png")
+
+class BulkSendRequest(BaseModel):
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    student_ids: Optional[List[str]] = None  # explicit selection; if None => all outstanding
+    channels: List[str] = Field(default_factory=lambda: ["email"])  # 'email' and/or 'whatsapp'
+    public_link_base: str
+    message: Optional[str] = None
+
+
+@api_router.get("/invoices/bulk-preview")
+async def bulk_preview(start_date: Optional[str] = None, end_date: Optional[str] = None,
+                       user: dict = Depends(get_current_user)):
+    """Return per-student outstanding balance + reachability channels for bulk-send."""
+    students = []
+    async for s in db.students.find({"owner_id": user["_id"]}):
+        students.append(s)
+    out = []
+    for s in students:
+        sid = str(s["_id"])
+        summ = await compute_student_summary(user["_id"], sid)
+        # optionally recompute against the requested date window using totals
+        billed_win, paid_win = 0.0, 0.0
+        if start_date or end_date:
+            async for c in db.classes.find({"owner_id": user["_id"], "student_id": sid}):
+                d = c.get("class_date") or ""
+                if start_date and d < start_date: continue
+                if end_date and d > end_date: continue
+                billed_win += float(c.get("amount", 0))
+            async for p in db.payments.find({"owner_id": user["_id"], "student_id": sid}):
+                d = p.get("paid_on") or ""
+                if start_date and d < start_date: continue
+                if end_date and d > end_date: continue
+                paid_win += float(p.get("amount", 0))
+            balance_in_window = round(billed_win - paid_win, 2)
+        else:
+            balance_in_window = summ["balance_due"]
+
+        out.append({
+            "student_id": sid,
+            "name": s.get("name"),
+            "email": s.get("email"),
+            "phone": s.get("phone"),
+            "balance_due": summ["balance_due"],       # overall
+            "window_billed": round(billed_win, 2) if (start_date or end_date) else summ["total_billed"],
+            "window_balance": balance_in_window,
+            "channels": [ch for ch, ok in [("email", bool(s.get("email"))), ("whatsapp", bool(s.get("phone")))] if ok],
+        })
+    out.sort(key=lambda x: x["balance_due"], reverse=True)
+    return out
+
+
+def _wa_link(phone: str, message: str) -> str:
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    from urllib.parse import quote
+    return f"https://wa.me/{digits}?text={quote(message)}"
+
+
+@api_router.post("/invoices/bulk-send")
+async def bulk_send(body: BulkSendRequest, user: dict = Depends(get_current_user)):
+    """Generate an invoice for each targeted student and send it on the selected channels.
+    For 'email', the send happens server-side. For 'whatsapp', we return a pre-filled
+    wa.me link that the frontend can open in new tabs.
+    """
+    origin = body.public_link_base.rstrip("/")
+
+    # Determine target students
+    filter_q = {"owner_id": user["_id"]}
+    if body.student_ids:
+        filter_q["_id"] = {"$in": [ObjectId(sid) for sid in body.student_ids]}
+    students = []
+    async for s in db.students.find(filter_q):
+        students.append(s)
+
+    if not body.channels:
+        raise HTTPException(status_code=400, detail="At least one channel is required")
+    channels = set(body.channels)
+    if not channels.issubset({"email", "whatsapp"}):
+        raise HTTPException(status_code=400, detail="Unknown channel")
+
+    results = []
+    for s in students:
+        sid = str(s["_id"])
+        # Skip if no explicit selection and student has no outstanding
+        if body.student_ids is None:
+            summ = await compute_student_summary(user["_id"], sid)
+            if summ["balance_due"] <= 0:
+                continue
+
+        try:
+            doc = await _create_invoice_for_student(user["_id"], s, body.start_date, body.end_date)
+        except Exception as e:
+            results.append({"student_id": sid, "name": s.get("name"), "status": "error",
+                            "detail": f"Invoice generation failed: {e}"})
+            continue
+
+        entry = {
+            "student_id": sid,
+            "name": s.get("name"),
+            "invoice_id": doc["invoice_id"],
+            "share_token": doc["share_token"],
+            "public_link": f"{origin}/invoice/{doc['share_token']}",
+            "balance_due": doc["summary"]["balance_due"],
+            "channels": {},
+        }
+
+        # Email channel
+        if "email" in channels:
+            if not s.get("email"):
+                entry["channels"]["email"] = {"status": "skipped", "reason": "no email on file"}
+            elif not EMAIL_KEY:
+                entry["channels"]["email"] = {"status": "skipped", "reason": "email not configured"}
+            else:
+                send_body = SendInvoiceRequest(
+                    to_email=s["email"],
+                    public_link=entry["public_link"],
+                    message=body.message,
+                )
+                payload = _build_email_payload(doc, send_body, doc["invoice_id"])
+                try:
+                    await _dispatch_email(payload)
+                    await _mark_invoice_sent(doc["invoice_id"], s["email"])
+                    entry["channels"]["email"] = {"status": "sent", "to": s["email"]}
+                except Exception as e:
+                    logger.error(f"Bulk email failed for {sid}: {e}")
+                    entry["channels"]["email"] = {"status": "error", "detail": "email dispatch failed"}
+
+        # WhatsApp channel: return pre-filled link for the frontend to open
+        if "whatsapp" in channels:
+            if not s.get("phone"):
+                entry["channels"]["whatsapp"] = {"status": "skipped", "reason": "no phone on file"}
+            else:
+                teacher = doc.get("studio_snapshot", {}).get("studio_name") or doc.get("teacher_name") or "your teacher"
+                msg = (f"Hi {s.get('name') or ''}, here's your invoice from {teacher} "
+                       f"(₹{doc['summary']['balance_due']} due):\n{entry['public_link']}")
+                entry["channels"]["whatsapp"] = {"status": "ready", "url": _wa_link(s["phone"], msg)}
+
+        results.append(entry)
+
+    summary_counts = {
+        "students": len(results),
+        "emails_sent": sum(1 for r in results if r.get("channels", {}).get("email", {}).get("status") == "sent"),
+        "whatsapp_links": sum(1 for r in results if r.get("channels", {}).get("whatsapp", {}).get("status") == "ready"),
+    }
+    return {"summary": summary_counts, "results": results}
+
 
 @api_router.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):

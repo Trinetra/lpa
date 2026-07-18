@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { api, formatApiErrorDetail, API } from "@/lib/api";
-import { FileText, Download, Link as LinkIcon, Copy, Mail, MessageCircle, X, Trash2 } from "lucide-react";
+import { FileText, Download, Link as LinkIcon, Copy, Mail, MessageCircle, X, Trash2, Send } from "lucide-react";
 import { toast } from "sonner";
+import BulkSendModal from "@/components/BulkSendModal";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -82,6 +83,7 @@ export default function InvoicesPage() {
   const [form, setForm] = useState({ student_id: "", start_date: "", end_date: "" });
   const [saving, setSaving] = useState(false);
   const [emailing, setEmailing] = useState(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const load = () => {
     Promise.all([api.get("/students"), api.get("/invoices")]).then(([sRes, iRes]) => {
@@ -146,11 +148,21 @@ export default function InvoicesPage() {
   return (
     <div data-testid="invoices-page" className="space-y-8">
       <header>
-        <div className="uppercase-label mb-2">Billing</div>
-        <h1 className="font-serif-display text-4xl sm:text-5xl">Invoices</h1>
+        <div className="flex flex-wrap justify-between items-start gap-4">
+          <div>
+            <div className="uppercase-label mb-2">Billing</div>
+            <h1 className="font-serif-display text-4xl sm:text-5xl">Invoices</h1>
+          </div>
+          <button type="button" onClick={() => setBulkOpen(true)}
+            data-testid="bulk-send-open-btn"
+            className="btn-pill flex items-center gap-2">
+            <Send size={14} /> Send outstanding
+          </button>
+        </div>
         <p className="mt-3 text-sm max-w-xl" style={{ color: "var(--text-muted)" }}>
           Generate a shareable invoice for any student and date range. Send the link
-          or PDF directly to your student via email or WhatsApp.
+          or PDF directly to your student via email or WhatsApp — or dispatch a whole
+          month's outstanding reminders in one tap.
         </p>
       </header>
 
@@ -265,6 +277,9 @@ export default function InvoicesPage() {
           studentMap={studentMap}
           onClose={() => setEmailing(null)}
         />
+      )}
+      {bulkOpen && (
+        <BulkSendModal onClose={() => setBulkOpen(false)} onDone={load} />
       )}
     </div>
   );
