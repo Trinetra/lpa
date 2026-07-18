@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 5 verification: admin credentials rotation, change-password, forgot/reset-password, Studio Profile GET/PATCH, logo upload, invoice studio_snapshot, shared logo endpoint, PDF branding (Studio name + Pay-to), and shared invoice page UI. Created /app/backend/tests/test_auth_profile_branding.py (23 tests) — all pass. Frontend UI verified end-to-end via Playwright: /login forgot-password link + modal, /settings shows studio-profile-form and change-password-form with 'Password updated' toast, /invoice/<share_token> renders shared-logo + shared-brand ('Lakshmi School of Dance') + shared-payto (UPI + email). Password ended at 'prashanth' (verified via login 200).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/profile", "issue": "Fields set to null in request body are stripped before update (server drops None values). This means the UI cannot CLEAR studio_name/logo_path/etc back to null via PATCH — a subsequent GET still returns the previous value. Workaround in UI (Remove logo button) only clears the local form state; the saved profile still has the old logo_path unless a new one is uploaded. Consider using an explicit sentinel like empty-string or a separate DELETE endpoint if 'unset' semantics are required."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "SharedInvoicePage totals column", "issues": ["'Balance due' and the amount visually collide (rendered as 'Balance due₹1,000'). The <span>Balance due</span><span>₹1,000</span> flex row on line 141-144 uses justify-between but the font-serif-display sizing can push them together on narrow columns. Add a small gap (gap-3) between the label and value, or use a min-width on the amount."]},
+      {"screen": "SettingsPage / all pages using sonner toast", "issues": ["Toast library selector: only found via role=status; consider adding data-testid to toast for testability."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth_profile_branding.py",
+    "/app/test_reports/pytest/iter5_auth_profile.xml"
+  ],
+  "action_items": [
+    "OPTIONAL cosmetic: fix 'Balance due₹1,000' spacing on SharedInvoicePage totals row (line 141-144 in SharedInvoicePage.jsx — add gap-3 to the flex row).",
+    "OPTIONAL: legacy tests /app/tests/test_backend.py and /app/backend/tests/test_delete_and_branding.py still hard-code teacher@dance.com/dance123 (old admin) — they now fail at login setup because credentials are rotated. Main agent should update EMAIL/PASSWORD constants to lpathreya@gmail.com/prashanth OR delete these files if superseded.",
+    "OPTIONAL: PATCH /api/profile strips None — if UI needs to clear logo_path (Remove logo), backend needs to accept explicit null or provide DELETE /api/profile/logo."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1249 lines — still above the 700-line soft limit. Splitting into services/pdf.py, services/email.py, services/auth.py would improve maintainability. Auth (login/change/forgot/reset), profile, uploads, students, classes, payments, invoices, stats, and email are all in one file.",
+    "Auth: cookie sits alongside Bearer — get_current_user prefers cookie over Authorization header (line 110-114). This is fine but a client that logs in once caches the cookie; the fixture had to use a fresh Session for the unauth test — flag this if you ever need to test 'no-auth' from an already-authenticated session.",
+    "PATCH /api/profile (line 399): builds updates via body.model_dump() then filters None (line 401). Cannot clear values back to null. Same pattern is used in students/classes updates — consistent, but may need re-design if UI wants a 'remove' semantic.",
+    "Password reset TTL index on password_reset_tokens with expireAfterSeconds=0 correctly auto-deletes expired tokens (line 1200).",
+    "forgot_password (line 336): returns success even for non-existent emails — good no-info-leak posture. Password reset link is logged INFO level (line 353) — this is convenient for testing but should not leak sensitive tokens to logs in production; consider DEBUG level or an env-gated flag.",
+    "invoice_pdf endpoint (line 929): fetches logo bytes via requests.get in the request thread (get_object). For high traffic this blocks — acceptable at this scale but worth noting.",
+    "SharedInvoicePage.jsx: brand fallback chain is studio_name -> teacher_name (line 33). If both are null on the snapshot the header renders empty. Not a bug in the current happy path, just a fallback consideration.",
+    "SettingsPage.jsx StudioProfileCard: form.logo_path is used as-is; toggling 'Remove' sets it to null locally but the PATCH sends null which is stripped by the backend (see above). UX indicates removal succeeded but the profile is unchanged."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auth_profile_branding.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (23/23 tests pass)",
+    "frontend": "100% for the flows under test (forgot-password modal, settings/change-password toast, shared invoice logo+brand+pay-to)"
+  },
+  "test_credentials": "lpathreya@gmail.com / prashanth (verified working after all tests; password preserved).",
+  "seed_data_creation": "Each test creates TEST_-prefixed students and cascades cleanup via DELETE /api/students. Uploaded logo remains on profile (studio_name='Lakshmi School of Dance', contact_upi='lakshmi@upi', logo_path set). If a clean profile is desired, main agent can PATCH /api/profile with empty overrides (though None values are stripped — see minor issue).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 5-iteration requirements verified: (1) credentials rotated — only lpathreya@gmail.com admin in db, old teacher@dance.com returns 401; (2) change-password endpoint validates current/length and works round-trip; (3) forgot-password creates reset tokens, no info leak, log line 'Password reset link for ...' present in supervisor backend log; (4) reset-password enforces length, used-once, and expiration; (5) profile GET/PATCH works with snapshot into invoices; (6) shared-invoice/{token}/logo serves image bytes, 404 for bad token, 404 when snapshot has no logo; (7) PDF embeds 'Lakshmi School of Dance' text and 'Pay to' UPI line when balance_due>0 (verified via pypdf text extract); (8) frontend shared invoice page has data-testid shared-logo, shared-brand, shared-payto rendering correctly. Legacy tests (/app/tests/test_backend.py + /app/backend/tests/test_delete_and_branding.py) use OLD hard-coded credentials and will fail at setup — update or remove them.",
+  "rca of the issue": "N/A - no new bugs to reproduce this iteration."
+}

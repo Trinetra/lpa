@@ -8,6 +8,7 @@ import {
   Wallet,
   FileText,
   BarChart3,
+  Settings,
   LogOut,
 } from "lucide-react";
 
@@ -27,6 +28,7 @@ export default function AppLayout() {
     { to: "/payments", label: "Payments", icon: Wallet, tid: "nav-payments" },
     { to: "/invoices", label: "Invoices", icon: FileText, tid: "nav-invoices" },
     { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
+    { to: "/settings", label: "Settings", icon: Settings, tid: "nav-settings" },
   ];
 
   return (

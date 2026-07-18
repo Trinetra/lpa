@@ -29,15 +29,28 @@ export default function SharedInvoicePage() {
   if (!inv) return <div className="min-h-screen flex items-center justify-center uppercase-label">Loading…</div>;
 
   const pdfUrl = `${API}/invoices/${inv.invoice_id}/pdf?token=${inv.share_token}`;
+  const studio = inv.studio || {};
+  const brandName = studio.studio_name || inv.teacher_name;
+  const logoUrl = studio.logo_path ? `${API}/invoices/share/${token}/logo` : null;
 
   return (
     <div className="min-h-screen py-14 px-6" style={{ background: "var(--bg)" }}>
       <div className="max-w-3xl mx-auto">
-        <header className="flex items-end justify-between mb-10">
-          <div>
-            <div className="uppercase-label mb-1">Invoice from</div>
-            <div className="font-serif-display text-3xl" style={{ color: "var(--primary)" }}>
-              {inv.teacher_name}
+        <header className="flex items-start justify-between mb-10 gap-4 flex-wrap">
+          <div className="flex items-center gap-4">
+            {logoUrl && (
+              <img src={logoUrl} alt="" data-testid="shared-logo"
+                className="w-16 h-16 object-contain rounded"
+                style={{ background: "var(--surface-2)" }} />
+            )}
+            <div>
+              <div className="uppercase-label mb-1">Invoice from</div>
+              <div className="font-serif-display text-3xl" style={{ color: "var(--primary)" }} data-testid="shared-brand">
+                {brandName}
+              </div>
+              {studio.studio_name && inv.teacher_name && studio.studio_name !== inv.teacher_name && (
+                <div className="text-sm" style={{ color: "var(--text-muted)" }}>with {inv.teacher_name}</div>
+              )}
             </div>
           </div>
           <a href={pdfUrl} target="_blank" rel="noreferrer" className="btn-pill" data-testid="shared-download-pdf">
@@ -113,8 +126,16 @@ export default function SharedInvoicePage() {
 
           <div className="divider-dashed my-4" />
 
-          <div className="flex justify-end">
-            <div className="w-full max-w-xs text-sm space-y-1">
+          <div className="flex flex-wrap justify-between items-start gap-6">
+            {(studio.contact_upi || studio.contact_phone || studio.contact_email) && (inv.summary?.balance_due > 0) && (
+              <div className="text-xs space-y-1" data-testid="shared-payto">
+                <div className="uppercase-label mb-1">Pay to</div>
+                {studio.contact_upi && <div>UPI: <span style={{ color: "var(--text)" }}>{studio.contact_upi}</span></div>}
+                {studio.contact_phone && <div>Phone: {studio.contact_phone}</div>}
+                {studio.contact_email && <div>Email: {studio.contact_email}</div>}
+              </div>
+            )}
+            <div className="w-full sm:w-auto sm:max-w-xs text-sm space-y-1 ml-auto">
               <div className="flex justify-between"><span>Total billed</span><span>{fmt(inv.summary?.total_billed)}</span></div>
               <div className="flex justify-between"><span>Total paid</span><span>{fmt(inv.summary?.total_paid)}</span></div>
               <div className="flex justify-between font-serif-display text-lg pt-2"
@@ -126,7 +147,7 @@ export default function SharedInvoicePage() {
         </div>
 
         <div className="text-center text-xs" style={{ color: "var(--text-muted)" }}>
-          <Link to="/" className="underline">Powered by Lakshmi Studio Ledger</Link>
+          <Link to="/" className="underline">Powered by {brandName} · Studio Ledger</Link>
         </div>
       </div>
     </div>

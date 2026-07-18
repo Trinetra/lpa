@@ -12,6 +12,8 @@ import ClassesPage from "@/pages/ClassesPage";
 import PaymentsPage from "@/pages/PaymentsPage";
 import InvoicesPage from "@/pages/InvoicesPage";
 import ChartsPage from "@/pages/ChartsPage";
+import SettingsPage from "@/pages/SettingsPage";
+import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import SharedInvoicePage from "@/pages/SharedInvoicePage";
 
 function ProtectedRoute({ children }) {
@@ -31,6 +33,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/invoice/:token" element={<SharedInvoicePage />} />
       <Route
         element={
@@ -47,6 +50,7 @@ function AppRoutes() {
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/invoices" element={<InvoicesPage />} />
         <Route path="/charts" element={<ChartsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

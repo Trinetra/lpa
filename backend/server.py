@@ -15,6 +15,7 @@ import bcrypt
 import httpx
 import jwt
 import requests
+import secrets
 from collections import defaultdict
 from bson import ObjectId
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends, Query, Header
@@ -26,7 +27,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 
 # --------------- Config -----------------
 mongo_url = os.environ['MONGO_URL']
@@ -132,6 +133,25 @@ async def get_current_user(request: Request) -> dict:
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+class ProfileUpdate(BaseModel):
+    studio_name: Optional[str] = None
+    teacher_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_upi: Optional[str] = None
+    contact_email: Optional[EmailStr] = None
+    logo_path: Optional[str] = None
 
 class StudentCreate(BaseModel):
     name: str
@@ -259,6 +279,131 @@ async def refresh(request: Request, response: Response):
         return {"ok": True}
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+@api_router.post("/auth/change-password")
+async def change_password(body: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    full = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    if not full or not verify_password(body.current_password, full["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    await db.users.update_one(
+        {"_id": ObjectId(user["_id"])},
+        {"$set": {"password_hash": hash_password(body.new_password)}}
+    )
+    return {"ok": True}
+
+async def _send_password_reset_email(to_email: str, name: str, reset_link: str):
+    if not EMAIL_KEY:
+        logger.warning(f"Password reset requested but EMERGENT_EMAIL_KEY not set. Link: {reset_link}")
+        return
+    html = f"""
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
+  <tr><td align="center">
+    <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
+      <tr><td>
+        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">Password reset</div>
+        <div style="font-size:22px;color:#d48464;font-weight:700;margin-bottom:20px">{EMAIL_FROM_NAME}</div>
+        <div style="font-size:15px;color:#2c2926;line-height:1.5">
+          Hi {name or "there"},<br><br>
+          We received a request to reset your password. Click the button below to choose a new one.
+          This link expires in 60 minutes.
+        </div>
+        <div style="margin:24px 0"><a href="{reset_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px">Reset password</a></div>
+        <div style="font-size:12px;color:#a89886">If you didn't request this, you can safely ignore this email.</div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+""".strip()
+    payload = {
+        "to": [to_email],
+        "subject": f"Reset your {EMAIL_FROM_NAME} password",
+        "html": html,
+        "from_name": EMAIL_FROM_NAME,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            resp = await c.post(
+                f"{EMAIL_BASE_URL}/api/v1/email/send",
+                headers={"X-Email-Key": EMAIL_KEY},
+                json=payload,
+            )
+        resp.raise_for_status()
+    except Exception as e:
+        logger.error(f"Password reset email failed: {e}")
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(body: ForgotPasswordRequest):
+    email = body.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    # Always return success (don't leak whether email exists)
+    if user:
+        token = secrets.token_urlsafe(32)
+        await db.password_reset_tokens.insert_one({
+            "token": token,
+            "user_id": str(user["_id"]),
+            "email": email,
+            "used": False,
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
+        })
+        app_url = os.environ.get("APP_URL", "").rstrip("/")
+        reset_link = f"{app_url}/reset-password?token={token}"
+        logger.info(f"Password reset link for {email}: {reset_link}")
+        await _send_password_reset_email(email, user.get("name") or "", reset_link)
+    return {"ok": True, "message": "If an account exists for that email, a reset link has been sent."}
+
+@api_router.post("/auth/reset-password")
+async def reset_password(body: ResetPasswordRequest):
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    rec = await db.password_reset_tokens.find_one({"token": body.token})
+    if not rec:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    if rec.get("used"):
+        raise HTTPException(status_code=400, detail="Reset link already used")
+    expires_at = rec.get("expires_at")
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if not expires_at or expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Reset link has expired")
+    await db.users.update_one(
+        {"_id": ObjectId(rec["user_id"])},
+        {"$set": {"password_hash": hash_password(body.new_password)}}
+    )
+    await db.password_reset_tokens.update_one(
+        {"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}}
+    )
+    return {"ok": True}
+
+# --------------- Profile endpoints -----------------
+def _ser_profile(user_doc: dict) -> dict:
+    return {
+        "id": str(user_doc["_id"]),
+        "email": user_doc.get("email"),
+        "name": user_doc.get("name"),
+        "studio_name": user_doc.get("studio_name"),
+        "teacher_name": user_doc.get("teacher_name") or user_doc.get("name"),
+        "contact_phone": user_doc.get("contact_phone"),
+        "contact_upi": user_doc.get("contact_upi"),
+        "contact_email": user_doc.get("contact_email") or user_doc.get("email"),
+        "logo_path": user_doc.get("logo_path"),
+    }
+
+@api_router.get("/profile")
+async def get_profile(user: dict = Depends(get_current_user)):
+    full = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    return _ser_profile(full)
+
+@api_router.patch("/profile")
+async def update_profile(body: ProfileUpdate, user: dict = Depends(get_current_user)):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.users.update_one({"_id": ObjectId(user["_id"])}, {"$set": updates})
+    full = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    return _ser_profile(full)
 
 # --------------- Upload endpoint -----------------
 @api_router.post("/uploads/photo")
@@ -548,12 +693,28 @@ def _pdf_styles():
     }
 
 
-def _pdf_header(styles, teacher_name: str):
-    return [
-        Paragraph("Invoice", styles["title"]),
-        Paragraph(f"From <b>{teacher_name}</b> — Dance Classes", styles["label"]),
-        Spacer(1, 8 * mm),
-    ]
+def _pdf_header(styles, teacher_name: str, studio_name: Optional[str] = None,
+                logo_bytes: Optional[bytes] = None):
+    els = []
+    if logo_bytes:
+        try:
+            img = RLImage(io.BytesIO(logo_bytes))
+            # Scale to max 30mm tall
+            ratio = (img.imageWidth or 1) / (img.imageHeight or 1)
+            img.drawHeight = 22 * mm
+            img.drawWidth = 22 * mm * ratio
+            img.hAlign = "LEFT"
+            els.append(img)
+            els.append(Spacer(1, 3 * mm))
+        except Exception:
+            pass
+    if studio_name:
+        studio_style = ParagraphStyle("s", parent=styles["title"], fontSize=16, textColor=_PDF_TEXT_DARK)
+        els.append(Paragraph(studio_name, studio_style))
+    els.append(Paragraph("Invoice", styles["title"]))
+    els.append(Paragraph(f"From <b>{teacher_name}</b> — Dance Classes", styles["label"]))
+    els.append(Spacer(1, 8 * mm))
+    return els
 
 
 def _pdf_meta_table(student: dict, start: Optional[str], end: Optional[str]):
@@ -640,14 +801,16 @@ def _pdf_summary_table(summary: dict) -> Table:
 
 def _generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
                           payments: list, summary: dict, start: Optional[str],
-                          end: Optional[str]) -> bytes:
+                          end: Optional[str], studio_name: Optional[str] = None,
+                          logo_bytes: Optional[bytes] = None,
+                          studio_contact: Optional[dict] = None) -> bytes:
     styles = _pdf_styles()
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             leftMargin=18 * mm, rightMargin=18 * mm,
                             topMargin=18 * mm, bottomMargin=18 * mm)
     story = []
-    story.extend(_pdf_header(styles, teacher_name))
+    story.extend(_pdf_header(styles, teacher_name, studio_name, logo_bytes))
     story.append(_pdf_meta_table(student, start, end))
     story.append(Spacer(1, 8 * mm))
     story.append(Paragraph("<b>Classes</b>", styles["body"]))
@@ -660,7 +823,19 @@ def _generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
         story.append(_pdf_payments_table(payments))
         story.append(Spacer(1, 6 * mm))
     story.append(_pdf_summary_table(summary))
-    story.append(Spacer(1, 10 * mm))
+    story.append(Spacer(1, 6 * mm))
+    if studio_contact and summary.get("balance_due", 0) > 0:
+        contact_bits = []
+        if studio_contact.get("contact_upi"):
+            contact_bits.append(f"UPI: <b>{studio_contact['contact_upi']}</b>")
+        if studio_contact.get("contact_phone"):
+            contact_bits.append(f"Phone: {studio_contact['contact_phone']}")
+        if studio_contact.get("contact_email"):
+            contact_bits.append(f"Email: {studio_contact['contact_email']}")
+        if contact_bits:
+            story.append(Paragraph(
+                "<b>Pay to:</b> " + " · ".join(contact_bits), styles["label"]))
+            story.append(Spacer(1, 4 * mm))
     story.append(Paragraph(
         "<i>Thank you for learning with us. Please remit any balance at your earliest convenience.</i>",
         styles["label"]))
@@ -704,13 +879,23 @@ async def generate_invoice(body: InvoiceRequest, user: dict = Depends(get_curren
 
     invoice_id = str(uuid.uuid4())
     share_token = uuid.uuid4().hex
+    full_user = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    studio_snapshot = {
+        "studio_name": (full_user or {}).get("studio_name"),
+        "teacher_name": (full_user or {}).get("teacher_name") or (full_user or {}).get("name"),
+        "contact_phone": (full_user or {}).get("contact_phone"),
+        "contact_upi": (full_user or {}).get("contact_upi"),
+        "contact_email": (full_user or {}).get("contact_email") or (full_user or {}).get("email"),
+        "logo_path": (full_user or {}).get("logo_path"),
+    }
     invoice_doc = {
         "invoice_id": invoice_id,
         "share_token": share_token,
         "owner_id": user["_id"],
         "student_id": body.student_id,
         "student_snapshot": ser_student(student),
-        "teacher_name": user.get("name") or "Dance Teacher",
+        "teacher_name": studio_snapshot["teacher_name"] or "Dance Teacher",
+        "studio_snapshot": studio_snapshot,
         "classes": classes,
         "payments": payments,
         "summary": summary,
@@ -758,10 +943,20 @@ async def invoice_pdf(invoice_id: str, token: Optional[str] = Query(None),
                 raise HTTPException(status_code=403, detail="Not authorized")
         except HTTPException:
             raise HTTPException(status_code=401, detail="Not authenticated")
+    studio = inv.get("studio_snapshot") or {}
+    logo_bytes = None
+    if studio.get("logo_path"):
+        try:
+            logo_bytes, _ = get_object(studio["logo_path"])
+        except Exception as e:
+            logger.warning(f"Logo fetch failed for invoice {invoice_id}: {e}")
     pdf_bytes = _generate_invoice_pdf(
         inv.get("teacher_name") or "Dance Teacher",
         inv["student_snapshot"], inv["classes"], inv["payments"], inv["summary"],
         inv.get("start_date"), inv.get("end_date"),
+        studio_name=studio.get("studio_name"),
+        logo_bytes=logo_bytes,
+        studio_contact=studio,
     )
     filename = f"invoice_{invoice_id}.pdf"
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
@@ -776,6 +971,7 @@ async def get_shared_invoice(share_token: str):
         "invoice_id": inv["invoice_id"],
         "share_token": inv["share_token"],
         "teacher_name": inv.get("teacher_name"),
+        "studio": inv.get("studio_snapshot") or {},
         "student": inv["student_snapshot"],
         "classes": inv["classes"],
         "payments": inv["payments"],
@@ -784,6 +980,20 @@ async def get_shared_invoice(share_token: str):
         "end_date": inv.get("end_date"),
         "created_at": inv.get("created_at"),
     }
+
+@api_router.get("/invoices/share/{share_token}/logo")
+async def shared_invoice_logo(share_token: str):
+    inv = await db.invoices.find_one({"share_token": share_token})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    logo_path = (inv.get("studio_snapshot") or {}).get("logo_path")
+    if not logo_path:
+        raise HTTPException(status_code=404, detail="No logo")
+    try:
+        data, ct = get_object(logo_path)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Logo unavailable")
+    return Response(content=data, media_type=ct or "image/png")
 
 @api_router.delete("/invoices/{invoice_id}")
 async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
@@ -986,29 +1196,46 @@ async def on_startup():
     await db.payments.create_index([("owner_id", 1), ("paid_on", -1)])
     await db.invoices.create_index("invoice_id", unique=True)
     await db.invoices.create_index("share_token", unique=True)
+    await db.password_reset_tokens.create_index("token", unique=True)
+    await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
 
-    # Seed admin
-    admin_email = os.environ.get("ADMIN_EMAIL", "teacher@dance.com").lower()
-    admin_password = os.environ.get("ADMIN_PASSWORD", "dance123")
-    existing = await db.users.find_one({"email": admin_email})
-    if existing is None:
+    # Seed / migrate admin (single-user app)
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()
+    admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+    admin_name = os.environ.get("ADMIN_NAME", "Admin")
+
+    existing_by_email = await db.users.find_one({"email": admin_email})
+    other_admin = await db.users.find_one({"role": "admin", "email": {"$ne": admin_email}})
+
+    if existing_by_email is None and other_admin is not None:
+        # Rename the existing admin to the new email (single-user migration)
+        await db.users.update_one(
+            {"_id": other_admin["_id"]},
+            {"$set": {
+                "email": admin_email,
+                "password_hash": hash_password(admin_password),
+                "name": admin_name,
+            }},
+        )
+        logger.info(f"Migrated admin account to {admin_email}")
+    elif existing_by_email is None:
         await db.users.insert_one({
             "email": admin_email,
             "password_hash": hash_password(admin_password),
-            "name": "Lakshmi",
+            "name": admin_name,
             "role": "admin",
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
         logger.info(f"Seeded admin user {admin_email}")
-    elif not verify_password(admin_password, existing["password_hash"]):
-        await db.users.update_one(
-            {"email": admin_email},
-            {"$set": {"password_hash": hash_password(admin_password), "name": "Lakshmi"}}
-        )
-        logger.info(f"Updated admin password for {admin_email}")
-    elif existing.get("name") != "Lakshmi":
-        await db.users.update_one({"email": admin_email}, {"$set": {"name": "Lakshmi"}})
-        logger.info("Updated admin display name to Lakshmi")
+    else:
+        updates = {}
+        if not verify_password(admin_password, existing_by_email["password_hash"]):
+            updates["password_hash"] = hash_password(admin_password)
+        if existing_by_email.get("name") != admin_name:
+            updates["name"] = admin_name
+        if updates:
+            await db.users.update_one({"_id": existing_by_email["_id"]}, {"$set": updates})
+            logger.info(f"Updated admin fields: {list(updates.keys())}")
 
     # Init storage
     try:

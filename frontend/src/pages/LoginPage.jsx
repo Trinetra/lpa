@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { formatApiErrorDetail } from "@/lib/api";
+import { api, formatApiErrorDetail } from "@/lib/api";
 import { Loader2 } from "lucide-react";
 
 const HERO_IMG =
@@ -10,10 +10,11 @@ const HERO_IMG =
 export default function LoginPage() {
   const { user, login } = useAuth();
   const nav = useNavigate();
-  const [email, setEmail] = useState("teacher@dance.com");
-  const [password, setPassword] = useState("dance123");
+  const [email, setEmail] = useState("lpathreya@gmail.com");
+  const [password, setPassword] = useState("prashanth");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   if (user && user !== false && user !== null)
     return <Navigate to="/dashboard" replace />;
@@ -97,7 +98,7 @@ export default function LoginPage() {
               autoComplete="email"
             />
           </label>
-          <label className="block mb-6">
+          <label className="block mb-2">
             <span className="uppercase-label block mb-2">Password</span>
             <input
               data-testid="login-password"
@@ -109,6 +110,17 @@ export default function LoginPage() {
               autoComplete="current-password"
             />
           </label>
+          <div className="flex justify-end mb-6">
+            <button
+              type="button"
+              data-testid="forgot-password-link"
+              onClick={() => setForgotOpen(true)}
+              className="text-xs hover:underline"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Forgot password?
+            </button>
+          </div>
 
           {err && (
             <div data-testid="login-error" className="mb-4 text-sm" style={{ color: "var(--error)" }}>
@@ -131,6 +143,65 @@ export default function LoginPage() {
           </p>
         </form>
       </div>
+      {forgotOpen && <ForgotPasswordModal onClose={() => setForgotOpen(false)} defaultEmail={email} />}
+    </div>
+  );
+}
+
+function ForgotPasswordModal({ onClose, defaultEmail }) {
+  const [email, setEmail] = React.useState(defaultEmail || "");
+  const [sending, setSending] = React.useState(false);
+  const [sent, setSent] = React.useState(false);
+  const [err, setErr] = React.useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSending(true);
+    setErr("");
+    try {
+      await api.post("/auth/forgot-password", { email });
+      setSent(true);
+    } catch (e2) {
+      setErr(e2?.response?.data?.detail || "Something went wrong");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+      <form onSubmit={submit} data-testid="forgot-form" className="surface w-full max-w-sm p-6">
+        <div className="uppercase-label mb-2">Reset password</div>
+        <h3 className="font-serif-display text-2xl mb-4">Forgot your password?</h3>
+        {sent ? (
+          <>
+            <p className="text-sm mb-6" style={{ color: "var(--text-muted)" }}>
+              If an account exists for <span style={{ color: "var(--text)" }}>{email}</span>, we've sent a reset link.
+              Check your inbox (and spam folder) for a message from {process.env.REACT_APP_APP_NAME || "the studio ledger"}.
+            </p>
+            <button type="button" onClick={onClose} className="btn-pill w-full" data-testid="forgot-done-btn">Got it</button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
+              Enter the email you use to sign in. We'll send you a link to choose a new password.
+            </p>
+            <label className="block mb-4">
+              <span className="uppercase-label block mb-1">Email</span>
+              <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                data-testid="forgot-email-input"
+                className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+            </label>
+            {err && <div className="mb-3 text-sm" style={{ color: "var(--error)" }}>{err}</div>}
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="btn-ghost flex-1" data-testid="forgot-cancel-btn">Cancel</button>
+              <button type="submit" disabled={sending} className="btn-pill flex-1" data-testid="forgot-send-btn">
+                {sending ? "Sending..." : "Send reset link"}
+              </button>
+            </div>
+          </>
+        )}
+      </form>
     </div>
   );
 }
