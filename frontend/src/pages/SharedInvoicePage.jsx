@@ -136,9 +136,9 @@ export default function SharedInvoicePage() {
               </div>
             )}
             <div className="w-full sm:w-auto sm:max-w-xs text-sm space-y-1 ml-auto">
-              <div className="flex justify-between"><span>Total billed</span><span>{fmt(inv.summary?.total_billed)}</span></div>
-              <div className="flex justify-between"><span>Total paid</span><span>{fmt(inv.summary?.total_paid)}</span></div>
-              <div className="flex justify-between font-serif-display text-lg pt-2"
+              <div className="flex justify-between gap-6"><span>Total billed</span><span>{fmt(inv.summary?.total_billed)}</span></div>
+              <div className="flex justify-between gap-6"><span>Total paid</span><span>{fmt(inv.summary?.total_paid)}</span></div>
+              <div className="flex justify-between gap-6 font-serif-display text-lg pt-2"
                 style={{ borderTop: "1px solid var(--border)", color: inv.summary?.balance_due > 0 ? "var(--error)" : "var(--success)" }}>
                 <span>Balance due</span><span>{fmt(inv.summary?.balance_due)}</span>
               </div>

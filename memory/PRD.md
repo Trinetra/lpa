@@ -33,17 +33,22 @@ Client is a dance teacher with ~10 online students. She has no way to bill stude
 - `files` (storage_path, user_id, content_type, is_deleted)
 
 ## Implemented (2026-02)
-- JWT login + `me` + refresh + logout (cookies + Bearer)
-- Student CRUD with photo upload/serve (blob via `AuthImage`)
-- Class logging + edit (PATCH `/api/classes/{id}` recomputes amount) + delete
-- Payment CRUD
-- Per-student summary (billed/paid/due/hours/classes)
-- Dashboard (totals + outstanding by student + recent classes)
-- Invoice generation → PDF (ReportLab, styled) + public share link + shared invoice view
-- **Send invoice** via email (Resend/Emergent-managed) & WhatsApp (wa.me deep link)
-- **Charts page**: monthly earnings (bar), monthly hours (line), billed-per-student (bar), hours share (donut) — powered by Recharts and `/api/stats/monthly` + `/api/stats/by-student`
-- Cascade delete of classes/payments when student removed
-- Admin auto-seeded on startup
+- JWT login + `me` + refresh + logout (cookies SameSite=None/Secure + Bearer fallback for iframe)
+- **Password lifecycle**: `/auth/change-password` (authenticated), `/auth/forgot-password` → emails a signed reset link via Resend, `/auth/reset-password` consumes single-use token (1-hour TTL, auto-expiring via Mongo TTL index)
+- **Studio Profile**: `/api/profile` GET/PATCH — studio_name, teacher_name, contact_phone, contact_upi, contact_email, logo_path. Empty strings clear fields. Settings page in UI with logo upload + change-password card.
+- Student CRUD with photo upload/serve
+- Class logging + edit + delete (mobile-responsive row)
+- Payment CRUD (mobile-responsive row)
+- Per-student summary + dashboard totals + outstanding by student + recent classes
+- Invoice generation with **studio profile snapshot** — historical invoices retain their branding even if profile later changes
+- Invoice PDF (ReportLab) with logo + studio name + "Pay to" UPI line
+- Shared invoice page + public logo endpoint (`/invoices/share/{token}/logo`)
+- Email invoice (Resend) + WhatsApp deep-link
+- Delete invoices
+- Charts: monthly earnings, hours, per-student billing/hours share (Recharts)
+- Kalpana → **Lakshmi** rename across UI, PDF, email templates
+- Auto-migrate admin doc on startup (rename email + password + name to match `.env`)
+- Admin credentials: **lpathreya@gmail.com / prashanth**
 
 ### Test Results
 - 33/34 backend E2E checks pass (1 test-script bug — expected `.user` wrapper).

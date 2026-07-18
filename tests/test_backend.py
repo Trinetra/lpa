@@ -7,8 +7,8 @@ import requests
 
 BASE = "https://instructor-pay.preview.emergentagent.com"
 API = f"{BASE}/api"
-EMAIL = "teacher@dance.com"
-PASSWORD = "dance123"
+EMAIL = "lpathreya@gmail.com"
+PASSWORD = "prashanth"
 
 results = {"passed": [], "failed": []}
 

@@ -102,12 +102,12 @@ function StudioProfileCard({ profile, onSaved }) {
     setSaving(true);
     try {
       const body = {
-        studio_name: form.studio_name || null,
-        teacher_name: form.teacher_name || null,
-        contact_phone: form.contact_phone || null,
-        contact_upi: form.contact_upi || null,
-        contact_email: form.contact_email || null,
-        logo_path: form.logo_path || null,
+        studio_name: form.studio_name,
+        teacher_name: form.teacher_name,
+        contact_phone: form.contact_phone,
+        contact_upi: form.contact_upi,
+        contact_email: form.contact_email,
+        logo_path: form.logo_path === null ? "" : form.logo_path,
       };
       const { data } = await api.patch("/profile", body);
       toast.success("Studio profile saved");

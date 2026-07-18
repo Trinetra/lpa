@@ -11,8 +11,8 @@ import pytest
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://instructor-pay.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
-EMAIL = "teacher@dance.com"
-PASSWORD = "dance123"
+EMAIL = "lpathreya@gmail.com"
+PASSWORD = "prashanth"
 
 
 @pytest.fixture(scope="module")

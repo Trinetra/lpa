@@ -4,8 +4,8 @@ import requests
 
 BASE = os.environ.get("BASE_URL", "https://instructor-pay.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api"
-EMAIL = "teacher@dance.com"
-PASSWORD = "dance123"
+EMAIL = "lpathreya@gmail.com"
+PASSWORD = "prashanth"
 
 results = {"passed": [], "failed": []}
 

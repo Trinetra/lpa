@@ -398,7 +398,9 @@ async def get_profile(user: dict = Depends(get_current_user)):
 
 @api_router.patch("/profile")
 async def update_profile(body: ProfileUpdate, user: dict = Depends(get_current_user)):
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    # Convert empty strings to None so the UI can clear fields (e.g. Remove logo).
+    raw = body.model_dump(exclude_unset=True)
+    updates = {k: (None if isinstance(v, str) and v == "" else v) for k, v in raw.items()}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     await db.users.update_one({"_id": ObjectId(user["_id"])}, {"$set": updates})

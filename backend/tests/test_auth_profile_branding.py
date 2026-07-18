@@ -73,7 +73,7 @@ class TestCredentialsRotation:
         assert r.json()["name"] == "Lakshmi"
 
     def test_old_creds_fail(self, session):
-        r = session.post(f"{API}/auth/login", json={"email": "teacher@dance.com", "password": "dance123"})
+        r = session.post(f"{API}/auth/login", json={"email": "lpathreya@gmail.com", "password": "prashanth"})
         assert r.status_code == 401
 
     def test_single_admin_in_db(self, db):
