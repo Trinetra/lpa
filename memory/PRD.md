@@ -1,4 +1,4 @@
-# Kalpana — Studio Ledger (Dance Teacher Billing)
+# Lakshmi — Studio Ledger (Dance Teacher Billing)
 
 ## Original Problem Statement
 Client is a dance teacher with ~10 online students. She has no way to bill students, track who paid and who hasn't. Needs a small web/mobile app to:
