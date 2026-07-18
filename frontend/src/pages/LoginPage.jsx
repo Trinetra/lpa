@@ -51,16 +51,16 @@ export default function LoginPage() {
           }}
         />
         <div className="relative z-10 h-full flex flex-col justify-between p-12">
-          <div className="font-serif-display text-3xl" style={{ color: "var(--secondary)" }}>
+          <div className="font-serif-display text-3xl" style={{ color: "#f5e6d3" }}>
             Lakshmi
           </div>
           <div>
-            <div className="uppercase-label mb-3" style={{ color: "var(--secondary)" }}>
+            <div className="uppercase-label mb-3" style={{ color: "#f5e6d3" }}>
               For dance teachers, made simple
             </div>
             <h1
               className="font-serif-display text-4xl sm:text-5xl lg:text-6xl leading-[1.05]"
-              style={{ color: "var(--secondary)" }}
+              style={{ color: "#f5e6d3" }}
             >
               Track classes.
               <br />

@@ -237,7 +237,7 @@ export default function PaymentsPage() {
               <div className="hidden sm:block sm:col-span-3 text-right font-serif-display" style={{ color: "var(--success)" }}>
                 {fmt(p.amount)}
               </div>
-              <div className="sm:col-span-1 flex justify-end pt-2 sm:pt-0 mt-1 sm:mt-0" style={{ borderTop: "1px dashed rgba(245,230,211,0.08)" }}>
+              <div className="sm:col-span-1 flex justify-end pt-2 sm:pt-0 mt-1 sm:mt-0" style={{ borderTop: "1px dashed var(--border)" }}>
                 <button
                   onClick={() => remove(p.id)}
                   data-testid={`delete-payment-${p.id}`}

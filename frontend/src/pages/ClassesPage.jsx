@@ -267,7 +267,7 @@ export default function ClassesPage() {
               <div className="hidden sm:block sm:col-span-2 sm:text-right font-serif-display" style={{ color: "var(--primary)" }}>
                 {fmt(c.amount)}
               </div>
-              <div className="sm:col-span-1 flex items-center justify-end gap-3 pt-2 sm:pt-0 mt-1 sm:mt-0" style={{ borderTop: "1px dashed rgba(245,230,211,0.08)" }}>
+              <div className="sm:col-span-1 flex items-center justify-end gap-3 pt-2 sm:pt-0 mt-1 sm:mt-0" style={{ borderTop: "1px dashed var(--border)" }}>
                 <button
                   onClick={() => setEditing(c)}
                   data-testid={`edit-class-${c.id}`}

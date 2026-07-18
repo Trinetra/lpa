@@ -18,6 +18,35 @@
   --text-muted: #a89886;
   --border: rgba(245, 230, 211, 0.1);
   --border-strong: rgba(245, 230, 211, 0.18);
+  --hover-bg: rgba(245, 230, 211, 0.04);
+  --grain-strong: rgba(212, 132, 100, 0.04);
+  --grain-soft: rgba(212, 132, 100, 0.02);
+  --toast-bg: #23211f;
+  --toast-fg: #f5e6d3;
+  --toast-border: rgba(245, 230, 211, 0.15);
+}
+
+/* Light theme — soft cream palette, deeper terracotta accent for AA contrast */
+:root[data-theme="light"] {
+  --bg: #f7f2ea;
+  --surface: #ffffff;
+  --surface-2: #f0e8dc;
+  --primary: #b06846;
+  --primary-hover: #9a5837;
+  --secondary: #2c2926;
+  --success: #4d7358;
+  --warning: #a67c1f;
+  --error: #9b3a3a;
+  --text: #2c2926;
+  --text-muted: #7a6f5f;
+  --border: rgba(44, 41, 38, 0.09);
+  --border-strong: rgba(44, 41, 38, 0.18);
+  --hover-bg: rgba(44, 41, 38, 0.04);
+  --grain-strong: rgba(176, 104, 70, 0.05);
+  --grain-soft: rgba(176, 104, 70, 0.025);
+  --toast-bg: #ffffff;
+  --toast-fg: #2c2926;
+  --toast-border: rgba(44, 41, 38, 0.1);
 }
 
 html,
@@ -35,14 +64,15 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-image:
-    radial-gradient(rgba(212, 132, 100, 0.04) 1px, transparent 1px),
-    radial-gradient(rgba(212, 132, 100, 0.02) 1px, transparent 1px);
+    radial-gradient(var(--grain-strong) 1px, transparent 1px),
+    radial-gradient(var(--grain-soft) 1px, transparent 1px);
   background-size:
     22px 22px,
     50px 50px;
   background-position:
     0 0,
     11px 11px;
+  transition: background-color 240ms ease, color 240ms ease;
 }
 
 .font-serif-display {
@@ -140,6 +170,9 @@ body {
     background-color 180ms ease,
     transform 180ms ease;
 }
+:root[data-theme="light"] .btn-pill {
+  color: #ffffff;
+}
 .btn-pill:hover {
   background: var(--primary-hover);
   transform: translateY(-1px);
@@ -164,7 +197,7 @@ body {
   width: 100%;
   background-image: linear-gradient(
     to right,
-    rgba(245, 230, 211, 0.15) 50%,
+    var(--border-strong) 50%,
     transparent 50%
   );
   background-size: 8px 1px;
@@ -174,4 +207,27 @@ body {
 ::selection {
   background: var(--primary);
   color: #1a1816;
+}
+:root[data-theme="light"] ::selection {
+  color: #ffffff;
+}
+
+/* Light-mode overrides for the two Tailwind color literals used across pages
+   (`border-white/10` for form inputs, `hover:bg-white/5` for icon hovers).
+   Escaped slashes because Tailwind compiles the class name that way. */
+:root[data-theme="light"] .border-white\/10 {
+  border-color: rgba(44, 41, 38, 0.14);
+}
+:root[data-theme="light"] .hover\:bg-white\/5:hover {
+  background-color: rgba(44, 41, 38, 0.05);
+}
+/* Inputs inherit the current text color — set placeholder color to muted */
+:root[data-theme="light"] input::placeholder,
+:root[data-theme="light"] textarea::placeholder {
+  color: var(--text-muted);
+}
+/* Native select popup readability in light mode */
+:root[data-theme="light"] select option {
+  background: var(--surface) !important;
+  color: var(--text);
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useTheme } from "@/context/ThemeContext";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell,
@@ -7,7 +8,7 @@ import {
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
-const COLORS = ["#D48464", "#7C9082", "#D4B064", "#B85C5C", "#f5e6d3", "#a67e60", "#4a7c8c"];
+const COLORS = ["#D48464", "#7C9082", "#D4B064", "#B85C5C", "#a67e60", "#4a7c8c", "#87604a"];
 
 const TooltipDark = ({ active, payload, label, formatter }) => {
   if (!active || !payload || payload.length === 0) return null;
@@ -37,6 +38,15 @@ export default function ChartsPage() {
   const [months, setMonths] = useState(6);
   const [monthly, setMonthly] = useState(null);
   const [byStudent, setByStudent] = useState(null);
+  const { theme } = useTheme();
+
+  // Recharts needs real color strings (not CSS vars) so we branch here.
+  const axisColor = theme === "light" ? "#7a6f5f" : "#a89886";
+  const gridColor = theme === "light" ? "rgba(44,41,38,0.09)" : "rgba(245,230,211,0.08)";
+  const cursorFill = theme === "light" ? "rgba(176,104,70,0.10)" : "rgba(212,132,100,0.08)";
+  const cursorStroke = theme === "light" ? "rgba(44,41,38,0.15)" : "rgba(245,230,211,0.15)";
+  const primary = theme === "light" ? "#B06846" : "#D48464";
+  const success = theme === "light" ? "#4D7358" : "#7C9082";
 
   useEffect(() => {
     api.get("/stats/monthly", { params: { months } }).then((r) => setMonthly(r.data));
@@ -78,14 +88,14 @@ export default function ChartsPage() {
           {monthly && (
             <ResponsiveContainer>
               <BarChart data={monthly.series} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(245,230,211,0.08)" />
-                <XAxis dataKey="month" stroke="#a89886" tick={{ fontSize: 11 }} />
-                <YAxis stroke="#a89886" tick={{ fontSize: 11 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                <XAxis dataKey="month" stroke={axisColor} tick={{ fontSize: 11 }} />
+                <YAxis stroke={axisColor} tick={{ fontSize: 11 }} />
                 <Tooltip
                   content={<TooltipDark formatter={(v) => fmt(v)} />}
-                  cursor={{ fill: "rgba(212,132,100,0.08)" }}
+                  cursor={{ fill: cursorFill }}
                 />
-                <Bar dataKey="earnings" fill="#D48464" radius={[4, 4, 0, 0]} name="Earnings" />
+                <Bar dataKey="earnings" fill={primary} radius={[4, 4, 0, 0]} name="Earnings" />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -100,19 +110,19 @@ export default function ChartsPage() {
           {monthly && (
             <ResponsiveContainer>
               <LineChart data={monthly.series} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(245,230,211,0.08)" />
-                <XAxis dataKey="month" stroke="#a89886" tick={{ fontSize: 11 }} />
-                <YAxis stroke="#a89886" tick={{ fontSize: 11 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                <XAxis dataKey="month" stroke={axisColor} tick={{ fontSize: 11 }} />
+                <YAxis stroke={axisColor} tick={{ fontSize: 11 }} />
                 <Tooltip
                   content={<TooltipDark formatter={(v) => `${v}h`} />}
-                  cursor={{ stroke: "rgba(245,230,211,0.15)" }}
+                  cursor={{ stroke: cursorStroke }}
                 />
                 <Line
                   type="monotone"
                   dataKey="hours"
-                  stroke="#7C9082"
+                  stroke={success}
                   strokeWidth={2}
-                  dot={{ r: 4, fill: "#7C9082" }}
+                  dot={{ r: 4, fill: success }}
                   activeDot={{ r: 6 }}
                   name="Hours"
                 />
@@ -132,15 +142,15 @@ export default function ChartsPage() {
               <ResponsiveContainer>
                 <BarChart data={byStudent} layout="vertical"
                   margin={{ top: 8, right: 16, left: 30, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(245,230,211,0.08)" />
-                  <XAxis type="number" stroke="#a89886" tick={{ fontSize: 11 }} />
-                  <YAxis dataKey="name" type="category" stroke="#a89886"
+                  <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                  <XAxis type="number" stroke={axisColor} tick={{ fontSize: 11 }} />
+                  <YAxis dataKey="name" type="category" stroke={axisColor}
                     tick={{ fontSize: 11 }} width={100} />
                   <Tooltip
                     content={<TooltipDark formatter={(v) => fmt(v)} />}
-                    cursor={{ fill: "rgba(212,132,100,0.08)" }}
+                    cursor={{ fill: cursorFill }}
                   />
-                  <Bar dataKey="amount" fill="#D48464" radius={[0, 4, 4, 0]} name="Billed" />
+                  <Bar dataKey="amount" fill={primary} radius={[0, 4, 4, 0]} name="Billed" />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -176,7 +186,7 @@ export default function ChartsPage() {
                     ))}
                   </Pie>
                   <Tooltip content={<TooltipDark formatter={(v) => `${v}h`} />} />
-                  <Legend wrapperStyle={{ fontSize: 11, color: "#a89886" }} />
+                  <Legend wrapperStyle={{ fontSize: 11, color: axisColor }} />
                 </PieChart>
               </ResponsiveContainer>
             )}
