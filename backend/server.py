@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 import bcrypt
-import httpx  # noqa: F401  (kept for backward-compat with previous callers)
+import httpx
 import jwt
 import requests
 import secrets
@@ -21,13 +21,7 @@ from bson import ObjectId
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends, Query, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
-from motor.motor_asyncio import AsyncIOMotorClient
 from starlette.middleware.cors import CORSMiddleware
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 
 from db import client, db
 from services import pdf as pdf_service

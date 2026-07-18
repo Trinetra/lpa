@@ -21,8 +21,13 @@ Client is a dance teacher with ~10 online students. She has no way to bill stude
 
 ## Architecture
 - **Backend**: FastAPI + MongoDB (motor). JWT (bcrypt-hashed passwords, httpOnly cookies + Bearer fallback). ReportLab for PDF generation. Emergent Object Storage for photos.
-- **Frontend**: React 19 + React Router 7 + Tailwind + Shadcn/UI + Sonner (toasts).
-- **Design**: "Earthy Editorial" — Playfair Display + Outfit fonts, warm charcoal/terracotta palette (per `/app/design_guidelines.json`).
+  - `server.py` — route handlers, auth, models (1096 LOC after P4 refactor)
+  - `db.py` — lazy Motor client (services importable in isolation)
+  - `services/pdf.py` — invoice PDF generation (pure)
+  - `services/email.py` — Resend dispatch, invoice + reset-password HTML templates
+  - `services/invoices.py` — `create_invoice_for_student`, `filter_by_date`, `wa_link`, `build_studio_snapshot`
+- **Frontend**: React 19 + React Router 7 + Tailwind + Shadcn/UI + Sonner (toasts) + Recharts.
+- **Design**: "Earthy Editorial" — Playfair Display + Outfit fonts, warm charcoal/terracotta palette.
 
 ## Data Model
 - `users` (email, password_hash, name, role)
