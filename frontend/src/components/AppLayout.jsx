@@ -7,6 +7,7 @@ import {
   BookOpenCheck,
   Wallet,
   FileText,
+  BarChart3,
   LogOut,
 } from "lucide-react";
 
@@ -25,6 +26,7 @@ export default function AppLayout() {
     { to: "/classes", label: "Classes", icon: BookOpenCheck, tid: "nav-classes" },
     { to: "/payments", label: "Payments", icon: Wallet, tid: "nav-payments" },
     { to: "/invoices", label: "Invoices", icon: FileText, tid: "nav-invoices" },
+    { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
   ];
 
   return (

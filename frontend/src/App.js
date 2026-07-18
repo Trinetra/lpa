@@ -11,6 +11,7 @@ import StudentDetailPage from "@/pages/StudentDetailPage";
 import ClassesPage from "@/pages/ClassesPage";
 import PaymentsPage from "@/pages/PaymentsPage";
 import InvoicesPage from "@/pages/InvoicesPage";
+import ChartsPage from "@/pages/ChartsPage";
 import SharedInvoicePage from "@/pages/SharedInvoicePage";
 
 function ProtectedRoute({ children }) {
@@ -45,6 +46,7 @@ function AppRoutes() {
         <Route path="/classes" element={<ClassesPage />} />
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/invoices" element={<InvoicesPage />} />
+        <Route path="/charts" element={<ChartsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

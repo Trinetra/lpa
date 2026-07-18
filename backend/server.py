@@ -12,8 +12,10 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 import bcrypt
+import httpx
 import jwt
 import requests
+from collections import defaultdict
 from bson import ObjectId
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends, Query, Header
 from fastapi.responses import StreamingResponse
@@ -34,7 +36,10 @@ db = client[os.environ['DB_NAME']]
 JWT_ALGORITHM = "HS256"
 APP_NAME = os.environ.get("APP_NAME", "dance-billing")
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
+EMAIL_BASE_URL = "https://integrations.emergentagent.com"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Kalpana Studio Ledger")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -152,6 +157,13 @@ class ClassLogCreate(BaseModel):
     class_date: str  # ISO
     notes: Optional[str] = None
     rate_override: Optional[float] = None
+
+class ClassLogUpdate(BaseModel):
+    hours: Optional[float] = None
+    class_date: Optional[str] = None
+    notes: Optional[str] = None
+    rate_override: Optional[float] = None
+    student_id: Optional[str] = None
 
 class PaymentCreate(BaseModel):
     student_id: str
@@ -374,6 +386,39 @@ async def delete_class(cid: str, user: dict = Depends(get_current_user)):
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Class not found")
     return {"ok": True}
+
+@api_router.patch("/classes/{cid}")
+async def update_class(cid: str, body: ClassLogUpdate, user: dict = Depends(get_current_user)):
+    existing = await db.classes.find_one({"_id": ObjectId(cid), "owner_id": user["_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Resolve student for rate calc
+    student_id = updates.get("student_id", existing["student_id"])
+    student = await db.students.find_one({"_id": ObjectId(student_id), "owner_id": user["_id"]})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    hours = updates.get("hours", existing.get("hours"))
+    rate_override = updates.get("rate_override")
+    # rate_override key present -> use it (may be null explicitly not possible via patch since None is stripped)
+    if rate_override is not None:
+        rate = rate_override
+    elif "rate_override" not in updates and existing.get("rate") is not None and existing.get("student_id") == student_id and updates.get("student_id") is None:
+        # keep existing rate if student unchanged and no override change
+        rate = existing.get("rate")
+    else:
+        rate = student.get("hourly_rate", 0.0)
+    updates["rate"] = rate
+    updates["amount"] = round(float(hours) * float(rate), 2)
+
+    await db.classes.update_one({"_id": ObjectId(cid)}, {"$set": updates})
+    doc = await db.classes.find_one({"_id": ObjectId(cid)})
+    return ser_class(doc)
 
 # --------------- Payments endpoints -----------------
 @api_router.get("/payments")
@@ -704,6 +749,160 @@ async def get_shared_invoice(share_token: str):
 @api_router.get("/")
 async def root():
     return {"message": "Dance Billing API"}
+
+# --------------- Stats / charts -----------------
+@api_router.get("/stats/monthly")
+async def stats_monthly(months: int = 6, user: dict = Depends(get_current_user)):
+    # Build list of last N months (YYYY-MM keys)
+    now = datetime.now(timezone.utc).replace(day=1)
+    month_keys = []
+    y, m = now.year, now.month
+    for _ in range(months):
+        month_keys.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    month_keys.reverse()
+
+    earnings = {k: 0.0 for k in month_keys}
+    hours = {k: 0.0 for k in month_keys}
+    async for c in db.classes.find({"owner_id": user["_id"]}):
+        d = c.get("class_date") or ""
+        key = d[:7] if len(d) >= 7 else None
+        if key in earnings:
+            earnings[key] += float(c.get("amount", 0))
+            hours[key] += float(c.get("hours", 0))
+
+    return {
+        "months": month_keys,
+        "series": [
+            {"month": k, "earnings": round(earnings[k], 2), "hours": round(hours[k], 2)}
+            for k in month_keys
+        ],
+    }
+
+@api_router.get("/stats/by-student")
+async def stats_by_student(user: dict = Depends(get_current_user)):
+    smap = {}
+    async for s in db.students.find({"owner_id": user["_id"]}):
+        smap[str(s["_id"])] = s.get("name") or "—"
+    agg = defaultdict(lambda: {"hours": 0.0, "amount": 0.0})
+    async for c in db.classes.find({"owner_id": user["_id"]}):
+        sid = c.get("student_id")
+        agg[sid]["hours"] += float(c.get("hours", 0))
+        agg[sid]["amount"] += float(c.get("amount", 0))
+    out = []
+    for sid, v in agg.items():
+        out.append({
+            "student_id": sid,
+            "name": smap.get(sid, "Unknown"),
+            "hours": round(v["hours"], 2),
+            "amount": round(v["amount"], 2),
+        })
+    out.sort(key=lambda x: x["amount"], reverse=True)
+    return out
+
+# --------------- Invoice send (Resend email) -----------------
+class SendInvoiceRequest(BaseModel):
+    to_email: EmailStr
+    reply_to: Optional[EmailStr] = None
+    message: Optional[str] = None
+    public_link: str  # frontend-hosted /invoice/<share_token>
+
+def _build_invoice_email_html(inv: dict, public_link: str, pdf_link: str,
+                              teacher_name: str, personal_note: Optional[str]) -> str:
+    student = inv.get("student_snapshot", {})
+    summary = inv.get("summary", {})
+    period = f"{inv.get('start_date') or 'All time'} — {inv.get('end_date') or 'today'}"
+    note_html = ""
+    if personal_note:
+        safe = personal_note.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+        note_html = (
+            f'<tr><td style="padding:8px 0;font-family:Arial,sans-serif;'
+            f'font-size:14px;color:#2c2926;font-style:italic">{safe}</td></tr>'
+        )
+    return f"""
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
+      <tr><td>
+        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">Invoice from</div>
+        <div style="font-size:24px;color:#d48464;font-weight:700;margin-bottom:24px">{teacher_name}</div>
+        <div style="font-size:15px;color:#2c2926;line-height:1.5">
+          Hi {student.get("name") or "there"},<br><br>
+          Here's your invoice for dance classes ({period}).
+        </div>
+        {note_html}
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border-top:1px solid #eadfd1;border-bottom:1px solid #eadfd1">
+          <tr><td style="padding:12px 0;font-size:14px;color:#666">Total billed</td><td align="right" style="padding:12px 0;font-size:14px;color:#2c2926">₹ {summary.get("total_billed", 0)}</td></tr>
+          <tr><td style="padding:0 0 12px;font-size:14px;color:#666">Total paid</td><td align="right" style="padding:0 0 12px;font-size:14px;color:#7c9082">₹ {summary.get("total_paid", 0)}</td></tr>
+          <tr><td style="padding:12px 0;font-size:16px;color:#b85c5c;font-weight:700;border-top:1px solid #eadfd1">Balance due</td><td align="right" style="padding:12px 0;font-size:16px;color:#b85c5c;font-weight:700;border-top:1px solid #eadfd1">₹ {summary.get("balance_due", 0)}</td></tr>
+        </table>
+        <table cellpadding="0" cellspacing="0"><tr>
+          <td style="padding-right:8px"><a href="{public_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14px">View invoice</a></td>
+          <td><a href="{pdf_link}" style="display:inline-block;background:#ffffff;color:#2c2926;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14px;border:1px solid #eadfd1">Download PDF</a></td>
+        </tr></table>
+        <div style="font-size:12px;color:#a89886;margin-top:24px">Thank you for learning with us.</div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+""".strip()
+
+@api_router.post("/invoices/{invoice_id}/send")
+async def send_invoice(invoice_id: str, body: SendInvoiceRequest,
+                       user: dict = Depends(get_current_user)):
+    if not EMAIL_KEY:
+        raise HTTPException(status_code=503, detail="Email is not configured")
+    inv = await db.invoices.find_one({"invoice_id": invoice_id, "owner_id": user["_id"]})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    pdf_link = body.public_link.split("/invoice/")[0].rstrip("/") if "/invoice/" in body.public_link else ""
+    # Better: build pdf link from public link's origin
+    origin = body.public_link.split("/invoice/")[0] if "/invoice/" in body.public_link else ""
+    api_pdf_link = f"{origin}/api/invoices/{invoice_id}/pdf?token={inv['share_token']}" if origin else ""
+
+    html = _build_invoice_email_html(
+        inv, body.public_link, api_pdf_link,
+        inv.get("teacher_name") or EMAIL_FROM_NAME, body.message,
+    )
+    student_name = inv.get("student_snapshot", {}).get("name") or "student"
+    subject = f"Invoice from {inv.get('teacher_name') or EMAIL_FROM_NAME}"
+
+    payload = {
+        "to": [body.to_email],
+        "subject": subject,
+        "html": html,
+        "from_name": EMAIL_FROM_NAME,
+    }
+    if body.reply_to:
+        payload["contact_email"] = body.reply_to
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            resp = await c.post(
+                f"{EMAIL_BASE_URL}/api/v1/email/send",
+                headers={"X-Email-Key": EMAIL_KEY},
+                json=payload,
+            )
+        resp.raise_for_status()
+        await db.invoices.update_one(
+            {"invoice_id": invoice_id},
+            {"$set": {
+                "last_sent_to": body.to_email,
+                "last_sent_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        return {"status": "sent", "to": body.to_email, "student": student_name,
+                "email_id": resp.json().get("id")}
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Email send failed: {e.response.status_code} {e.response.text}")
+        raise HTTPException(status_code=502, detail="Failed to send email")
+    except Exception as e:
+        logger.error(f"Email error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send email")
 
 # --------------- App wiring -----------------
 app.include_router(api_router)

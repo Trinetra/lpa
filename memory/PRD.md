@@ -35,26 +35,28 @@ Client is a dance teacher with ~10 online students. She has no way to bill stude
 ## Implemented (2026-02)
 - JWT login + `me` + refresh + logout (cookies + Bearer)
 - Student CRUD with photo upload/serve (blob via `AuthImage`)
-- Class logging with per-class rate override, auto-amount
+- Class logging + edit (PATCH `/api/classes/{id}` recomputes amount) + delete
 - Payment CRUD
 - Per-student summary (billed/paid/due/hours/classes)
 - Dashboard (totals + outstanding by student + recent classes)
 - Invoice generation → PDF (ReportLab, styled) + public share link + shared invoice view
+- **Send invoice** via email (Resend/Emergent-managed) & WhatsApp (wa.me deep link)
+- **Charts page**: monthly earnings (bar), monthly hours (line), billed-per-student (bar), hours share (donut) — powered by Recharts and `/api/stats/monthly` + `/api/stats/by-student`
 - Cascade delete of classes/payments when student removed
 - Admin auto-seeded on startup
 
 ### Test Results
 - 33/34 backend E2E checks pass (1 test-script bug — expected `.user` wrapper).
-- Frontend renders correctly, login → dashboard flow verified via screenshots.
+- PATCH class verified: 3h × ₹600 override = ₹1,800.
+- Email send verified: 200 OK with email_id from proxy.
+- Charts UI verified via screenshots (multi-month data seeded).
 
 ## Backlog / Next Actions
-- **P1** Edit class log (currently delete-only); toggle "paid class" flag on individual classes.
-- **P1** Bulk actions (mark all classes in date range as invoiced).
+- **P2** Online payment collection (Stripe/Razorpay) — record + mark invoice paid.
 - **P2** Calendar view (deferred by user).
-- **P2** Online payment collection (Stripe/Razorpay).
-- **P2** WhatsApp/Email invoice send button (Resend/Twilio).
-- **P3** Multi-teacher support / studio mode.
-- **P3** Charts: monthly earnings, hours per student.
+- **P3** Multi-teacher / studio mode.
+- **P3** SMS reminders via Twilio, bulk WhatsApp broadcast.
+- **P3** Recurring class templates (auto-log same class weekly).
 
 ## Credentials
 See `/app/memory/test_credentials.md`.
