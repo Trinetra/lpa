@@ -730,6 +730,8 @@ async def list_invoices(user: dict = Depends(get_current_user)):
             "start_date": d.get("start_date"),
             "end_date": d.get("end_date"),
             "created_at": d.get("created_at"),
+            "last_sent_to": d.get("last_sent_to"),
+            "last_sent_at": d.get("last_sent_at"),
         })
     return out
 
