@@ -39,7 +39,7 @@ STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
 EMAIL_BASE_URL = "https://integrations.emergentagent.com"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY")
-EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Kalpana Studio Ledger")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Lakshmi Studio Ledger")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -785,6 +785,13 @@ async def get_shared_invoice(share_token: str):
         "created_at": inv.get("created_at"),
     }
 
+@api_router.delete("/invoices/{invoice_id}")
+async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+    res = await db.invoices.delete_one({"invoice_id": invoice_id, "owner_id": user["_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return {"ok": True}
+
 @api_router.get("/")
 async def root():
     return {"message": "Dance Billing API"}
@@ -988,7 +995,7 @@ async def on_startup():
         await db.users.insert_one({
             "email": admin_email,
             "password_hash": hash_password(admin_password),
-            "name": "Dance Teacher",
+            "name": "Lakshmi",
             "role": "admin",
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
@@ -996,9 +1003,12 @@ async def on_startup():
     elif not verify_password(admin_password, existing["password_hash"]):
         await db.users.update_one(
             {"email": admin_email},
-            {"$set": {"password_hash": hash_password(admin_password)}}
+            {"$set": {"password_hash": hash_password(admin_password), "name": "Lakshmi"}}
         )
         logger.info(f"Updated admin password for {admin_email}")
+    elif existing.get("name") != "Lakshmi":
+        await db.users.update_one({"email": admin_email}, {"$set": {"name": "Lakshmi"}})
+        logger.info("Updated admin display name to Lakshmi")
 
     # Init storage
     try:

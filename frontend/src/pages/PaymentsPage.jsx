@@ -205,7 +205,7 @@ export default function PaymentsPage() {
 
       {/* History */}
       <div className="surface overflow-hidden">
-        <div className="grid grid-cols-12 px-6 py-3 uppercase-label" style={{ borderBottom: "1px solid var(--border)" }}>
+        <div className="hidden sm:grid sm:grid-cols-12 px-6 py-3 uppercase-label" style={{ borderBottom: "1px solid var(--border)" }}>
           <div className="col-span-3">Date</div>
           <div className="col-span-3">Student</div>
           <div className="col-span-2">Method</div>
@@ -221,31 +221,37 @@ export default function PaymentsPage() {
           <div
             key={p.id}
             data-testid={`payment-row-${p.id}`}
-            className="grid grid-cols-12 items-center px-6 py-3 text-sm"
+            className="px-4 sm:px-6 py-3 text-sm"
             style={{ borderTop: "1px solid var(--border)" }}
           >
-            <div className="col-span-3">
-              {p.paid_on}
-              {p.notes && (
-                <div className="text-xs" style={{ color: "var(--text-muted)" }}>{p.notes}</div>
-              )}
+            <div className="flex flex-col sm:grid sm:grid-cols-12 sm:items-center gap-2 sm:gap-0">
+              <div className="sm:col-span-3 flex sm:block justify-between">
+                <span>{p.paid_on}</span>
+                <span className="sm:hidden font-serif-display" style={{ color: "var(--success)" }}>{fmt(p.amount)}</span>
+              </div>
+              <div className="sm:col-span-3 truncate" style={{ color: "var(--text-muted)" }}>{nameOf(p.student_id)}</div>
+              <div className="sm:col-span-2 flex sm:block items-center justify-between">
+                <span className="sm:hidden uppercase-label">Method</span>
+                <span>{p.method || "-"}</span>
+              </div>
+              <div className="hidden sm:block sm:col-span-3 text-right font-serif-display" style={{ color: "var(--success)" }}>
+                {fmt(p.amount)}
+              </div>
+              <div className="sm:col-span-1 flex justify-end pt-2 sm:pt-0 mt-1 sm:mt-0" style={{ borderTop: "1px dashed rgba(245,230,211,0.08)" }}>
+                <button
+                  onClick={() => remove(p.id)}
+                  data-testid={`delete-payment-${p.id}`}
+                  className="px-3 py-1.5 sm:p-1 rounded hover:bg-white/5 inline-flex items-center gap-1 text-xs"
+                  style={{ color: "var(--error)" }}
+                  type="button"
+                >
+                  <Trash2 size={14} /> <span className="sm:hidden">Delete</span>
+                </button>
+              </div>
             </div>
-            <div className="col-span-3 truncate">{nameOf(p.student_id)}</div>
-            <div className="col-span-2">{p.method || "-"}</div>
-            <div className="col-span-3 text-right font-serif-display" style={{ color: "var(--success)" }}>
-              {fmt(p.amount)}
-            </div>
-            <div className="col-span-1 text-right">
-              <button
-                onClick={() => remove(p.id)}
-                data-testid={`delete-payment-${p.id}`}
-                className="p-1 rounded hover:bg-white/5"
-                style={{ color: "var(--error)" }}
-                type="button"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
+            {p.notes && (
+              <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{p.notes}</div>
+            )}
           </div>
         ))}
       </div>

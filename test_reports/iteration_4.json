@@ -1,0 +1,42 @@
+{
+  "summary": "Regression testing for (1) mobile row-action bug fix on /classes and /payments (edit + delete tappable at 390px), (2) new DELETE /api/invoices/{invoice_id} endpoint + UI delete button on /invoices, (3) Kalpana -> Lakshmi rename across UI (login, sidebar, shared-invoice footer), backend seed (/auth/me name), and PDF From-line. Created /app/backend/tests/test_delete_and_branding.py (7 tests, all pass). Ran full Playwright coverage on both mobile (390x844) and desktop (1920x1080). Ran legacy /app/tests/test_backend.py — 33/34 pass (1 known false-fail: script expects '.user' wrapper but API returns fields at top level; the returned name is 'Lakshmi' as required). Verified PDF via pypdf: text extracts 'From Lakshmi — Dance Classes'. Codebase Kalpana grep returns only /app/memory/PRD.md (docs file, no user-facing code).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Class + Payment select dropdowns", "issues": ["React hydration warning: '<span> cannot be a child of <option>' — inside <select> options in ClassesPage / PaymentsPage (e.g. 'Prashanth — ₹500/hr' uses inline styled span inside <option>). Not a bug fix in this iteration, minor console noise, cosmetic. Fix: replace <option style={{background:...}}> ... <span> ... </option> with plain text-only option children."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_delete_and_branding.py",
+    "/app/test_reports/pytest/delete_branding.xml",
+    "/app/tests/test_backend.py"
+  ],
+  "action_items": [
+    "OPTIONAL: /app/memory/PRD.md still contains 'Kalpana' in the title. If the requirement is 'zero hits in whole codebase', update PRD.md too. Not user-facing so leaving as-is is acceptable.",
+    "OPTIONAL (pre-existing, cosmetic): fix React hydration warning about <span> nested inside <option> in ClassesPage.jsx (log-student-select) and PaymentsPage.jsx (pay-student-select)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1023 lines — still above the 700-line soft threshold. New delete_invoice endpoint is clean and correctly filters by owner_id (line 790) — ownership isolation is enforced (unowned invoice_id returns 404 the same way it would for a truly-missing id, which is the correct behaviour and matches the review request).",
+    "PDF/email/PDF-helper split into services/pdf.py and services/email.py would help readability (called out previously; still applicable).",
+    "ClassesPage.jsx and PaymentsPage.jsx: the mobile-vs-desktop responsive pattern using 'flex flex-col sm:grid sm:grid-cols-12' with icon+text button labels is a good UX fix — verified working at 390px. Buttons have clear touch targets (~63x28 px edit, ~76x28 px delete) and clear text labels on mobile.",
+    "InvoicesPage.jsx removeInvoice: uses window.confirm which is functional but not consistent with the app's own EditClassModal / EmailInvoiceModal styling. Consider a lightweight styled confirm modal for consistency (low priority)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_delete_and_branding.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 new + 33/34 legacy — the 34th 'failure' is a known test-script bug, not a code bug)",
+    "frontend": "100% for the bug fixes under test"
+  },
+  "test_credentials": "teacher@dance.com / dance123 (from /app/memory/test_credentials.md). Working. Login response now returns name='Lakshmi'.",
+  "seed_data_creation": "Each test creates TEST_-prefixed student (+ cascading classes/payments/invoices) and deletes at teardown via /api/students cascade delete. No orphaned data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All three reported bugs are fixed and verified end-to-end: (1) mobile delete tappable at 390px on /classes and /payments — buttons stack under the row with visible 'Edit'/'Delete' text labels, dashed-bordered action bar, ample clearance above fixed bottom nav; (2) new DELETE /api/invoices/{invoice_id} works, requires auth (401 without), returns 404 for unknown or unowned ids, and the invoice-delete-<id> UI button on /invoices removes the row and 404s the /share/<token> endpoint; (3) Lakshmi branding is live on login hero, sidebar/topbar, /auth/me, shared invoice page + footer, PDF From-line. Only remaining 'Kalpana' hit is /app/memory/PRD.md (docs file title). If retesting, run pytest /app/backend/tests/test_delete_and_branding.py and python /app/tests/test_backend.py.",
+  "rca of the issue": "The mobile delete-not-clickable bug was root-caused to the previous layout using a 12-col CSS grid where the action column was col-span-1 (~33px at 390px viewport, minus grid gaps). Two icon buttons could not fit and were being clipped/covered by the bottom nav. Fix applied by main agent uses 'flex flex-col sm:grid sm:grid-cols-12' so on mobile the row is a vertical stack with action buttons in their own row (with 'Edit'/'Delete' text labels), and the desktop 12-col grid is preserved via sm: breakpoint. Verified: at 390px both edit (x=198,w=63) and delete (x=273,w=76) buttons fit inside the viewport and are clickable."
+}

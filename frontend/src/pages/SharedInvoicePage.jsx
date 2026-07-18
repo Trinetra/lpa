@@ -126,7 +126,7 @@ export default function SharedInvoicePage() {
         </div>
 
         <div className="text-center text-xs" style={{ color: "var(--text-muted)" }}>
-          <Link to="/" className="underline">Powered by Kalpana Studio Ledger</Link>
+          <Link to="/" className="underline">Powered by Lakshmi Studio Ledger</Link>
         </div>
       </div>
     </div>

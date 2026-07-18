@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, formatApiErrorDetail, API } from "@/lib/api";
-import { FileText, Download, Link as LinkIcon, Copy, Mail, MessageCircle, X } from "lucide-react";
+import { FileText, Download, Link as LinkIcon, Copy, Mail, MessageCircle, X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -119,6 +119,17 @@ export default function InvoicesPage() {
   const pdfLink = (inv) => `${API}/invoices/${inv.invoice_id}/pdf?token=${inv.share_token}`;
   const copy = (text) => { navigator.clipboard.writeText(text); toast.success("Link copied"); };
 
+  const removeInvoice = async (inv) => {
+    if (!window.confirm(`Delete this invoice for ${inv.student_name}? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/invoices/${inv.invoice_id}`);
+      toast.success("Invoice deleted");
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Delete failed");
+    }
+  };
+
   const openWhatsApp = (inv) => {
     const s = studentMap[inv.student_id] || {};
     const link = shareLink(inv);
@@ -233,6 +244,13 @@ export default function InvoicesPage() {
                     className="btn-pill flex items-center gap-1 text-xs"
                     style={{ background: "#25D366", color: "#0b1f13" }}>
                     <MessageCircle size={13} /> WhatsApp
+                  </button>
+                  <button type="button" onClick={() => removeInvoice(inv)}
+                    data-testid={`invoice-delete-${inv.invoice_id}`}
+                    className="p-2 rounded hover:bg-white/5"
+                    style={{ color: "var(--error)" }}
+                    title="Delete invoice">
+                    <Trash2 size={14} />
                   </button>
                 </div>
               </div>

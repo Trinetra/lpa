@@ -39,7 +39,7 @@ export default function AppLayout() {
       >
         <div className="mb-10">
           <div className="font-serif-display text-2xl" style={{ color: "var(--primary)" }}>
-            Kalpana
+            Lakshmi
           </div>
           <div className="uppercase-label mt-1">Studio Ledger</div>
         </div>
@@ -76,7 +76,7 @@ export default function AppLayout() {
       {/* Mobile top bar */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3"
         style={{ background: "#1a1816", borderBottom: "1px solid var(--border)" }}>
-        <div className="font-serif-display text-xl" style={{ color: "var(--primary)" }}>Kalpana</div>
+        <div className="font-serif-display text-xl" style={{ color: "var(--primary)" }}>Lakshmi</div>
         <button data-testid="mobile-logout-btn" onClick={handleLogout} className="btn-ghost text-xs" type="button">
           Log out
         </button>
