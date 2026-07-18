@@ -1072,7 +1072,10 @@ async def bulk_send(body: BulkSendRequest, user: dict = Depends(get_current_user
     # Determine target students
     filter_q = {"owner_id": user["_id"]}
     if body.student_ids:
-        filter_q["_id"] = {"$in": [ObjectId(sid) for sid in body.student_ids]}
+        try:
+            filter_q["_id"] = {"$in": [ObjectId(sid) for sid in body.student_ids]}
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid student id in list")
     students = []
     async for s in db.students.find(filter_q):
         students.append(s)
@@ -1086,11 +1089,11 @@ async def bulk_send(body: BulkSendRequest, user: dict = Depends(get_current_user
     results = []
     for s in students:
         sid = str(s["_id"])
-        # Skip if no explicit selection and student has no outstanding
-        if body.student_ids is None:
-            summ = await compute_student_summary(user["_id"], sid)
-            if summ["balance_due"] <= 0:
-                continue
+        # Always skip students with no outstanding balance (whether they were
+        # hand-picked or matched by the "all outstanding" default).
+        summ = await compute_student_summary(user["_id"], sid)
+        if summ["balance_due"] <= 0:
+            continue
 
         try:
             doc = await _create_invoice_for_student(user["_id"], s, body.start_date, body.end_date)

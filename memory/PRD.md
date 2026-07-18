@@ -44,6 +44,7 @@ Client is a dance teacher with ~10 online students. She has no way to bill stude
 - Invoice PDF (ReportLab) with logo + studio name + "Pay to" UPI line
 - Shared invoice page + public logo endpoint (`/invoices/share/{token}/logo`)
 - Email invoice (Resend) + WhatsApp deep-link
+- **Bulk "Send outstanding invoices"** — one-tap month-end action: /invoices/bulk-preview + /invoices/bulk-send; generates fresh invoices for every student with a balance, emails those with an email on file, returns prefilled `wa.me` links for those with a phone. Skips students with 0 balance even if hand-picked.
 - Delete invoices
 - Charts: monthly earnings, hours, per-student billing/hours share (Recharts)
 - Kalpana → **Lakshmi** rename across UI, PDF, email templates

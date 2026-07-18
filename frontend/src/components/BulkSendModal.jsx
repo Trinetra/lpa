@@ -35,9 +35,10 @@ export default function BulkSendModal({ onClose, onDone }) {
     }).finally(() => setLoading(false));
   };
 
-  useEffect(loadPreview, []); // initial load
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadPreview(); }, [range.start, range.end]);
+  useEffect(() => {
+    loadPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range.start, range.end]);
 
   const selectedCount = useMemo(
     () => Object.values(selected).filter(Boolean).length,
