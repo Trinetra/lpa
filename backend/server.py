@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 import bcrypt
-import httpx
+import httpx  # noqa: F401  (kept for backward-compat with previous callers)
 import jwt
 import requests
 import secrets
@@ -29,11 +29,12 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 
-# --------------- Config -----------------
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+from db import client, db
+from services import pdf as pdf_service
+from services import email as email_service
+from services import invoices as invoices_service
 
+# --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
 APP_NAME = os.environ.get("APP_NAME", "dance-billing")
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
@@ -294,44 +295,7 @@ async def change_password(body: ChangePasswordRequest, user: dict = Depends(get_
     return {"ok": True}
 
 async def _send_password_reset_email(to_email: str, name: str, reset_link: str):
-    if not EMAIL_KEY:
-        logger.warning(f"Password reset requested but EMERGENT_EMAIL_KEY not set. Link: {reset_link}")
-        return
-    html = f"""
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
-  <tr><td align="center">
-    <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
-      <tr><td>
-        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">Password reset</div>
-        <div style="font-size:22px;color:#d48464;font-weight:700;margin-bottom:20px">{EMAIL_FROM_NAME}</div>
-        <div style="font-size:15px;color:#2c2926;line-height:1.5">
-          Hi {name or "there"},<br><br>
-          We received a request to reset your password. Click the button below to choose a new one.
-          This link expires in 60 minutes.
-        </div>
-        <div style="margin:24px 0"><a href="{reset_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px">Reset password</a></div>
-        <div style="font-size:12px;color:#a89886">If you didn't request this, you can safely ignore this email.</div>
-      </td></tr>
-    </table>
-  </td></tr>
-</table>
-""".strip()
-    payload = {
-        "to": [to_email],
-        "subject": f"Reset your {EMAIL_FROM_NAME} password",
-        "html": html,
-        "from_name": EMAIL_FROM_NAME,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=30) as c:
-            resp = await c.post(
-                f"{EMAIL_BASE_URL}/api/v1/email/send",
-                headers={"X-Email-Key": EMAIL_KEY},
-                json=payload,
-            )
-        resp.raise_for_status()
-    except Exception as e:
-        logger.error(f"Password reset email failed: {e}")
+    await email_service.send_password_reset_email(to_email, name, reset_link)
 
 @api_router.post("/auth/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest):
@@ -677,233 +641,28 @@ async def dashboard(user: dict = Depends(get_current_user)):
     }
 
 # --------------- Invoice endpoints -----------------
-_PDF_ACCENT = colors.HexColor("#D48464")
-_PDF_MUTED = colors.HexColor("#666666")
-_PDF_HEADER_BG = colors.HexColor("#F5E6D3")
-_PDF_TEXT_DARK = colors.HexColor("#1A1816")
-_PDF_GRID = colors.HexColor("#DDDDDD")
-_PDF_DUE = colors.HexColor("#B85C5C")
-_PDF_RULE = colors.HexColor("#888888")
+# PDF generation, invoice creation, date filtering and WhatsApp links have moved
+# to backend/services/. These thin wrappers keep the historical function names
+# so nearby handlers read naturally.
+
+def _generate_invoice_pdf(teacher_name, student, classes, payments, summary,
+                           start, end, studio_name=None, logo_bytes=None,
+                           studio_contact=None):
+    return pdf_service.generate_invoice_pdf(
+        teacher_name, student, classes, payments, summary, start, end,
+        studio_name=studio_name, logo_bytes=logo_bytes, studio_contact=studio_contact,
+    )
 
 
-def _pdf_styles():
-    base = getSampleStyleSheet()
-    return {
-        "title": ParagraphStyle("t", parent=base["Title"], fontSize=22, textColor=_PDF_ACCENT),
-        "label": ParagraphStyle("l", parent=base["Normal"], fontSize=9, textColor=_PDF_MUTED),
-        "body": base["Normal"],
-    }
+def _filter_by_date(items, start, end, key):
+    return invoices_service.filter_by_date(items, start, end, key)
 
 
-def _pdf_header(styles, teacher_name: str, studio_name: Optional[str] = None,
-                logo_bytes: Optional[bytes] = None):
-    els = []
-    if logo_bytes:
-        try:
-            img = RLImage(io.BytesIO(logo_bytes))
-            # Scale to max 30mm tall
-            ratio = (img.imageWidth or 1) / (img.imageHeight or 1)
-            img.drawHeight = 22 * mm
-            img.drawWidth = 22 * mm * ratio
-            img.hAlign = "LEFT"
-            els.append(img)
-            els.append(Spacer(1, 3 * mm))
-        except Exception:
-            pass
-    if studio_name:
-        studio_style = ParagraphStyle("s", parent=styles["title"], fontSize=16, textColor=_PDF_TEXT_DARK)
-        els.append(Paragraph(studio_name, studio_style))
-    els.append(Paragraph("Invoice", styles["title"]))
-    els.append(Paragraph(f"From <b>{teacher_name}</b> — Dance Classes", styles["label"]))
-    els.append(Spacer(1, 8 * mm))
-    return els
-
-
-def _pdf_meta_table(student: dict, start: Optional[str], end: Optional[str]):
-    now = datetime.now(timezone.utc)
-    rows = [
-        ["Invoice #", f"INV-{now.strftime('%Y%m%d%H%M%S')}"],
-        ["Date", now.strftime("%d %b %Y")],
-        ["Billed to", student.get("name", "")],
-        ["Contact", f"{student.get('email','') or ''} {student.get('phone','') or ''}"],
-        ["Period", f"{start or 'All time'} to {end or 'Today'}"],
-    ]
-    t = Table(rows, colWidths=[35 * mm, 130 * mm])
-    t.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#888888")),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    return t
-
-
-def _pdf_classes_table(classes: list) -> Table:
-    rows = [["Date", "Hours", "Rate (INR/hr)", "Amount (INR)", "Notes"]]
-    for c in classes:
-        rows.append([
-            c.get("class_date", ""),
-            f"{c.get('hours', 0)}",
-            f"{c.get('rate', 0)}",
-            f"{c.get('amount', 0)}",
-            c.get("notes") or "",
-        ])
-    tbl = Table(rows, colWidths=[28 * mm, 18 * mm, 30 * mm, 30 * mm, 60 * mm], repeatRows=1)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), _PDF_HEADER_BG),
-        ("TEXTCOLOR", (0, 0), (-1, 0), _PDF_TEXT_DARK),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.25, _PDF_GRID),
-        ("ALIGN", (1, 1), (3, -1), "RIGHT"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    return tbl
-
-
-def _pdf_payments_table(payments: list) -> Table:
-    rows = [["Date", "Method", "Amount (INR)", "Notes"]]
-    for p in payments:
-        rows.append([
-            p.get("paid_on", ""),
-            p.get("method") or "-",
-            f"{p.get('amount', 0)}",
-            p.get("notes") or "",
-        ])
-    tbl = Table(rows, colWidths=[28 * mm, 32 * mm, 30 * mm, 76 * mm], repeatRows=1)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), _PDF_HEADER_BG),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.25, _PDF_GRID),
-        ("ALIGN", (2, 1), (2, -1), "RIGHT"),
-    ]))
-    return tbl
-
-
-def _pdf_summary_table(summary: dict) -> Table:
-    rows = [
-        ["Total billed", f"INR {summary.get('total_billed', 0)}"],
-        ["Total paid", f"INR {summary.get('total_paid', 0)}"],
-        ["Balance due", f"INR {summary.get('balance_due', 0)}"],
-    ]
-    tbl = Table(rows, colWidths=[60 * mm, 40 * mm], hAlign="RIGHT")
-    tbl.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("FONTNAME", (0, 2), (-1, 2), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 11),
-        ("TEXTCOLOR", (0, 2), (-1, 2), _PDF_DUE),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("LINEABOVE", (0, 2), (-1, 2), 0.6, _PDF_RULE),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-    ]))
-    return tbl
-
-
-def _generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
-                          payments: list, summary: dict, start: Optional[str],
-                          end: Optional[str], studio_name: Optional[str] = None,
-                          logo_bytes: Optional[bytes] = None,
-                          studio_contact: Optional[dict] = None) -> bytes:
-    styles = _pdf_styles()
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=18 * mm, rightMargin=18 * mm,
-                            topMargin=18 * mm, bottomMargin=18 * mm)
-    story = []
-    story.extend(_pdf_header(styles, teacher_name, studio_name, logo_bytes))
-    story.append(_pdf_meta_table(student, start, end))
-    story.append(Spacer(1, 8 * mm))
-    story.append(Paragraph("<b>Classes</b>", styles["body"]))
-    story.append(Spacer(1, 3 * mm))
-    story.append(_pdf_classes_table(classes))
-    story.append(Spacer(1, 6 * mm))
-    if payments:
-        story.append(Paragraph("<b>Payments Received</b>", styles["body"]))
-        story.append(Spacer(1, 3 * mm))
-        story.append(_pdf_payments_table(payments))
-        story.append(Spacer(1, 6 * mm))
-    story.append(_pdf_summary_table(summary))
-    story.append(Spacer(1, 6 * mm))
-    if studio_contact and summary.get("balance_due", 0) > 0:
-        contact_bits = []
-        if studio_contact.get("contact_upi"):
-            contact_bits.append(f"UPI: <b>{studio_contact['contact_upi']}</b>")
-        if studio_contact.get("contact_phone"):
-            contact_bits.append(f"Phone: {studio_contact['contact_phone']}")
-        if studio_contact.get("contact_email"):
-            contact_bits.append(f"Email: {studio_contact['contact_email']}")
-        if contact_bits:
-            story.append(Paragraph(
-                "<b>Pay to:</b> " + " · ".join(contact_bits), styles["label"]))
-            story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph(
-        "<i>Thank you for learning with us. Please remit any balance at your earliest convenience.</i>",
-        styles["label"]))
-    doc.build(story)
-    buf.seek(0)
-    return buf.read()
-
-def _filter_by_date(items: list, start: Optional[str], end: Optional[str], key: str):
-    out = []
-    for it in items:
-        d = it.get(key)
-        if start and (not d or d < start):
-            continue
-        if end and (not d or d > end):
-            continue
-        out.append(it)
-    return out
-
-async def _create_invoice_for_student(owner_id: str, student: dict,
-                                       start_date: Optional[str], end_date: Optional[str]) -> dict:
-    student_id = str(student["_id"])
-    classes = []
-    async for c in db.classes.find({"owner_id": owner_id, "student_id": student_id}).sort("class_date", 1):
-        classes.append(ser_class(c))
-    payments = []
-    async for p in db.payments.find({"owner_id": owner_id, "student_id": student_id}).sort("paid_on", 1):
-        payments.append(ser_payment(p))
-    classes = _filter_by_date(classes, start_date, end_date, "class_date")
-    payments = _filter_by_date(payments, start_date, end_date, "paid_on")
-
-    total_billed = round(sum(float(c["amount"]) for c in classes), 2)
-    total_paid = round(sum(float(p["amount"]) for p in payments), 2)
-    summary = {
-        "total_billed": total_billed,
-        "total_paid": total_paid,
-        "balance_due": round(total_billed - total_paid, 2),
-    }
-
-    invoice_id = str(uuid.uuid4())
-    share_token = uuid.uuid4().hex
-    full_user = await db.users.find_one({"_id": ObjectId(owner_id)})
-    studio_snapshot = {
-        "studio_name": (full_user or {}).get("studio_name"),
-        "teacher_name": (full_user or {}).get("teacher_name") or (full_user or {}).get("name"),
-        "contact_phone": (full_user or {}).get("contact_phone"),
-        "contact_upi": (full_user or {}).get("contact_upi"),
-        "contact_email": (full_user or {}).get("contact_email") or (full_user or {}).get("email"),
-        "logo_path": (full_user or {}).get("logo_path"),
-    }
-    invoice_doc = {
-        "invoice_id": invoice_id,
-        "share_token": share_token,
-        "owner_id": owner_id,
-        "student_id": student_id,
-        "student_snapshot": ser_student(student),
-        "teacher_name": studio_snapshot["teacher_name"] or "Dance Teacher",
-        "studio_snapshot": studio_snapshot,
-        "classes": classes,
-        "payments": payments,
-        "summary": summary,
-        "start_date": start_date,
-        "end_date": end_date,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.invoices.insert_one(invoice_doc)
-    return invoice_doc
+async def _create_invoice_for_student(owner_id, student, start_date, end_date):
+    return await invoices_service.create_invoice_for_student(
+        owner_id, student, start_date, end_date,
+        ser_class=ser_class, ser_payment=ser_payment, ser_student=ser_student,
+    )
 
 
 @api_router.post("/invoices/generate")
@@ -1056,9 +815,7 @@ async def bulk_preview(start_date: Optional[str] = None, end_date: Optional[str]
 
 
 def _wa_link(phone: str, message: str) -> str:
-    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
-    from urllib.parse import quote
-    return f"https://wa.me/{digits}?text={quote(message)}"
+    return invoices_service.wa_link(phone, message)
 
 
 @api_router.post("/invoices/bulk-send")
@@ -1224,90 +981,28 @@ class SendInvoiceRequest(BaseModel):
     message: Optional[str] = None
     public_link: str  # frontend-hosted /invoice/<share_token>
 
-def _build_invoice_email_html(inv: dict, public_link: str, pdf_link: str,
-                              teacher_name: str, personal_note: Optional[str]) -> str:
-    student = inv.get("student_snapshot", {})
-    summary = inv.get("summary", {})
-    period = f"{inv.get('start_date') or 'All time'} — {inv.get('end_date') or 'today'}"
-    note_html = ""
-    if personal_note:
-        safe = personal_note.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-        note_html = (
-            f'<tr><td style="padding:8px 0;font-family:Arial,sans-serif;'
-            f'font-size:14px;color:#2c2926;font-style:italic">{safe}</td></tr>'
-        )
-    return f"""
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
-  <tr><td align="center">
-    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
-      <tr><td>
-        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">Invoice from</div>
-        <div style="font-size:24px;color:#d48464;font-weight:700;margin-bottom:24px">{teacher_name}</div>
-        <div style="font-size:15px;color:#2c2926;line-height:1.5">
-          Hi {student.get("name") or "there"},<br><br>
-          Here's your invoice for dance classes ({period}).
-        </div>
-        {note_html}
-        <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border-top:1px solid #eadfd1;border-bottom:1px solid #eadfd1">
-          <tr><td style="padding:12px 0;font-size:14px;color:#666">Total billed</td><td align="right" style="padding:12px 0;font-size:14px;color:#2c2926">₹ {summary.get("total_billed", 0)}</td></tr>
-          <tr><td style="padding:0 0 12px;font-size:14px;color:#666">Total paid</td><td align="right" style="padding:0 0 12px;font-size:14px;color:#7c9082">₹ {summary.get("total_paid", 0)}</td></tr>
-          <tr><td style="padding:12px 0;font-size:16px;color:#b85c5c;font-weight:700;border-top:1px solid #eadfd1">Balance due</td><td align="right" style="padding:12px 0;font-size:16px;color:#b85c5c;font-weight:700;border-top:1px solid #eadfd1">₹ {summary.get("balance_due", 0)}</td></tr>
-        </table>
-        <table cellpadding="0" cellspacing="0"><tr>
-          <td style="padding-right:8px"><a href="{public_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14px">View invoice</a></td>
-          <td><a href="{pdf_link}" style="display:inline-block;background:#ffffff;color:#2c2926;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14px;border:1px solid #eadfd1">Download PDF</a></td>
-        </tr></table>
-        <div style="font-size:12px;color:#a89886;margin-top:24px">Thank you for learning with us.</div>
-      </td></tr>
-    </table>
-  </td></tr>
-</table>
-""".strip()
-
-def _origin_from_public_link(public_link: str) -> str:
-    if "/invoice/" not in public_link:
-        return ""
-    return public_link.split("/invoice/")[0]
-
-
-def _build_email_payload(inv: dict, body: SendInvoiceRequest, invoice_id: str) -> dict:
-    origin = _origin_from_public_link(body.public_link)
-    api_pdf_link = (
-        f"{origin}/api/invoices/{invoice_id}/pdf?token={inv['share_token']}"
-        if origin else ""
+def _build_invoice_email_html(inv, public_link, pdf_link, teacher_name, personal_note):
+    return email_service.build_invoice_email_html(
+        inv, public_link, pdf_link, teacher_name, personal_note
     )
-    teacher = inv.get("teacher_name") or EMAIL_FROM_NAME
-    html = _build_invoice_email_html(inv, body.public_link, api_pdf_link, teacher, body.message)
-    payload = {
-        "to": [body.to_email],
-        "subject": f"Invoice from {teacher}",
-        "html": html,
-        "from_name": EMAIL_FROM_NAME,
-    }
-    if body.reply_to:
-        payload["contact_email"] = body.reply_to
-    return payload
 
 
-async def _dispatch_email(payload: dict) -> dict:
-    async with httpx.AsyncClient(timeout=30) as c:
-        resp = await c.post(
-            f"{EMAIL_BASE_URL}/api/v1/email/send",
-            headers={"X-Email-Key": EMAIL_KEY},
-            json=payload,
-        )
-    resp.raise_for_status()
-    return resp.json()
+def _origin_from_public_link(public_link):
+    return email_service._origin_from_public_link(public_link)
 
 
-async def _mark_invoice_sent(invoice_id: str, to_email: str):
-    await db.invoices.update_one(
-        {"invoice_id": invoice_id},
-        {"$set": {
-            "last_sent_to": to_email,
-            "last_sent_at": datetime.now(timezone.utc).isoformat(),
-        }},
+def _build_email_payload(inv, body, invoice_id):
+    return email_service.build_invoice_email_payload(
+        inv, invoice_id, body.to_email, body.public_link, body.message, body.reply_to
     )
+
+
+async def _dispatch_email(payload):
+    return await email_service.dispatch_email(payload)
+
+
+async def _mark_invoice_sent(invoice_id, to_email):
+    await email_service.mark_invoice_sent(invoice_id, to_email)
 
 
 @api_router.post("/invoices/{invoice_id}/send")
