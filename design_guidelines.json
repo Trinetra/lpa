@@ -1,0 +1,111 @@
+{
+  "theme": "dark",
+  "typography": {
+    "headings": {
+      "family": "Playfair Display, serif",
+      "weights": "font-light, font-bold",
+      "rules": "Never use Inter or generic sans for headings. Apply tracking-tight for sizes above 32px."
+    },
+    "body": {
+      "family": "Outfit, sans-serif",
+      "weights": "font-light, font-normal",
+      "rules": "Generous line-height (leading-relaxed)."
+    },
+    "labels": "Uppercase + Tiny + Wide Spacing (tracking-[0.2em])"
+  },
+  "colors": {
+    "archetype": "Luxury & Earthy Fusion (Warmth & Elegance)",
+    "background": "#1A1816",
+    "surface": "#23211F",
+    "primary": "#D48464",
+    "secondary": "#F5E6D3",
+    "status": {
+      "success": "#7C9082",
+      "warning": "#D4B064",
+      "error": "#B85C5C"
+    },
+    "contrast_rules": "Always check APCA. Text over images must have text-shadow. Explicit hover states (e.g. hover:bg-[#D48464] hover:text-white)."
+  },
+  "visual_enhancers": {
+    "surfaces": "Subtle roundness (max 8px). Flat Solid surfaces with 1px border. No Glassmorphism for heavy data.",
+    "textures": "Subtle noise overlay (bg-noise) on the main background to kill digital flatness.",
+    "borders": "Soft inner borders (border-white/10). No pure #000000 or #808080."
+  },
+  "component_name": "Shadcn/UI (JavaScript)",
+  "grids": {
+    "dashboard": "Mode B (High Density Grid): grid-cols-1 md:grid-cols-3 lg:grid-cols-4. Tight gaps (gap-6).",
+    "roster": "Bento Grid layout with generous padding (p-6, p-8) around student cards."
+  },
+  "layouts": {
+    "general": "Mobile-first responsive. Optical alignment over geometrical. Asymmetry where possible.",
+    "navigation": "Visible sidebar or top nav with solid background (e.g. bg-[#1A1816]). No hamburger menus on desktop. NEVER use complete transparent background in header/overlays.",
+    "spacing_scale": "Use 2-3x more spacing. Containers with borders MUST have internal padding."
+  },
+  "motion": {
+    "interactions": "Hover states (slight lift -translate-y-1, shadow-lg, border darken).",
+    "technical": "Use specific transition properties. NEVER use 'transition: all'."
+  },
+  "accessibility": {
+    "contrast": "Normal text min 4.5:1. Interactive min 3:1.",
+    "testing": "All interactive and key informational elements MUST include a `data-testid` attribute."
+  },
+  "media": {
+    "icons": "Use @phosphor-icons/react for high-end, elegant duotone weight icons.",
+    "image_constraints": "Max height 80vh on mobile."
+  },
+  "3d_libraries": {
+    "strategy": "Minimal in dashboard. Focus on clean Recharts implementations with customized earthy colors."
+  },
+  "image_urls": [
+    {
+      "url": "https://images.unsplash.com/photo-1525296416200-59aaed194d0c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwzfHxlbGVnYW50JTIwbW9kZXJuJTIwZGFuY2VyJTIwc2lsaG91ZXR0ZSUyMHdhcm18ZW58MHx8fHwxNzg0MzU4NTY3fDA&ixlib=rb-4.1.0&q=85",
+      "description": "Silhouette of woman making yoga pose (warm, elegant)",
+      "category": "Dashboard Empty State / Hero Visual"
+    },
+    {
+      "url": "https://images.pexels.com/photos/29016047/pexels-photo-29016047.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Artistic portrait of a dancer with flowing orange fabric",
+      "category": "Login Page Background"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1758598497219-45e77afc5b53?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHw0fHxwb3J0cmFpdCUyMGZhY2UlMjBuZXV0cmFsJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODQzNTg1Njd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Man with beard against a light background",
+      "category": "Student Avatar Placeholder 1"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1758600434196-635876d30f7b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwzfHxwb3J0cmFpdCUyMGZhY2UlMjBuZXV0cmFsJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODQzNTg1Njd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "A young woman with curly hair",
+      "category": "Student Avatar Placeholder 2"
+    },
+    {
+      "url": "https://images.pexels.com/photos/3786525/pexels-photo-3786525.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Portrait of a woman in a white turtleneck",
+      "category": "Student Avatar Placeholder 3"
+    }
+  ],
+  "instructions_to_main_agent": [
+    "You are building a dashboard for a single dance teacher managing ~10 students. The vibe must be 'Earthy Editorial'—elegant, warm, and structured.",
+    "Do not use generic SaaS styling. Ditch the blues and teals. Use warm charcoal, terracotta, and soft sand.",
+    "Use Javascript (.jsx/.js files, NOT .tsx) for all components.",
+    "Install and use 'lucide-react' for general icons or '@phosphor-icons/react' for a premium duotone feel.",
+    "Use Shadcn/UI for modals, forms, dropdowns, and date pickers. Customize them to remove the default Vercel look (e.g., replace heavy shadows with 1px inner borders).",
+    "Ensure the layout has a clear navigation (e.g., sidebar) that never uses a transparent background. Use #1A1816.",
+    "Implement a roster table/grid with photos (use provided avatar URLs), hourly rates, and class logs.",
+    "Ensure 'data-testid' is present on all actionable items and key data displays (e.g., 'data-testid=\"student-card\"').",
+    "Don't build generic centered layouts. Add tension. Left-align text inputs and tabular data."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Avoid generic, 'on distribution' outputs. Do not create the 'AI slop' aesthetic.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects carefully; prefer solid surfaces with delicate borders for this app.",
+    "You MUST NOT apply universal transition. Eg: transition: all. This breaks transforms. Target specific properties.",
+    "You MUST NOT center align the app container. No '.App { text-align: center; }'.",
+    "Always use modern button styles like pill-shaped, or sharp buttons with interaction animations.",
+    "NEVER use AI assistant Emoji characters for icons.",
+    "Every interaction needs micro-animations - hover states, transitions. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable.",
+    "Shadcn components have opinionated rules, override them when necessary (e.g. height on tabs).",
+    "Use sonner for toasts, located in /app/src/components/ui/sonner.jsx."
+  ]
+}
