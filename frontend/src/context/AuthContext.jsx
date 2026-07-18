@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, API } from "@/lib/api";
 
 const AuthContext = createContext(null);
 
@@ -8,13 +8,21 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    let mounted = true;
-    api
-      .get("/auth/me")
-      .then((r) => mounted && setUser(r.data))
-      .catch(() => mounted && setUser(false));
+    let cancelled = false;
+    // Use fetch (not axios) so a 401 is a normal Response, not a thrown
+    // AxiosError — avoids polluting the console / preview error overlay
+    // on the very first anonymous page-load.
+    fetch(`${API}/auth/me`, { credentials: "include" })
+      .then(async (r) => {
+        if (cancelled) return;
+        if (r.ok) setUser(await r.json());
+        else setUser(false);
+      })
+      .catch(() => {
+        if (!cancelled) setUser(false);
+      });
     return () => {
-      mounted = false;
+      cancelled = true;
     };
   }, []);
 
