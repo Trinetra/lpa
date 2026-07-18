@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { api, API } from "@/lib/api";
+import { api, API, setStoredToken, getStoredToken } from "@/lib/api";
 
 const AuthContext = createContext(null);
 
@@ -9,14 +9,19 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let cancelled = false;
-    // Use fetch (not axios) so a 401 is a normal Response, not a thrown
-    // AxiosError — avoids polluting the console / preview error overlay
-    // on the very first anonymous page-load.
-    fetch(`${API}/auth/me`, { credentials: "include" })
+    const token = getStoredToken();
+    const headers = { credentials: "include" };
+    const opts = token
+      ? { credentials: "include", headers: { Authorization: `Bearer ${token}` } }
+      : headers;
+    fetch(`${API}/auth/me`, opts)
       .then(async (r) => {
         if (cancelled) return;
         if (r.ok) setUser(await r.json());
-        else setUser(false);
+        else {
+          setStoredToken(null);
+          setUser(false);
+        }
       })
       .catch(() => {
         if (!cancelled) setUser(false);
@@ -28,6 +33,7 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const { data } = await api.post("/auth/login", { email, password });
+    if (data.token) setStoredToken(data.token);
     setUser({ id: data.id, email: data.email, name: data.name });
     return data;
   };
@@ -38,6 +44,7 @@ export function AuthProvider({ children }) {
     } catch (e) {
       // ignore
     }
+    setStoredToken(null);
     setUser(false);
   };
 

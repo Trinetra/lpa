@@ -98,10 +98,12 @@ def create_refresh_token(user_id: str) -> str:
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
 def set_auth_cookies(response: Response, access: str, refresh: str):
-    response.set_cookie("access_token", access, httponly=True, secure=False,
-                        samesite="lax", max_age=8 * 3600, path="/")
-    response.set_cookie("refresh_token", refresh, httponly=True, secure=False,
-                        samesite="lax", max_age=7 * 24 * 3600, path="/")
+    # SameSite=None + Secure so cookies work when the app is embedded in the
+    # Emergent preview iframe (different parent origin from the backend).
+    response.set_cookie("access_token", access, httponly=True, secure=True,
+                        samesite="none", max_age=8 * 3600, path="/")
+    response.set_cookie("refresh_token", refresh, httponly=True, secure=True,
+                        samesite="none", max_age=7 * 24 * 3600, path="/")
 
 async def get_current_user(request: Request) -> dict:
     token = request.cookies.get("access_token")
@@ -252,8 +254,8 @@ async def refresh(request: Request, response: Response):
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
         access = create_access_token(str(user["_id"]), user["email"])
-        response.set_cookie("access_token", access, httponly=True, secure=False,
-                            samesite="lax", max_age=8 * 3600, path="/")
+        response.set_cookie("access_token", access, httponly=True, secure=True,
+                            samesite="none", max_age=8 * 3600, path="/")
         return {"ok": True}
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
@@ -281,10 +283,14 @@ async def upload_photo(file: UploadFile = File(...), user: dict = Depends(get_cu
 
 @api_router.get("/uploads/file")
 async def get_file(path: str = Query(...), auth: Optional[str] = Query(None), request: Request = None):
-    # Manual auth: cookie or ?auth=<token>
+    # Auth: cookie, ?auth=<token>, or Authorization: Bearer <token>
     token = request.cookies.get("access_token") if request else None
     if not token and auth:
         token = auth
+    if not token and request is not None:
+        header = request.headers.get("Authorization", "")
+        if header.startswith("Bearer "):
+            token = header[7:]
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
