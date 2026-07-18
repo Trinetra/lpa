@@ -1,0 +1,65 @@
+version: "3.9"
+
+# Lakshmi Studio Ledger — VPS deployment
+#
+# Runs the FastAPI backend + a private MongoDB instance behind the host's
+# existing nginx. FastAPI binds to 127.0.0.1:8001 on the host loopback only,
+# so it is never publicly reachable except through nginx (which terminates
+# TLS via Let's Encrypt).
+#
+# Persistent state:
+#   - MongoDB data      → docker volume ``lakshmi_mongo``
+#   - Uploaded photos   → host bind-mount ./data/uploads
+#
+# Bring up:
+#   docker compose --env-file .env.production up -d
+# Logs:
+#   docker compose logs -f backend
+# Update after `git pull`:
+#   docker compose build backend && docker compose up -d backend
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - lakshmi_mongo:/data/db
+    # Not exposed to host — only reachable from the backend service via the
+    # default docker network.
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGO_URL: "mongodb://mongo:27017"
+      DB_NAME: "${DB_NAME:-lakshmi}"
+      JWT_SECRET: "${JWT_SECRET:?set in .env.production}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:?set in .env.production}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?set in .env.production}"
+      ADMIN_NAME: "${ADMIN_NAME:-Lakshmi}"
+      CORS_ORIGINS: "${CORS_ORIGINS:?set in .env.production}"
+      APP_URL: "${APP_URL:?set in .env.production}"
+      APP_NAME: "${APP_NAME:-lakshmi}"
+      # Storage: 'local' uses the mounted volume below.
+      STORAGE_BACKEND: "local"
+      LOCAL_UPLOAD_DIR: "/data/uploads"
+      # Email: direct Resend when RESEND_API_KEY is set.
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      RESEND_FROM: "${RESEND_FROM:-onboarding@resend.dev}"
+      EMAIL_FROM_NAME: "${EMAIL_FROM_NAME:-Lakshmi Studio Ledger}"
+    volumes:
+      - ./data/uploads:/data/uploads
+    ports:
+      # Loopback-only — nginx on the host reverse-proxies to this.
+      - "127.0.0.1:8001:8001"
+
+volumes:
+  lakshmi_mongo:

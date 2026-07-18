@@ -27,49 +27,37 @@ from db import client, db
 from services import pdf as pdf_service
 from services import email as email_service
 from services import invoices as invoices_service
+from services import storage as storage_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
 APP_NAME = os.environ.get("APP_NAME", "dance-billing")
-STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
-EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"  # legacy — services/storage.py owns this now
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
-EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY")
+# Email-configured flag: true when either the Emergent proxy key OR a direct
+# Resend key is set. services/email.py picks the right transport at call time.
+EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY") or os.environ.get("RESEND_API_KEY")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Lakshmi Studio Ledger")
+
+
+# Legacy shims — delegate to services.storage. Older call sites in the file
+# still reference these names; keeping the shims avoids a wider diff.
+def init_storage():
+    return storage_service.init()
+
+
+def put_object(path, data, content_type):
+    return storage_service.put_object(path, data, content_type)
+
+
+def get_object(path):
+    return storage_service.get_object(path)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
-
-# --------------- Storage helpers -----------------
-storage_key = None
-
-def init_storage():
-    global storage_key
-    if storage_key:
-        return storage_key
-    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-    resp.raise_for_status()
-    storage_key = resp.json()["storage_key"]
-    return storage_key
-
-def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data, timeout=120
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-def get_object(path: str):
-    key = init_storage()
-    resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
-    resp.raise_for_status()
-    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
 # --------------- Auth helpers -----------------
 def hash_password(pw: str) -> str:

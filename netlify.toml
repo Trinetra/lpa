@@ -1,0 +1,22 @@
+[build]
+  base = "frontend"
+  publish = "build"
+  command = "yarn install --frozen-lockfile && yarn build"
+
+[build.environment]
+  # CI=false so warnings don't fail the CRA build (matches Emergent preview).
+  CI = "false"
+  NODE_VERSION = "20"
+
+# Client-side routing — every unknown path serves index.html so React Router
+# handles it (login, reset-password, invoice/<token>, etc.).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Long-cache the hashed CRA static assets. index.html stays short-cache.
+[[headers]]
+  for = "/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

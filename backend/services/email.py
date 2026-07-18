@@ -16,10 +16,21 @@ from db import db
 logger = logging.getLogger(__name__)
 
 EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+RESEND_URL = "https://api.resend.com/emails"
 
 
 def _email_key() -> Optional[str]:
-    return os.environ.get("EMERGENT_EMAIL_KEY")
+    # Prefer the Emergent proxy key (works only inside Emergent). Fall back to a
+    # user-supplied Resend key for self-hosted deployments.
+    return os.environ.get("EMERGENT_EMAIL_KEY") or os.environ.get("RESEND_API_KEY")
+
+
+def _use_direct_resend() -> bool:
+    return not os.environ.get("EMERGENT_EMAIL_KEY") and bool(os.environ.get("RESEND_API_KEY"))
+
+
+def _from_address() -> str:
+    return os.environ.get("RESEND_FROM", "onboarding@resend.dev")
 
 
 def _from_name() -> str:
@@ -97,7 +108,32 @@ def build_invoice_email_payload(inv: dict, invoice_id: str, to_email: str,
 async def dispatch_email(payload: dict) -> dict:
     key = _email_key()
     if not key:
-        raise RuntimeError("EMERGENT_EMAIL_KEY not configured")
+        raise RuntimeError("No email transport configured (set EMERGENT_EMAIL_KEY or RESEND_API_KEY)")
+
+    if _use_direct_resend():
+        # Direct Resend API — used when self-hosted on a VPS.
+        rs_body = {
+            "from": f"{_from_name()} <{_from_address()}>",
+            "to": payload["to"],
+            "subject": payload["subject"],
+            "html": payload["html"],
+        }
+        reply_to = payload.get("contact_email")
+        if reply_to:
+            rs_body["reply_to"] = reply_to
+        async with httpx.AsyncClient(timeout=30) as c:
+            resp = await c.post(
+                RESEND_URL,
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=rs_body,
+            )
+        resp.raise_for_status()
+        return resp.json()
+
+    # Emergent-managed Resend proxy — used inside the preview environment.
     async with httpx.AsyncClient(timeout=30) as c:
         resp = await c.post(
             f"{EMAIL_BASE_URL}/api/v1/email/send",
@@ -121,7 +157,7 @@ async def mark_invoice_sent(invoice_id: str, to_email: str):
 async def send_password_reset_email(to_email: str, name: str, reset_link: str):
     key = _email_key()
     if not key:
-        logger.warning(f"Password reset requested but EMERGENT_EMAIL_KEY not set. Link: {reset_link}")
+        logger.warning(f"Password reset requested but no email key set. Link: {reset_link}")
         return
     from_name = _from_name()
     html = f"""
@@ -150,12 +186,6 @@ async def send_password_reset_email(to_email: str, name: str, reset_link: str):
         "from_name": from_name,
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as c:
-            resp = await c.post(
-                f"{EMAIL_BASE_URL}/api/v1/email/send",
-                headers={"X-Email-Key": key},
-                json=payload,
-            )
-        resp.raise_for_status()
+        await dispatch_email(payload)
     except Exception as e:
         logger.error(f"Password reset email failed: {e}")
