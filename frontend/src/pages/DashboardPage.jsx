@@ -34,6 +34,8 @@ export default function DashboardPage() {
   if (loading) return <div data-testid="dashboard-loading" className="uppercase-label">Loading…</div>;
   if (!data) return null;
 
+  const studentsOwing = data.students.filter((s) => s.balance_due > 0);
+
   return (
     <div data-testid="dashboard-page" className="space-y-10">
       <header className="flex items-end justify-between flex-wrap gap-4">
@@ -71,7 +73,12 @@ export default function DashboardPage() {
               No students yet. <Link to="/students" className="underline">Add your first student.</Link>
             </div>
           )}
-          {data.students.map((s) => (
+          {data.students.length > 0 && studentsOwing.length === 0 && (
+            <div className="p-8 text-center" style={{ color: "var(--text-muted)" }}>
+              Nobody owes you right now.
+            </div>
+          )}
+          {studentsOwing.map((s) => (
             <div
               key={s.student_id}
               data-testid={`due-row-${s.student_id}`}
