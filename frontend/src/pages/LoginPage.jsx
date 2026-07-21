@@ -49,7 +49,7 @@ export default function LoginPage() {
     <div className="relative min-h-screen grid md:grid-cols-2" style={{ background: "var(--bg)" }}>
       {/* Full-bleed background photo — mobile only. Desktop uses the split
           panel below instead, so this is hidden at md: and up. */}
-      <div className="md:hidden fixed inset-0 -z-10">
+      <div className="md:hidden fixed inset-0 z-0">
         <img
           src={HERO_IMG}
           alt=""
@@ -67,7 +67,7 @@ export default function LoginPage() {
       </div>
 
       {/* Left visual — desktop only */}
-      <div className="hidden md:block relative overflow-hidden">
+      <div className="hidden md:block relative overflow-hidden z-10">
         <img
           src={HERO_IMG}
           alt="Dancer"
@@ -108,7 +108,7 @@ export default function LoginPage() {
       </div>
 
       {/* Form */}
-      <div className="relative flex flex-col items-center justify-center px-6 py-16">
+      <div className="relative z-10 flex flex-col items-center justify-center px-6 py-16">
         <div className="md:hidden text-center mb-8 font-serif-display text-3xl" style={{ color: "#f5e6d3" }}>
           Lakshmi
         </div>
