@@ -4,8 +4,21 @@ import { useAuth } from "@/context/AuthContext";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { Loader2 } from "lucide-react";
 
+const HERO_PHOTOS = [
+  "1_headshot.jpg",
+  "2_ravana.jpg",
+  "2_ravana_bw.jpg",
+  "3_chakra.jpg",
+  "3_chakra_bw.jpg",
+  "4_margam.jpg",
+  "4_margam_bw.jpg",
+  "5_siva.jpg",
+  "6_yellow.jpg",
+  "6_yellow_bw.jpg",
+];
+
 const HERO_IMG =
-  "https://images.pexels.com/photos/29016047/pexels-photo-29016047.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
+  "/hero-photos/" + HERO_PHOTOS[Math.floor(Math.random() * HERO_PHOTOS.length)];
 
 export default function LoginPage() {
   const { user, login } = useAuth();
