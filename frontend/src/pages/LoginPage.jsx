@@ -22,8 +22,8 @@ const HERO_IMG =
 export default function LoginPage() {
   const { user, login } = useAuth();
   const nav = useNavigate();
-  const [email, setEmail] = useState("lpathreya@gmail.com");
-  const [password, setPassword] = useState("prashanth");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [forgotOpen, setForgotOpen] = useState(false);
@@ -171,10 +171,6 @@ export default function LoginPage() {
             {loading && <Loader2 className="animate-spin" size={16} />}
             Enter Studio
           </button>
-
-          <p className="mt-6 text-xs" style={{ color: "var(--text-muted)" }}>
-            Default credentials are already filled in for the demo.
-          </p>
         </form>
       </div>
       {forgotOpen && <ForgotPasswordModal onClose={() => setForgotOpen(false)} defaultEmail={email} />}
