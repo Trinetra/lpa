@@ -46,8 +46,27 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen grid md:grid-cols-2" style={{ background: "var(--bg)" }}>
-      {/* Left visual */}
+    <div className="relative min-h-screen grid md:grid-cols-2" style={{ background: "var(--bg)" }}>
+      {/* Full-bleed background photo — mobile only. Desktop uses the split
+          panel below instead, so this is hidden at md: and up. */}
+      <div className="md:hidden fixed inset-0 -z-10">
+        <img
+          src={HERO_IMG}
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ filter: "brightness(0.6) saturate(1.05)" }}
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(26,24,22,0.55) 0%, rgba(26,24,22,0.85) 100%)",
+          }}
+        />
+      </div>
+
+      {/* Left visual — desktop only */}
       <div className="hidden md:block relative overflow-hidden">
         <img
           src={HERO_IMG}
@@ -89,7 +108,10 @@ export default function LoginPage() {
       </div>
 
       {/* Form */}
-      <div className="flex items-center justify-center px-6 py-16">
+      <div className="relative flex flex-col items-center justify-center px-6 py-16">
+        <div className="md:hidden text-center mb-8 font-serif-display text-3xl" style={{ color: "#f5e6d3" }}>
+          Lakshmi
+        </div>
         <form
           onSubmit={submit}
           data-testid="login-form"
