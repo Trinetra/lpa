@@ -5,16 +5,15 @@ import { api, formatApiErrorDetail } from "@/lib/api";
 import { Loader2 } from "lucide-react";
 
 const HERO_PHOTOS = [
-  "1_headshot.jpg",
-  "2_ravana.jpg",
-  "2_ravana_bw.jpg",
-  "3_chakra.jpg",
-  "3_chakra_bw.jpg",
-  "4_margam.jpg",
-  "4_margam_bw.jpg",
-  "5_siva.jpg",
-  "6_yellow.jpg",
-  "6_yellow_bw.jpg",
+  "hero1.jpg",
+  "hero2.jpg",
+  "hero3.jpg",
+  "hero4.jpg",
+  "hero5.jpg",
+  "hero6.jpg",
+  "hero7.jpg",
+  "hero8.jpg",
+  "hero9.jpg",
 ];
 
 const HERO_IMG =

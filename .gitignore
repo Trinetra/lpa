@@ -95,3 +95,6 @@ frontend/node_modules/.cache/default-development/6.pack
 credentials.json
 *.key
 .credentials
+
+# VPS-local runtime data (uploaded files bind-mount, never part of the repo)
+/deploy/data/

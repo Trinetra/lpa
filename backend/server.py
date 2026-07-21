@@ -236,8 +236,11 @@ async def login(body: LoginRequest, response: Response):
 
 @api_router.post("/auth/logout")
 async def logout(response: Response, user: dict = Depends(get_current_user)):
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/")
+    # Must match the attributes used in set_auth_cookies() — browsers can
+    # silently ignore a Set-Cookie deletion whose SameSite/Secure don't match
+    # the cookie actually stored, leaving the session cookie alive.
+    response.delete_cookie("access_token", path="/", secure=True, samesite="none")
+    response.delete_cookie("refresh_token", path="/", secure=True, samesite="none")
     return {"ok": True}
 
 @api_router.get("/auth/me")
