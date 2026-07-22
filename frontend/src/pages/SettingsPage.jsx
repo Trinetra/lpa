@@ -229,6 +229,9 @@ function StudioProfileCard({ profile, onSaved }) {
     contact_email: profile?.contact_email || profile?.email || "",
     logo_path: profile?.logo_path || null,
     zoom_meeting_id: profile?.zoom_meeting_id || "",
+    social_youtube: profile?.social_youtube || "",
+    social_instagram: profile?.social_instagram || "",
+    social_facebook: profile?.social_facebook || "",
   });
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -265,6 +268,9 @@ function StudioProfileCard({ profile, onSaved }) {
         contact_email: form.contact_email,
         logo_path: form.logo_path === null ? "" : form.logo_path,
         zoom_meeting_id: form.zoom_meeting_id,
+        social_youtube: form.social_youtube,
+        social_instagram: form.social_instagram,
+        social_facebook: form.social_facebook,
       };
       const { data } = await api.patch("/profile", body);
       toast.success("Studio profile saved");
@@ -354,6 +360,23 @@ function StudioProfileCard({ profile, onSaved }) {
             className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
           <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
             Added as a join link on every class synced to Google Calendar. Passcode isn't included — share that separately if your room needs one.
+          </div>
+        </label>
+        <label className="sm:col-span-2">
+          <span className="uppercase-label block mb-1">Social links (shown on invoices)</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <input value={form.social_youtube} onChange={(e) => setForm({ ...form, social_youtube: e.target.value })}
+              data-testid="studio-youtube-input"
+              placeholder="YouTube URL"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+            <input value={form.social_instagram} onChange={(e) => setForm({ ...form, social_instagram: e.target.value })}
+              data-testid="studio-instagram-input"
+              placeholder="Instagram URL"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+            <input value={form.social_facebook} onChange={(e) => setForm({ ...form, social_facebook: e.target.value })}
+              data-testid="studio-facebook-input"
+              placeholder="Facebook URL"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
           </div>
         </label>
       </div>

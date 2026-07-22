@@ -147,6 +147,20 @@ export default function SharedInvoicePage() {
           </div>
         </div>
 
+        {(studio.social_youtube || studio.social_instagram || studio.social_facebook) && (
+          <div className="text-center text-xs mb-3 space-x-4" data-testid="shared-socials">
+            {studio.social_youtube && (
+              <a href={studio.social_youtube} target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--text-muted)" }}>YouTube</a>
+            )}
+            {studio.social_instagram && (
+              <a href={studio.social_instagram} target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--text-muted)" }}>Instagram</a>
+            )}
+            {studio.social_facebook && (
+              <a href={studio.social_facebook} target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--text-muted)" }}>Facebook</a>
+            )}
+          </div>
+        )}
+
         <div className="text-center text-xs" style={{ color: "var(--text-muted)" }}>
           <Link to="/" className="underline">Powered by {brandName} · Studio Ledger</Link>
         </div>

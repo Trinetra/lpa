@@ -41,6 +41,9 @@ def build_studio_snapshot(user_doc: Optional[dict]) -> dict:
         "contact_upi": u.get("contact_upi"),
         "contact_email": u.get("contact_email") or u.get("email"),
         "logo_path": u.get("logo_path"),
+        "social_youtube": u.get("social_youtube"),
+        "social_instagram": u.get("social_instagram"),
+        "social_facebook": u.get("social_facebook"),
     }
 
 

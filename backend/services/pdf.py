@@ -287,9 +287,28 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
     story.append(Paragraph(
         "Thank you for learning with us. Please remit any balance at your earliest convenience.",
         styles["footer"]))
+
+    social_line = _social_links_line(studio_contact)
+    if social_line:
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph(social_line, styles["footer"]))
+
     doc.build(story)
     buf.seek(0)
     return buf.read()
+
+
+def _social_links_line(studio_contact: Optional[dict]) -> Optional[str]:
+    if not studio_contact:
+        return None
+    bits = []
+    if studio_contact.get("social_youtube"):
+        bits.append(f'<link href="{studio_contact["social_youtube"]}"><u>YouTube</u></link>')
+    if studio_contact.get("social_instagram"):
+        bits.append(f'<link href="{studio_contact["social_instagram"]}"><u>Instagram</u></link>')
+    if studio_contact.get("social_facebook"):
+        bits.append(f'<link href="{studio_contact["social_facebook"]}"><u>Facebook</u></link>')
+    return " · ".join(bits) if bits else None
 
 
 def generate_tour_expense_pdf(tour: dict, expenses: list) -> bytes:
