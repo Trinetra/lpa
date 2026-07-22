@@ -30,10 +30,8 @@ def _from_name() -> str:
     return os.environ.get("EMAIL_FROM_NAME", "Studio Ledger")
 
 
-def _origin_from_public_link(public_link: str) -> str:
-    if "/invoice/" not in public_link:
-        return ""
-    return public_link.split("/invoice/")[0]
+def _backend_url() -> str:
+    return os.environ.get("BACKEND_URL", "").rstrip("/")
 
 
 def build_invoice_email_html(inv: dict, public_link: str, pdf_link: str,
@@ -80,10 +78,10 @@ def build_invoice_email_html(inv: dict, public_link: str, pdf_link: str,
 def build_invoice_email_payload(inv: dict, invoice_id: str, to_email: str,
                                  public_link: str, message: Optional[str],
                                  reply_to: Optional[str]) -> dict:
-    origin = _origin_from_public_link(public_link)
+    backend = _backend_url()
     api_pdf_link = (
-        f"{origin}/api/invoices/{invoice_id}/pdf?token={inv['share_token']}"
-        if origin else ""
+        f"{backend}/api/invoices/{invoice_id}/pdf?token={inv['share_token']}"
+        if backend else ""
     )
     teacher = inv.get("teacher_name") or _from_name()
     html = build_invoice_email_html(inv, public_link, api_pdf_link, teacher, message)
@@ -96,6 +94,39 @@ def build_invoice_email_payload(inv: dict, invoice_id: str, to_email: str,
     if reply_to:
         payload["contact_email"] = reply_to
     return payload
+
+
+_CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
+
+
+def build_tour_invoice_email_html(invoice: dict, teacher_name: str, pdf_link: str) -> str:
+    symbol = _CURRENCY_SYMBOLS.get(invoice.get("currency", "INR"), invoice.get("currency", ""))
+    amount = invoice.get("amount", 0)
+    amount_str = f"{symbol}{amount:,.0f}" if float(amount) == int(amount) else f"{symbol}{amount:,.2f}"
+    return f"""
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#fffdf9;padding:24px 0;font-family:Georgia,'Times New Roman',serif">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e4d9c8;border-radius:8px;padding:32px">
+      <tr><td>
+        <div style="font-size:12px;letter-spacing:2px;color:#8a6d3b;text-transform:uppercase;margin-bottom:6px;font-family:Arial,sans-serif">Invoice from</div>
+        <div style="font-size:24px;color:#7a1f2b;font-weight:700;margin-bottom:24px">{teacher_name}</div>
+        <div style="font-size:15px;color:#2b2b2b;line-height:1.5;font-family:Arial,sans-serif">
+          Dear {invoice.get("recipient_name") or "there"},<br><br>
+          Please find attached the invoice for {invoice.get("description", "our engagement")}.
+        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border-top:1px solid #e4d9c8;border-bottom:1px solid #e4d9c8">
+          <tr><td style="padding:12px 0;font-size:16px;color:#7a1f2b;font-weight:700;font-family:Arial,sans-serif">Amount due</td>
+              <td align="right" style="padding:12px 0;font-size:16px;color:#7a1f2b;font-weight:700;font-family:Arial,sans-serif">{amount_str}</td></tr>
+        </table>
+        <table cellpadding="0" cellspacing="0"><tr>
+          <td><a href="{pdf_link}" style="display:inline-block;background:#7a1f2b;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:6px;font-weight:600;font-size:14px;font-family:Arial,sans-serif">Download invoice</a></td>
+        </tr></table>
+        <div style="font-size:12px;color:#8a6d3b;margin-top:24px;font-family:Arial,sans-serif">Thank you for the opportunity to perform.</div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+""".strip()
 
 
 async def dispatch_email(payload: dict) -> dict:

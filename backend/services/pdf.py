@@ -55,6 +55,7 @@ _PAID = colors.HexColor("#5C7A5E")
 
 _PAGE_W = 174 * mm  # A4 width minus 18mm margins each side
 _RUPEE = "₹"
+_CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
 
 
 def _styles():
@@ -133,14 +134,15 @@ def _fmt_hours(hours) -> str:
     return f"{h:g}"
 
 
-def _fmt_money(n) -> str:
+def _fmt_money(n, currency: str = "INR") -> str:
     try:
         v = float(n)
     except (TypeError, ValueError):
         v = 0.0
+    symbol = _CURRENCY_SYMBOLS.get(currency, currency + " ")
     if v == int(v):
-        return f"{_RUPEE}{int(v):,}"
-    return f"{_RUPEE}{v:,.2f}"
+        return f"{symbol}{int(v):,}"
+    return f"{symbol}{v:,.2f}"
 
 
 def _letterhead(styles, teacher_name: str, studio_name: Optional[str] = None,
@@ -254,6 +256,24 @@ def _summary_card(styles, rows: list, emphasis_index: int, emphasis_color) -> Ta
         ("LINEABOVE", (0, emphasis_index), (-1, emphasis_index), 0.4, _RULE),
     ]
     tbl.setStyle(TableStyle(style))
+    return tbl
+
+
+def _totals_table(styles, rows: list) -> Table:
+    """Equal-weight totals, one row per currency — used when a tour's
+    expenses span more than one currency and no single row is "the answer"
+    the way a due/paid amount is, so no row gets emphasis banding."""
+    label_style = ParagraphStyle("tt-label", parent=styles["label"], fontName=_FONT_BOLD,
+                                  fontSize=10.5, textColor=_INK, leading=13)
+    value_style = ParagraphStyle("tt-value", parent=styles["label"], fontName=_FONT_BOLD,
+                                  fontSize=10.5, textColor=_INK, leading=13, alignment=2)
+    cells = [[Paragraph(label, label_style), Paragraph(value, value_style)] for label, value in rows]
+    tbl = Table(cells, colWidths=[65 * mm, 45 * mm], hAlign="RIGHT")
+    tbl.setStyle(TableStyle([
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ("LINEABOVE", (0, 0), (-1, 0), 0.4, _RULE),
+    ]))
     return tbl
 
 
@@ -397,19 +417,92 @@ def generate_tour_expense_pdf(tour: dict, expenses: list) -> bytes:
                         style=TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.8, _GOLD)])))
     story.append(Spacer(1, 7 * mm))
 
-    total = sum(float(e.get("amount", 0)) for e in expenses)
-    rows = [[
-        _fmt_date(e.get("expense_date")), e.get("category", ""), _fmt_money(e.get("amount", 0)),
-        e.get("notes") or "",
-    ] for e in expenses]
+    # Expenses on a tour commonly span more than one currency (flights in
+    # USD, local transport in GBP, etc.) — summing them into one blended
+    # number would be meaningless, so totals are grouped per currency.
+    totals_by_currency = {}
+    rows = []
+    for e in expenses:
+        currency = e.get("currency", "INR")
+        amount = float(e.get("amount", 0))
+        totals_by_currency[currency] = totals_by_currency.get(currency, 0) + amount
+        rows.append([
+            _fmt_date(e.get("expense_date")), e.get("category", ""),
+            _fmt_money(amount, currency), e.get("notes") or "",
+        ])
     story.append(_line_items_table(
         styles, ["Date", "Category", "Amount", "Notes"],
         rows, [30 * mm, 40 * mm, 30 * mm, _PAGE_W - 100 * mm],
     ))
     story.append(Spacer(1, 7 * mm))
+    total_rows = [(f"Total ({c})", _fmt_money(t, c)) for c, t in sorted(totals_by_currency.items())]
+    if len(total_rows) == 1:
+        story.append(_summary_card(
+            styles, total_rows, emphasis_index=0, emphasis_color=_MAROON,
+        ))
+    elif total_rows:
+        story.append(_totals_table(styles, total_rows))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
+def generate_tour_invoice_pdf(teacher_name: str, studio_name: Optional[str],
+                               logo_bytes: Optional[bytes], invoice: dict,
+                               studio_contact: Optional[dict] = None) -> bytes:
+    """Simpler layout than the class invoice — a single description/amount
+    line, no per-class table, since a tour invoice bills a performance or
+    engagement as a whole rather than itemized hours."""
+    styles = _styles()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            leftMargin=18 * mm, rightMargin=18 * mm,
+                            topMargin=16 * mm, bottomMargin=16 * mm)
+    story = []
+    story.extend(_letterhead(styles, teacher_name, studio_name, logo_bytes, doc_label="Invoice"))
+
+    currency = invoice.get("currency", "INR")
+    story.append(_meta_card(styles, [
+        ("Invoice #", invoice.get("invoice_number") or "—"),
+        ("Date", _fmt_date(invoice.get("invoice_date"))),
+        ("Billed to", invoice.get("recipient_name", "")),
+        ("Contact", invoice.get("recipient_email") or "—"),
+    ]))
+    story.append(Spacer(1, 8 * mm))
+
+    story.append(Paragraph("DESCRIPTION", styles["sectionHead"]))
+    story.append(Spacer(1, 2.5 * mm))
+    story.append(Paragraph(invoice.get("description", ""), ParagraphStyle(
+        "desc", parent=styles["label"], fontSize=10.5, textColor=_INK, leading=15)))
+    story.append(Spacer(1, 8 * mm))
+
+    paid = invoice.get("paid", False)
     story.append(_summary_card(
-        styles, [("Total", _fmt_money(total))], emphasis_index=0, emphasis_color=_MAROON,
+        styles,
+        [("Paid" if paid else "Amount Due", _fmt_money(invoice.get("amount", 0), currency))],
+        emphasis_index=0,
+        emphasis_color=_PAID if paid else _DUE,
     ))
+    story.append(Spacer(1, 7 * mm))
+
+    if studio_contact and not paid:
+        contact_bits = []
+        if studio_contact.get("contact_upi"):
+            contact_bits.append(f"UPI: <b>{studio_contact['contact_upi']}</b>")
+        if studio_contact.get("contact_phone"):
+            contact_bits.append(f"Phone: {studio_contact['contact_phone']}")
+        if studio_contact.get("contact_email"):
+            contact_bits.append(f"Email: {studio_contact['contact_email']}")
+        if contact_bits:
+            story.append(Paragraph("<b>Pay to:</b> " + " · ".join(contact_bits), styles["label"]))
+            story.append(Spacer(1, 4 * mm))
+
+    story.append(Paragraph(
+        "Thank you for the opportunity to perform. Please remit payment at your earliest convenience.",
+        ParagraphStyle("thanks", parent=styles["footer"], alignment=0)))
+
+    story.extend(_footer(styles, teacher_name, studio_contact))
 
     doc.build(story)
     buf.seek(0)

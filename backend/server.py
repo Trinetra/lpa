@@ -238,6 +238,7 @@ class TourStopUpdate(BaseModel):
 class TourExpenseCreate(BaseModel):
     category: str
     amount: float
+    currency: str = "INR"
     expense_date: str  # ISO date
     notes: Optional[str] = None
     receipt_path: Optional[str] = None
@@ -245,6 +246,7 @@ class TourExpenseCreate(BaseModel):
 class TourExpenseUpdate(BaseModel):
     category: Optional[str] = None
     amount: Optional[float] = None
+    currency: Optional[str] = None
     expense_date: Optional[str] = None
     notes: Optional[str] = None
     receipt_path: Optional[str] = None
@@ -274,6 +276,30 @@ class TourTodoCreate(BaseModel):
 class TourTodoUpdate(BaseModel):
     text: Optional[str] = None
     done: Optional[bool] = None
+
+TOUR_CURRENCIES = ["INR", "EUR", "USD", "GBP"]
+CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
+
+class TourInvoiceCreate(BaseModel):
+    contact_id: Optional[str] = None
+    recipient_name: str
+    recipient_email: Optional[EmailStr] = None
+    description: str
+    invoice_date: str  # ISO date
+    amount: float
+    currency: str = "INR"
+
+class TourInvoiceUpdate(BaseModel):
+    recipient_name: Optional[str] = None
+    recipient_email: Optional[str] = None
+    description: Optional[str] = None
+    invoice_date: Optional[str] = None
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    paid: Optional[bool] = None
+
+class TourInvoiceSend(BaseModel):
+    channels: List[str] = Field(default_factory=lambda: ["email"])  # 'email' and/or 'whatsapp'
 
 # --------------- Serializers -----------------
 def ser_student(doc):
@@ -355,6 +381,7 @@ def ser_tour_expense(doc):
         "tour_id": doc.get("tour_id"),
         "category": doc.get("category"),
         "amount": doc.get("amount"),
+        "currency": doc.get("currency", "INR"),
         "expense_date": doc.get("expense_date"),
         "notes": doc.get("notes"),
         "receipt_path": doc.get("receipt_path"),
@@ -389,6 +416,25 @@ def ser_tour_todo(doc):
         "tour_id": doc.get("tour_id"),
         "text": doc.get("text"),
         "done": doc.get("done", False),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_tour_invoice(doc):
+    return {
+        "id": str(doc["_id"]),
+        "tour_id": doc.get("tour_id"),
+        "contact_id": doc.get("contact_id"),
+        "invoice_number": doc.get("invoice_number"),
+        "recipient_name": doc.get("recipient_name"),
+        "recipient_email": doc.get("recipient_email"),
+        "description": doc.get("description"),
+        "invoice_date": doc.get("invoice_date"),
+        "amount": doc.get("amount"),
+        "currency": doc.get("currency"),
+        "paid": doc.get("paid", False),
+        "share_token": doc.get("share_token"),
+        "last_sent_to": doc.get("last_sent_to"),
+        "last_sent_at": doc.get("last_sent_at"),
         "created_at": doc.get("created_at"),
     }
 
@@ -1171,10 +1217,6 @@ def _build_invoice_email_html(inv, public_link, pdf_link, teacher_name, personal
     )
 
 
-def _origin_from_public_link(public_link):
-    return email_service._origin_from_public_link(public_link)
-
-
 def _build_email_payload(inv, body, invoice_id):
     return email_service.build_invoice_email_payload(
         inv, invoice_id, body.to_email, body.public_link, body.message, body.reply_to
@@ -1390,6 +1432,7 @@ async def delete_tour(tour_id: str, user: dict = Depends(get_current_user)):
     await db.tour_checkins.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
     await db.tour_contacts.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
     await db.tour_todos.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
+    await db.tour_invoices.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
     return {"ok": True}
 
 # --------------- Tour stops (schedule) -----------------
@@ -1443,6 +1486,8 @@ async def list_tour_expenses(tour_id: str, user: dict = Depends(get_current_user
 @api_router.post("/tours/{tour_id}/expenses")
 async def create_tour_expense(tour_id: str, body: TourExpenseCreate, user: dict = Depends(get_current_user)):
     await _get_owned_tour(tour_id, user["_id"])
+    if body.currency not in TOUR_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {TOUR_CURRENCIES}")
     doc = body.model_dump()
     doc["tour_id"] = tour_id
     doc["owner_id"] = user["_id"]
@@ -1458,6 +1503,8 @@ async def update_tour_expense(tour_id: str, expense_id: str, body: TourExpenseUp
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "currency" in updates and updates["currency"] not in TOUR_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {TOUR_CURRENCIES}")
     res = await db.tour_expenses.update_one(
         {"_id": ObjectId(expense_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
     )
@@ -1606,6 +1653,151 @@ async def delete_tour_todo(tour_id: str, todo_id: str, user: dict = Depends(get_
         raise HTTPException(status_code=404, detail="To-do not found")
     return {"ok": True}
 
+# --------------- Tour invoices -----------------
+@api_router.get("/tours/{tour_id}/invoices")
+async def list_tour_invoices(tour_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    cur = db.tour_invoices.find({"tour_id": tour_id, "owner_id": user["_id"]}).sort("created_at", -1)
+    return [ser_tour_invoice(d) async for d in cur]
+
+@api_router.post("/tours/{tour_id}/invoices")
+async def create_tour_invoice(tour_id: str, body: TourInvoiceCreate, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    if body.currency not in TOUR_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {TOUR_CURRENCIES}")
+    now = datetime.now(timezone.utc)
+    doc = body.model_dump()
+    doc["tour_id"] = tour_id
+    doc["owner_id"] = user["_id"]
+    doc["paid"] = False
+    doc["share_token"] = secrets.token_urlsafe(24)
+    doc["invoice_number"] = await invoices_service.next_invoice_number(user["_id"], now, namespace="tour")
+    doc["created_at"] = now.isoformat()
+    res = await db.tour_invoices.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_tour_invoice(doc)
+
+@api_router.patch("/tours/{tour_id}/invoices/{invoice_id}")
+async def update_tour_invoice(tour_id: str, invoice_id: str, body: TourInvoiceUpdate,
+                               user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    if "currency" in updates and updates["currency"] not in TOUR_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {TOUR_CURRENCIES}")
+    res = await db.tour_invoices.update_one(
+        {"_id": ObjectId(invoice_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return ser_tour_invoice(await db.tour_invoices.find_one({"_id": ObjectId(invoice_id)}))
+
+@api_router.delete("/tours/{tour_id}/invoices/{invoice_id}")
+async def delete_tour_invoice(tour_id: str, invoice_id: str, user: dict = Depends(get_current_user)):
+    res = await db.tour_invoices.delete_one(
+        {"_id": ObjectId(invoice_id), "tour_id": tour_id, "owner_id": user["_id"]}
+    )
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return {"ok": True}
+
+async def _get_owned_tour_invoice(tour_id: str, invoice_id: str, owner_id: str) -> dict:
+    inv = await db.tour_invoices.find_one(
+        {"_id": ObjectId(invoice_id), "tour_id": tour_id, "owner_id": owner_id}
+    )
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return inv
+
+@api_router.get("/tours/{tour_id}/invoices/{invoice_id}/pdf")
+async def tour_invoice_pdf(tour_id: str, invoice_id: str, token: Optional[str] = Query(None),
+                            request: Request = None):
+    inv = await db.tour_invoices.find_one({"_id": ObjectId(invoice_id), "tour_id": tour_id})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if token and token == inv["share_token"]:
+        pass
+    else:
+        try:
+            user = await get_current_user(request)
+            if user["_id"] != inv["owner_id"]:
+                raise HTTPException(status_code=403, detail="Not authorized")
+        except HTTPException:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+    owner = await db.users.find_one({"_id": ObjectId(inv["owner_id"])})
+    studio_snapshot = invoices_service.build_studio_snapshot(owner)
+    logo_bytes = None
+    if studio_snapshot.get("logo_path"):
+        try:
+            logo_bytes, _ = get_object(studio_snapshot["logo_path"])
+        except Exception as e:
+            logger.warning(f"Logo fetch failed for tour invoice {invoice_id}: {e}")
+
+    pdf_bytes = pdf_service.generate_tour_invoice_pdf(
+        studio_snapshot["teacher_name"] or "Dance Teacher",
+        studio_snapshot.get("studio_name"),
+        logo_bytes,
+        ser_tour_invoice(inv),
+        studio_contact=studio_snapshot,
+    )
+    filename = f"invoice_{invoice_id}.pdf"
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
+                              headers={"Content-Disposition": f'inline; filename="{filename}"'})
+
+@api_router.post("/tours/{tour_id}/invoices/{invoice_id}/send")
+async def send_tour_invoice(tour_id: str, invoice_id: str, body: TourInvoiceSend,
+                             user: dict = Depends(get_current_user)):
+    inv = await _get_owned_tour_invoice(tour_id, invoice_id, user["_id"])
+    if not inv.get("recipient_email") and "email" in body.channels:
+        raise HTTPException(status_code=400, detail="No recipient email on file")
+
+    owner = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    studio_snapshot = invoices_service.build_studio_snapshot(owner)
+    teacher_name = studio_snapshot["teacher_name"] or "Dance Teacher"
+    backend_url = os.environ.get("BACKEND_URL", "").rstrip("/")
+    pdf_link = f"{backend_url}/api/tours/{tour_id}/invoices/{invoice_id}/pdf?token={inv['share_token']}"
+
+    result = {"email": None, "whatsapp": None}
+
+    if "email" in body.channels and inv.get("recipient_email"):
+        html = email_service.build_tour_invoice_email_html(ser_tour_invoice(inv), teacher_name, pdf_link)
+        payload = {
+            "to": [inv["recipient_email"]],
+            "subject": f"Invoice from {teacher_name}",
+            "html": html,
+            "from_name": teacher_name,
+        }
+        try:
+            await email_service.dispatch_email(payload)
+            result["email"] = "sent"
+        except Exception as e:
+            logger.error(f"Tour invoice email failed: {e}")
+            result["email"] = "failed"
+
+    if "whatsapp" in body.channels:
+        contact = None
+        if inv.get("contact_id"):
+            contact = await db.tour_contacts.find_one({"_id": ObjectId(inv["contact_id"])})
+        phone = (contact or {}).get("phone")
+        if phone:
+            symbol = CURRENCY_SYMBOLS.get(inv["currency"], inv["currency"])
+            msg = (f"Hi {inv['recipient_name']}, here's your invoice for "
+                   f"{inv['description']} ({symbol}{inv['amount']}):\n{pdf_link}")
+            result["whatsapp"] = invoices_service.wa_link(phone, msg)
+        else:
+            result["whatsapp"] = None
+
+    await db.tour_invoices.update_one(
+        {"_id": ObjectId(invoice_id)},
+        {"$set": {
+            "last_sent_to": inv.get("recipient_email"),
+            "last_sent_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    return result
+
 # --------------- Public tour schedule page -----------------
 @api_router.get("/tours/share/{share_token}")
 async def get_shared_tour(share_token: str):
@@ -1652,6 +1844,8 @@ async def on_startup():
     await db.tour_checkins.create_index("tour_id")
     await db.tour_contacts.create_index("tour_id")
     await db.tour_todos.create_index("tour_id")
+    await db.tour_invoices.create_index("tour_id")
+    await db.tour_invoices.create_index("share_token", unique=True)
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

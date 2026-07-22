@@ -11,14 +11,18 @@ from pymongo import ReturnDocument
 from db import db
 
 
-async def next_invoice_number(owner_id: str, on_date: datetime) -> str:
+async def next_invoice_number(owner_id: str, on_date: datetime, namespace: str = "student") -> str:
     """Atomically allocate the next sequential invoice number for the day, as
     yyyyMMddNN (NN wraps 00-99 — plenty for a single-teacher studio's daily
     volume). Stored on the invoice at creation so it never changes on
-    re-render, unlike a number computed fresh from 'now' each time."""
+    re-render, unlike a number computed fresh from 'now' each time.
+
+    `namespace` keeps separate counters per invoice type (student vs tour)
+    so their numbering sequences don't collide/interleave with each other.
+    """
     day_key = on_date.strftime("%Y%m%d")
     counter = await db.invoice_counters.find_one_and_update(
-        {"_id": f"{owner_id}:{day_key}"},
+        {"_id": f"{owner_id}:{namespace}:{day_key}"},
         {"$inc": {"seq": 1}},
         upsert=True,
         return_document=ReturnDocument.AFTER,

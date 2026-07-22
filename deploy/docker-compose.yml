@@ -47,6 +47,7 @@ services:
       ADMIN_NAME: "${ADMIN_NAME:-Lakshmi}"
       CORS_ORIGINS: "${CORS_ORIGINS:?set in .env.production}"
       APP_URL: "${APP_URL:?set in .env.production}"
+      BACKEND_URL: "${BACKEND_URL:?set in .env.production}"
       APP_NAME: "${APP_NAME:-lakshmi}"
       # Storage: 'local' uses the mounted volume below.
       STORAGE_BACKEND: "local"
