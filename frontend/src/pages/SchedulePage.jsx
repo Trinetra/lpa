@@ -368,7 +368,6 @@ export default function SchedulePage() {
   };
 
   const openNew = (dayIndex) => {
-    setNewBlockDay(dayIndex);
     setEditing({ day_of_week: dayIndex });
   };
 
