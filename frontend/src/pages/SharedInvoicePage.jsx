@@ -36,20 +36,21 @@ export default function SharedInvoicePage() {
   return (
     <div className="min-h-screen py-14 px-6" style={{ background: "var(--bg)" }}>
       <div className="max-w-3xl mx-auto">
-        <header className="flex items-start justify-between mb-10 gap-4 flex-wrap">
+        <header className="flex items-start justify-between mb-10 gap-4 flex-wrap pb-6"
+          style={{ borderBottom: "1px solid var(--border)" }}>
           <div className="flex items-center gap-4">
             {logoUrl && (
               <img src={logoUrl} alt="" data-testid="shared-logo"
-                className="w-16 h-16 object-contain rounded"
+                className="w-14 h-14 object-contain rounded shrink-0"
                 style={{ background: "var(--surface-2)" }} />
             )}
             <div>
-              <div className="uppercase-label mb-1">Invoice from</div>
-              <div className="font-serif-display text-3xl" style={{ color: "var(--primary)" }} data-testid="shared-brand">
+              <div className="uppercase-label mb-1" style={{ color: "var(--primary)" }}>Invoice</div>
+              <div className="font-serif-display text-3xl" data-testid="shared-brand">
                 {brandName}
               </div>
               {studio.studio_name && inv.teacher_name && studio.studio_name !== inv.teacher_name && (
-                <div className="text-sm" style={{ color: "var(--text-muted)" }}>with {inv.teacher_name}</div>
+                <div className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>{inv.teacher_name} — Dance Classes</div>
               )}
             </div>
           </div>

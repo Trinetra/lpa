@@ -17,168 +17,195 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-_PDF_ACCENT = colors.HexColor("#D48464")
-_PDF_MUTED = colors.HexColor("#666666")
-_PDF_HEADER_BG = colors.HexColor("#F5E6D3")
-_PDF_TEXT_DARK = colors.HexColor("#1A1816")
-_PDF_GRID = colors.HexColor("#DDDDDD")
-_PDF_DUE = colors.HexColor("#B85C5C")
-_PDF_RULE = colors.HexColor("#888888")
+# Warm, terracotta-biased palette — matches the studio's own brand accent
+# rather than a generic invoice grey/blue scheme.
+_ACCENT = colors.HexColor("#C97B56")       # terracotta — the one accent color
+_ACCENT_SOFT = colors.HexColor("#F3E4D8")  # tinted fill for the header band
+_INK = colors.HexColor("#2A241F")          # warm near-black for body text
+_LABEL = colors.HexColor("#96877A")        # warm grey for eyebrows/labels
+_RULE = colors.HexColor("#E7DACB")         # warm hairline, not blue-grey
+_ROW_TINT = colors.HexColor("#FAF6F1")     # zebra stripe, barely-there
+_DUE = colors.HexColor("#B14B3F")          # balance-due red, warm-shifted
+_PAID = colors.HexColor("#5C7A5E")         # settled/paid green, warm-shifted
+
+_PAGE_W = 174 * mm  # A4 width minus 18mm margins each side
 
 
-def _pdf_styles():
+def _styles():
     base = getSampleStyleSheet()
     return {
-        "title": ParagraphStyle("t", parent=base["Title"], fontSize=22, textColor=_PDF_ACCENT),
-        "label": ParagraphStyle("l", parent=base["Normal"], fontSize=9, textColor=_PDF_MUTED),
-        "body": base["Normal"],
+        "eyebrow": ParagraphStyle(
+            "eyebrow", parent=base["Normal"], fontName="Helvetica-Bold",
+            fontSize=9, textColor=_ACCENT, leading=11,
+        ),
+        "studio": ParagraphStyle(
+            "studio", parent=base["Title"], fontName="Times-Bold",
+            fontSize=21, leading=24, textColor=_INK, spaceAfter=0,
+        ),
+        "tagline": ParagraphStyle(
+            "tagline", parent=base["Normal"], fontName="Helvetica",
+            fontSize=9.5, textColor=_LABEL, leading=12,
+        ),
+        "label": ParagraphStyle(
+            "label", parent=base["Normal"], fontName="Helvetica",
+            fontSize=8.5, textColor=_LABEL, leading=11,
+        ),
+        "value": ParagraphStyle(
+            "value", parent=base["Normal"], fontName="Helvetica-Bold",
+            fontSize=10, textColor=_INK, leading=13,
+        ),
+        "sectionHead": ParagraphStyle(
+            "sectionHead", parent=base["Normal"], fontName="Helvetica-Bold",
+            fontSize=9.5, textColor=_INK, leading=12,
+        ),
+        "footer": ParagraphStyle(
+            "footer", parent=base["Normal"], fontName="Helvetica-Oblique",
+            fontSize=8.5, textColor=_LABEL, leading=11,
+        ),
     }
 
 
-def _pdf_header(styles, teacher_name: str, studio_name: Optional[str] = None,
-                logo_bytes: Optional[bytes] = None):
-    els = []
-
-    # Logo + studio name side by side, with "Invoice" as a small label above
-    # the studio name rather than a competing headline — reads as one
-    # letterhead block instead of two stacked, disconnected titles.
-    label = Paragraph("INVOICE", ParagraphStyle(
-        "inv-label", parent=styles["label"], fontSize=10, textColor=_PDF_ACCENT,
-        leading=12, spaceAfter=1,
-    ))
-    name_style = ParagraphStyle(
-        "s", parent=styles["title"], fontSize=20, leading=23,
-        textColor=_PDF_TEXT_DARK, spaceAfter=0,
-    )
-    name_para = Paragraph(studio_name, name_style) if studio_name else None
-    teacher_para = Paragraph(f"{teacher_name} — Dance Classes", styles["label"])
-
+def _letterhead(styles, teacher_name: str, studio_name: Optional[str] = None,
+                logo_bytes: Optional[bytes] = None, doc_label: str = "Invoice"):
+    """Logo + studio identity as one cohesive block, with a right-aligned
+    document-type eyebrow. Reused by both the class invoice and (in future)
+    other document types generated for the studio."""
     logo_cell = None
     if logo_bytes:
         try:
             img = RLImage(io.BytesIO(logo_bytes))
             ratio = (img.imageWidth or 1) / (img.imageHeight or 1)
-            img.drawHeight = 16 * mm
-            img.drawWidth = 16 * mm * ratio
+            img.drawHeight = 17 * mm
+            img.drawWidth = 17 * mm * ratio
             logo_cell = img
         except Exception:
             logo_cell = None
 
-    text_cell = [label]
-    if name_para:
-        text_cell.append(name_para)
+    identity_lines = []
+    if studio_name:
+        identity_lines.append(Paragraph(studio_name.upper(), styles["studio"]))
+        identity_lines.append(Paragraph(f"{teacher_name} · Dance", styles["tagline"]))
     else:
-        # No studio name set — "Invoice" alone still needs to read as a
-        # proper headline rather than a small eyebrow label with nothing
-        # under it.
-        text_cell[-1] = Paragraph("Invoice", styles["title"])
-    text_cell.append(Spacer(1, 1.5 * mm))
-    text_cell.append(teacher_para)
+        identity_lines.append(Paragraph(teacher_name, styles["studio"]))
+        identity_lines.append(Paragraph("Dance Classes", styles["tagline"]))
 
+    left_cell = [Paragraph(doc_label.upper(), styles["eyebrow"]), Spacer(1, 2 * mm)]
     if logo_cell:
-        header_table = Table(
-            [[logo_cell, text_cell]],
-            colWidths=[20 * mm, 140 * mm],
-        )
-        header_table.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (0, 0), 0),
-            ("LEFTPADDING", (1, 0), (1, 0), 6 * mm),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-            ("TOPPADDING", (0, 0), (-1, -1), 0),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-        ]))
-        els.append(header_table)
-    else:
-        els.extend(text_cell)
+        left_cell.append(logo_cell)
 
-    els.append(Spacer(1, 3 * mm))
-    els.append(Table([[""]], colWidths=[174 * mm], rowHeights=[0.6],
-                      style=TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.6, _PDF_RULE)])))
-    els.append(Spacer(1, 6 * mm))
+    right_cell = identity_lines
+
+    header = Table([[left_cell, right_cell]], colWidths=[28 * mm, _PAGE_W - 28 * mm])
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    els = [header, Spacer(1, 5 * mm)]
+    els.append(Table([[""]], colWidths=[_PAGE_W], rowHeights=[1.1],
+                      style=TableStyle([("LINEBELOW", (0, 0), (-1, -1), 1.1, _ACCENT)])))
+    els.append(Spacer(1, 7 * mm))
     return els
 
 
-def _pdf_meta_table(student: dict, start: Optional[str], end: Optional[str]):
-    now = datetime.now(timezone.utc)
-    rows = [
-        ["Invoice #", f"INV-{now.strftime('%Y%m%d%H%M%S')}"],
-        ["Date", now.strftime("%d %b %Y")],
-        ["Billed to", student.get("name", "")],
-        ["Contact", f"{student.get('email','') or ''} {student.get('phone','') or ''}"],
-        ["Period", f"{start or 'All time'} to {end or 'Today'}"],
-    ]
-    t = Table(rows, colWidths=[35 * mm, 130 * mm])
-    t.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#888888")),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    return t
-
-
-def _pdf_classes_table(classes: list) -> Table:
-    rows = [["Date", "Hours", "Rate (INR/hr)", "Amount (INR)", "Notes"]]
-    for c in classes:
-        rows.append([
-            c.get("class_date", ""),
-            f"{c.get('hours', 0)}",
-            f"{c.get('rate', 0)}",
-            f"{c.get('amount', 0)}",
-            c.get("notes") or "",
+def _meta_card(rows: list) -> Table:
+    """A compact two-column info card (label left, value right per row),
+    with a soft filled background so it reads as a distinct block rather
+    than loose text floating on the page."""
+    cells = []
+    for label, value in rows:
+        cells.append([
+            Paragraph(label.upper(), ParagraphStyle(
+                "mc-label", fontName="Helvetica", fontSize=8, textColor=_LABEL,
+                leading=10,
+            )),
+            Paragraph(value, ParagraphStyle(
+                "mc-value", fontName="Helvetica-Bold", fontSize=10, textColor=_INK, leading=13,
+            )),
         ])
-    tbl = Table(rows, colWidths=[28 * mm, 18 * mm, 30 * mm, 30 * mm, 60 * mm], repeatRows=1)
+    tbl = Table(cells, colWidths=[32 * mm, _PAGE_W - 32 * mm])
     tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), _PDF_HEADER_BG),
-        ("TEXTCOLOR", (0, 0), (-1, 0), _PDF_TEXT_DARK),
+        ("BACKGROUND", (0, 0), (-1, -1), _ACCENT_SOFT),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+        ("LEFTPADDING", (0, 0), (0, -1), 6 * mm),
+        ("LEFTPADDING", (1, 0), (1, -1), 3 * mm),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6 * mm),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    return tbl
+
+
+def _line_items_table(header_row: list, data_rows: list, col_widths: list,
+                       numeric_cols: list) -> Table:
+    """Shared table chrome: accent header, zebra striping, right-aligned
+    numeric columns, warm hairline grid instead of a heavy black box."""
+    rows = [header_row] + data_rows
+    tbl = Table(rows, colWidths=col_widths, repeatRows=1)
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), _ACCENT),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.25, _PDF_GRID),
-        ("ALIGN", (1, 1), (3, -1), "RIGHT"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    return tbl
-
-
-def _pdf_payments_table(payments: list) -> Table:
-    rows = [["Date", "Method", "Amount (INR)", "Notes"]]
-    for p in payments:
-        rows.append([
-            p.get("paid_on", ""),
-            p.get("method") or "-",
-            f"{p.get('amount', 0)}",
-            p.get("notes") or "",
-        ])
-    tbl = Table(rows, colWidths=[28 * mm, 32 * mm, 30 * mm, 76 * mm], repeatRows=1)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), _PDF_HEADER_BG),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.25, _PDF_GRID),
-        ("ALIGN", (2, 1), (2, -1), "RIGHT"),
-    ]))
-    return tbl
-
-
-def _pdf_summary_table(summary: dict) -> Table:
-    rows = [
-        ["Total billed", f"INR {summary.get('total_billed', 0)}"],
-        ["Total paid", f"INR {summary.get('total_paid', 0)}"],
-        ["Balance due", f"INR {summary.get('balance_due', 0)}"],
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("TEXTCOLOR", (0, 1), (-1, -1), _INK),
+        ("LINEBELOW", (0, 0), (-1, 0), 0, _ACCENT),
+        ("LINEBELOW", (0, 1), (-1, -2), 0.4, _RULE),
+        ("TOPPADDING", (0, 0), (-1, -1), 5.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4 * mm),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4 * mm),
     ]
-    tbl = Table(rows, colWidths=[60 * mm, 40 * mm], hAlign="RIGHT")
-    tbl.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("FONTNAME", (0, 2), (-1, 2), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 11),
-        ("TEXTCOLOR", (0, 2), (-1, 2), _PDF_DUE),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("LINEABOVE", (0, 2), (-1, 2), 0.6, _PDF_RULE),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-    ]))
+    for col in numeric_cols:
+        style.append(("ALIGN", (col, 0), (col, -1), "RIGHT"))
+    for i in range(1, len(rows)):
+        if (i - 1) % 2 == 1:
+            style.append(("BACKGROUND", (0, i), (-1, i), _ROW_TINT))
+    tbl.setStyle(TableStyle(style))
     return tbl
+
+
+def _summary_card(rows: list, emphasis_index: int, emphasis_color) -> Table:
+    """Totals as a self-contained card with a filled band under the final
+    (emphasized) row, so 'balance due' reads as the answer, not another
+    line in a list."""
+    cells = [[Paragraph(label, ParagraphStyle(
+                  "sc-label", fontName="Helvetica", fontSize=10, textColor=_LABEL, leading=13)),
+              Paragraph(value, ParagraphStyle(
+                  "sc-value", fontName="Helvetica", fontSize=10.5, textColor=_INK,
+                  leading=13, alignment=2))]
+             for label, value in rows]
+    emph_label, emph_value = rows[emphasis_index]
+    cells[emphasis_index] = [
+        Paragraph(emph_label, ParagraphStyle(
+            "sc-elabel", fontName="Helvetica-Bold", fontSize=11, textColor=colors.white, leading=14)),
+        Paragraph(emph_value, ParagraphStyle(
+            "sc-evalue", fontName="Helvetica-Bold", fontSize=13, textColor=colors.white,
+            leading=16, alignment=2)),
+    ]
+    tbl = Table(cells, colWidths=[60 * mm, 40 * mm], hAlign="RIGHT")
+    style = [
+        ("TOPPADDING", (0, 0), (-1, -2), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -2), 2.5),
+        ("TOPPADDING", (0, emphasis_index), (-1, emphasis_index), 5),
+        ("BOTTOMPADDING", (0, emphasis_index), (-1, emphasis_index), 5),
+        ("BACKGROUND", (0, emphasis_index), (-1, emphasis_index), emphasis_color),
+        ("LEFTPADDING", (0, emphasis_index), (0, emphasis_index), 4 * mm),
+        ("RIGHTPADDING", (0, emphasis_index), (-1, emphasis_index), 4 * mm),
+        ("LINEABOVE", (0, emphasis_index), (-1, emphasis_index), 0.4, _RULE),
+    ]
+    tbl.setStyle(TableStyle(style))
+    return tbl
+
+
+def _pdf_styles():
+    """Back-compat shim for the old style dict shape some callers may still
+    reference; new code should use _styles()."""
+    return _styles()
 
 
 def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
@@ -186,27 +213,66 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
                          end: Optional[str], studio_name: Optional[str] = None,
                          logo_bytes: Optional[bytes] = None,
                          studio_contact: Optional[dict] = None) -> bytes:
-    styles = _pdf_styles()
+    styles = _styles()
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             leftMargin=18 * mm, rightMargin=18 * mm,
-                            topMargin=18 * mm, bottomMargin=18 * mm)
+                            topMargin=16 * mm, bottomMargin=16 * mm)
     story = []
-    story.extend(_pdf_header(styles, teacher_name, studio_name, logo_bytes))
-    story.append(_pdf_meta_table(student, start, end))
+    story.extend(_letterhead(styles, teacher_name, studio_name, logo_bytes, doc_label="Invoice"))
+
+    now = datetime.now(timezone.utc)
+    contact_line = " · ".join(filter(None, [student.get("email"), student.get("phone")]))
+    story.append(_meta_card([
+        ("Invoice #", f"INV-{now.strftime('%Y%m%d%H%M%S')}"),
+        ("Date", now.strftime("%d %b %Y")),
+        ("Billed to", student.get("name", "")),
+        ("Contact", contact_line or "—"),
+        ("Period", f"{start or 'All time'} – {end or 'Today'}"),
+    ]))
     story.append(Spacer(1, 8 * mm))
-    story.append(Paragraph("<b>Classes</b>", styles["body"]))
-    story.append(Spacer(1, 3 * mm))
-    story.append(_pdf_classes_table(classes))
-    story.append(Spacer(1, 6 * mm))
+
+    story.append(Paragraph("CLASSES", styles["sectionHead"]))
+    story.append(Spacer(1, 2.5 * mm))
+    class_rows = [[
+        c.get("class_date", ""), f"{c.get('hours', 0)}", f"{c.get('rate', 0)}",
+        f"{c.get('amount', 0)}", c.get("notes") or "",
+    ] for c in classes]
+    story.append(_line_items_table(
+        ["Date", "Hours", "Rate (INR/hr)", "Amount (INR)", "Notes"],
+        class_rows, [26 * mm, 18 * mm, 32 * mm, 32 * mm, _PAGE_W - 108 * mm],
+        numeric_cols=[1, 2, 3],
+    ))
+    story.append(Spacer(1, 7 * mm))
+
     if payments:
-        story.append(Paragraph("<b>Payments Received</b>", styles["body"]))
-        story.append(Spacer(1, 3 * mm))
-        story.append(_pdf_payments_table(payments))
-        story.append(Spacer(1, 6 * mm))
-    story.append(_pdf_summary_table(summary))
-    story.append(Spacer(1, 6 * mm))
-    if studio_contact and summary.get("balance_due", 0) > 0:
+        story.append(Paragraph("PAYMENTS RECEIVED", styles["sectionHead"]))
+        story.append(Spacer(1, 2.5 * mm))
+        pay_rows = [[
+            p.get("paid_on", ""), p.get("method") or "—", f"{p.get('amount', 0)}", p.get("notes") or "",
+        ] for p in payments]
+        story.append(_line_items_table(
+            ["Date", "Method", "Amount (INR)", "Notes"],
+            pay_rows, [28 * mm, 34 * mm, 32 * mm, _PAGE_W - 94 * mm],
+            numeric_cols=[2],
+        ))
+        story.append(Spacer(1, 7 * mm))
+
+    balance_due = summary.get("balance_due", 0)
+    is_settled = balance_due <= 0
+    story.append(_summary_card(
+        [
+            ("Total billed", f"INR {summary.get('total_billed', 0)}"),
+            ("Total paid", f"INR {summary.get('total_paid', 0)}"),
+            ("Balance settled" if is_settled else "Balance due",
+             f"INR {abs(balance_due)}"),
+        ],
+        emphasis_index=2,
+        emphasis_color=_PAID if is_settled else _DUE,
+    ))
+    story.append(Spacer(1, 7 * mm))
+
+    if studio_contact and balance_due > 0:
         contact_bits = []
         if studio_contact.get("contact_upi"):
             contact_bits.append(f"UPI: <b>{studio_contact['contact_upi']}</b>")
@@ -215,64 +281,48 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
         if studio_contact.get("contact_email"):
             contact_bits.append(f"Email: {studio_contact['contact_email']}")
         if contact_bits:
-            story.append(Paragraph(
-                "<b>Pay to:</b> " + " · ".join(contact_bits), styles["label"]))
+            story.append(Paragraph("<b>Pay to:</b> " + " · ".join(contact_bits), styles["label"]))
             story.append(Spacer(1, 4 * mm))
+
     story.append(Paragraph(
-        "<i>Thank you for learning with us. Please remit any balance at your earliest convenience.</i>",
-        styles["label"]))
+        "Thank you for learning with us. Please remit any balance at your earliest convenience.",
+        styles["footer"]))
     doc.build(story)
     buf.seek(0)
     return buf.read()
 
 
 def generate_tour_expense_pdf(tour: dict, expenses: list) -> bytes:
-    styles = _pdf_styles()
+    styles = _styles()
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
                             leftMargin=18 * mm, rightMargin=18 * mm,
-                            topMargin=18 * mm, bottomMargin=18 * mm)
+                            topMargin=16 * mm, bottomMargin=16 * mm)
     story = []
-    story.append(Paragraph("Tour Expenses", styles["title"]))
-    story.append(Paragraph(f"<b>{tour.get('name', '')}</b>", styles["label"]))
-    period = f"{tour.get('start_date', '')} — {tour.get('end_date', '')}"
-    story.append(Paragraph(period, styles["label"]))
-    story.append(Spacer(1, 8 * mm))
+    story.append(Paragraph("TOUR EXPENSES", styles["eyebrow"]))
+    story.append(Spacer(1, 1.5 * mm))
+    story.append(Paragraph(tour.get("name", ""), styles["studio"]))
+    period = f"{tour.get('start_date', '')} – {tour.get('end_date', '')}"
+    story.append(Paragraph(period, styles["tagline"]))
+    story.append(Spacer(1, 3 * mm))
+    story.append(Table([[""]], colWidths=[_PAGE_W], rowHeights=[1.1],
+                        style=TableStyle([("LINEBELOW", (0, 0), (-1, -1), 1.1, _ACCENT)])))
+    story.append(Spacer(1, 7 * mm))
 
-    rows = [["Date", "Category", "Amount (INR)", "Notes"]]
-    total = 0.0
-    for e in expenses:
-        amount = float(e.get("amount", 0))
-        total += amount
-        rows.append([
-            e.get("expense_date", ""),
-            e.get("category", ""),
-            f"{amount:.2f}",
-            e.get("notes") or "",
-        ])
-    tbl = Table(rows, colWidths=[28 * mm, 40 * mm, 30 * mm, 76 * mm], repeatRows=1)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), _PDF_HEADER_BG),
-        ("TEXTCOLOR", (0, 0), (-1, 0), _PDF_TEXT_DARK),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.25, _PDF_GRID),
-        ("ALIGN", (2, 1), (2, -1), "RIGHT"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    story.append(tbl)
-    story.append(Spacer(1, 6 * mm))
-
-    total_tbl = Table([["Total", f"INR {total:.2f}"]], colWidths=[134 * mm, 40 * mm], hAlign="RIGHT")
-    total_tbl.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 12),
-        ("LINEABOVE", (0, 0), (-1, 0), 0.6, _PDF_RULE),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-    ]))
-    story.append(total_tbl)
+    total = sum(float(e.get("amount", 0)) for e in expenses)
+    rows = [[
+        e.get("expense_date", ""), e.get("category", ""), f"{float(e.get('amount', 0)):.2f}",
+        e.get("notes") or "",
+    ] for e in expenses]
+    story.append(_line_items_table(
+        ["Date", "Category", "Amount (INR)", "Notes"],
+        rows, [28 * mm, 40 * mm, 30 * mm, _PAGE_W - 98 * mm],
+        numeric_cols=[2],
+    ))
+    story.append(Spacer(1, 7 * mm))
+    story.append(_summary_card(
+        [("Total", f"INR {total:.2f}")], emphasis_index=0, emphasis_color=_ACCENT,
+    ))
 
     doc.build(story)
     buf.seek(0)
