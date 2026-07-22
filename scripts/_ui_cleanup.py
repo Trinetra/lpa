@@ -1,6 +1,7 @@
+import os
 import requests
 s = requests.Session()
-BASE = "https://instructor-pay.preview.emergentagent.com/api"
+BASE = os.environ.get("BASE_URL", "https://lpa.saisanathana.com") + "/api"
 s.post(f"{BASE}/auth/login", json={"email":"lpathreya@gmail.com","password":"prashanth"})
 for st in s.get(f"{BASE}/students").json():
     if st["name"].startswith("TEST_"):

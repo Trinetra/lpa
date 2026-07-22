@@ -2,7 +2,7 @@
 import os
 import requests
 
-BASE = os.environ.get("BASE_URL", "https://instructor-pay.preview.emergentagent.com").rstrip("/")
+BASE = os.environ.get("BASE_URL", "https://lpa.saisanathana.com").rstrip("/")
 API = f"{BASE}/api"
 EMAIL = "lpathreya@gmail.com"
 PASSWORD = "prashanth"

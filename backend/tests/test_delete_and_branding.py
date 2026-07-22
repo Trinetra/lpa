@@ -9,7 +9,7 @@ import time
 import requests
 import pytest
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://instructor-pay.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://lpa.saisanathana.com").rstrip("/")
 API = f"{BASE_URL}/api"
 EMAIL = "lpathreya@gmail.com"
 PASSWORD = "prashanth"

@@ -7,8 +7,7 @@ Two-origin production setup:
 - **Frontend** — Netlify, built from GitHub.
   URL: `https://<your-site>.netlify.app`
 
-Everything below assumes you've already pushed the repo to GitHub via
-Emergent's "Save to GitHub" button.
+Everything below assumes the repo is already on GitHub.
 
 ---
 

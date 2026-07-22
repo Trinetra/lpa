@@ -1,8 +1,105 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
-import { KeyRound, Upload, Save, Loader2 } from "lucide-react";
+import { KeyRound, Upload, Save, Loader2, CalendarClock, Link2, Unlink } from "lucide-react";
 import { toast } from "sonner";
+
+function CalendarConnectCard() {
+  const [status, setStatus] = useState(null);
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const load = () => {
+    api.get("/calendar/status").then((r) => setStatus(r.data)).catch(() => {});
+  };
+
+  useEffect(() => {
+    load();
+    if (searchParams.get("calendar") === "connected") {
+      toast.success("Google Calendar connected");
+      searchParams.delete("calendar");
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const connect = async () => {
+    setConnecting(true);
+    try {
+      const { data } = await api.get("/calendar/connect");
+      window.location.href = data.url;
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Couldn't start Google connection");
+      setConnecting(false);
+    }
+  };
+
+  const disconnect = async () => {
+    if (!window.confirm("Disconnect Google Calendar? Existing events will stay on your calendar but stop updating.")) return;
+    setDisconnecting(true);
+    try {
+      await api.post("/calendar/disconnect");
+      toast.success("Disconnected");
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Failed");
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  if (!status) return null;
+
+  return (
+    <div data-testid="calendar-connect-card" className="surface p-6">
+      <div className="flex items-center gap-2 mb-1">
+        <CalendarClock size={14} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
+        <div className="uppercase-label">Integrations</div>
+      </div>
+      <h2 className="font-serif-display text-2xl mb-2">Google Calendar</h2>
+
+      {!status.configured && (
+        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+          Google Calendar sync isn't set up on this server yet.
+        </p>
+      )}
+
+      {status.configured && (
+        <>
+          <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
+            {status.connected
+              ? "Your weekly schedule syncs to a dedicated \"Lakshmi Studio Ledger — Classes\" calendar, with reminders 30 minutes before each class."
+              : "Connect your Google account to automatically keep a calendar in sync with your weekly schedule."}
+          </p>
+          {status.connected ? (
+            <button
+              type="button"
+              onClick={disconnect}
+              disabled={disconnecting}
+              data-testid="calendar-disconnect-btn"
+              className="btn-ghost flex items-center gap-2"
+              style={{ color: "var(--error)" }}
+            >
+              <Unlink size={16} /> {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={connect}
+              disabled={connecting}
+              data-testid="calendar-connect-btn"
+              className="btn-pill flex items-center gap-2"
+            >
+              <Link2 size={16} /> {connecting ? "Redirecting…" : "Connect Google Calendar"}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 function ChangePasswordCard() {
   const [current, setCurrent] = useState("");
@@ -218,6 +315,7 @@ export default function SettingsPage() {
         </p>
       </header>
       {profile && <StudioProfileCard profile={profile} onSaved={setProfile} />}
+      <CalendarConnectCard />
       <ChangePasswordCard />
     </div>
   );

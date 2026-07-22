@@ -74,8 +74,7 @@ cd <repo-root>
 [ -f netlify.toml ] || { echo "FAIL: netlify.toml missing"; exit 1; }
 
 cd frontend
-# CI=false matches the Emergent preview's build; suppresses treating CRA
-# warnings as errors.
+# CI=false suppresses treating CRA warnings as errors.
 CI=false REACT_APP_BACKEND_URL="$BACKEND_URL" yarn install --frozen-lockfile
 CI=false REACT_APP_BACKEND_URL="$BACKEND_URL" yarn build
 

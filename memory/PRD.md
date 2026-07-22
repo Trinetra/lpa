@@ -12,7 +12,7 @@ Client is a dance teacher with ~10 online students. She has no way to bill stude
 - **Auth**: JWT-based custom login
 - **Currency**: INR (₹)
 - **Payments**: Manual entry + shareable PDF invoices (Stripe/Razorpay deferred to later phase)
-- **Photos**: Yes, via Emergent Object Storage
+- **Photos**: Yes, local filesystem storage (self-hosted)
 - **Calendar**: No — simple class logging only
 
 ## Personas
@@ -20,7 +20,7 @@ Client is a dance teacher with ~10 online students. She has no way to bill stude
 2. **Student (recipient)** — receives shareable invoice link/PDF (public, read-only).
 
 ## Architecture
-- **Backend**: FastAPI + MongoDB (motor). JWT (bcrypt-hashed passwords, httpOnly cookies + Bearer fallback). ReportLab for PDF generation. Emergent Object Storage for photos.
+- **Backend**: FastAPI + MongoDB (motor). JWT (bcrypt-hashed passwords, httpOnly cookies + Bearer fallback). ReportLab for PDF generation. Local filesystem storage for photos.
   - `server.py` — route handlers, auth, models (1096 LOC after P4 refactor)
   - `db.py` — lazy Motor client (services importable in isolation)
   - `services/pdf.py` — invoice PDF generation (pure)

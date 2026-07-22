@@ -4,7 +4,7 @@
   command = "yarn install --frozen-lockfile && yarn build"
 
 [build.environment]
-  # CI=false so warnings don't fail the CRA build (matches Emergent preview).
+  # CI=false so warnings don't fail the CRA build.
   CI = "false"
   NODE_VERSION = "20"
 

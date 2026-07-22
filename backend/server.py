@@ -19,7 +19,7 @@ import secrets
 from collections import defaultdict
 from bson import ObjectId
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends, Query, Header
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from starlette.middleware.cors import CORSMiddleware
 
@@ -28,20 +28,19 @@ from services import pdf as pdf_service
 from services import email as email_service
 from services import invoices as invoices_service
 from services import storage as storage_service
+from services import calendar as calendar_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
 APP_NAME = os.environ.get("APP_NAME", "dance-billing")
-STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"  # legacy — services/storage.py owns this now
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
-# Email-configured flag: true when either the Emergent proxy key OR a direct
-# Resend key is set. services/email.py picks the right transport at call time.
-EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY") or os.environ.get("RESEND_API_KEY")
+# Email-configured flag: true when a Resend key is set. services/email.py
+# picks the right transport at call time.
+EMAIL_KEY = os.environ.get("RESEND_API_KEY")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Lakshmi Studio Ledger")
 
 
-# Legacy shims — delegate to services.storage. Older call sites in the file
-# still reference these names; keeping the shims avoids a wider diff.
+# Thin wrappers delegating to services.storage, kept so call sites throughout
+# this file can use the short names.
 def init_storage():
     return storage_service.init()
 
@@ -82,8 +81,8 @@ def create_refresh_token(user_id: str) -> str:
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
 def set_auth_cookies(response: Response, access: str, refresh: str):
-    # SameSite=None + Secure so cookies work when the app is embedded in the
-    # Emergent preview iframe (different parent origin from the backend).
+    # SameSite=None + Secure so cookies still work across the frontend (Netlify)
+    # and backend (this VPS) being different origins.
     response.set_cookie("access_token", access, httponly=True, secure=True,
                         samesite="none", max_age=8 * 3600, path="/")
     response.set_cookie("refresh_token", refresh, httponly=True, secure=True,
@@ -244,6 +243,7 @@ def ser_schedule_block(doc):
         "student_ids": doc.get("student_ids", []),
         "notes": doc.get("notes"),
         "created_at": doc.get("created_at"),
+        "synced_to_calendar": bool(doc.get("google_event_id")),
     }
 
 # --------------- Auth endpoints -----------------
@@ -1088,6 +1088,14 @@ async def list_schedule(user: dict = Depends(get_current_user)):
         out.append(ser_schedule_block(d))
     return out
 
+async def _student_names(owner_id: str, student_ids: List[str]) -> List[str]:
+    names = []
+    for sid in student_ids:
+        s = await db.students.find_one({"_id": ObjectId(sid), "owner_id": owner_id})
+        if s:
+            names.append(s.get("name") or "Student")
+    return names
+
 @api_router.post("/schedule")
 async def create_schedule_block(body: ScheduleBlockCreate, user: dict = Depends(get_current_user)):
     if not (0 <= body.day_of_week <= 6):
@@ -1100,6 +1108,12 @@ async def create_schedule_block(body: ScheduleBlockCreate, user: dict = Depends(
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     res = await db.schedule_blocks.insert_one(doc)
     doc["_id"] = res.inserted_id
+
+    names = await _student_names(user["_id"], doc["student_ids"])
+    event_id = await calendar_service.sync_block_upsert(user["_id"], doc, names)
+    if event_id:
+        await db.schedule_blocks.update_one({"_id": doc["_id"]}, {"$set": {"google_event_id": event_id}})
+        doc["google_event_id"] = event_id
     return ser_schedule_block(doc)
 
 @api_router.patch("/schedule/{block_id}")
@@ -1120,13 +1134,50 @@ async def update_schedule_block(block_id: str, body: ScheduleBlockUpdate, user: 
 
     await db.schedule_blocks.update_one({"_id": ObjectId(block_id)}, {"$set": updates})
     doc = await db.schedule_blocks.find_one({"_id": ObjectId(block_id)})
+
+    names = await _student_names(user["_id"], doc["student_ids"])
+    event_id = await calendar_service.sync_block_upsert(user["_id"], doc, names)
+    if event_id and event_id != doc.get("google_event_id"):
+        await db.schedule_blocks.update_one({"_id": doc["_id"]}, {"$set": {"google_event_id": event_id}})
+        doc["google_event_id"] = event_id
     return ser_schedule_block(doc)
 
 @api_router.delete("/schedule/{block_id}")
 async def delete_schedule_block(block_id: str, user: dict = Depends(get_current_user)):
-    res = await db.schedule_blocks.delete_one({"_id": ObjectId(block_id), "owner_id": user["_id"]})
-    if res.deleted_count == 0:
+    existing = await db.schedule_blocks.find_one({"_id": ObjectId(block_id), "owner_id": user["_id"]})
+    if not existing:
         raise HTTPException(status_code=404, detail="Schedule block not found")
+    await calendar_service.sync_block_delete(user["_id"], existing.get("google_event_id"))
+    await db.schedule_blocks.delete_one({"_id": ObjectId(block_id), "owner_id": user["_id"]})
+    return {"ok": True}
+
+# --------------- Google Calendar OAuth -----------------
+@api_router.get("/calendar/status")
+async def calendar_status(user: dict = Depends(get_current_user)):
+    full = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    return {
+        "configured": calendar_service.is_configured(),
+        "connected": bool(full and full.get("google_refresh_token")),
+    }
+
+@api_router.get("/calendar/connect")
+async def calendar_connect(user: dict = Depends(get_current_user)):
+    if not calendar_service.is_configured():
+        raise HTTPException(status_code=400, detail="Google Calendar is not configured on this server")
+    # state carries the owner id through Google's redirect so the callback
+    # (which Google calls directly, no auth cookie of ours) knows who connected.
+    url = calendar_service.build_auth_url(state=user["_id"])
+    return {"url": url}
+
+@api_router.get("/calendar/oauth/callback")
+async def calendar_oauth_callback(code: str, state: str):
+    await calendar_service.handle_oauth_callback(owner_id=state, code=code)
+    app_url = os.environ.get("APP_URL", "/")
+    return RedirectResponse(url=f"{app_url}/settings?calendar=connected")
+
+@api_router.post("/calendar/disconnect")
+async def calendar_disconnect(user: dict = Depends(get_current_user)):
+    await calendar_service.disconnect(user["_id"])
     return {"ok": True}
 
 # --------------- App wiring -----------------

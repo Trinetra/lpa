@@ -5,7 +5,7 @@ import sys
 import base64
 import requests
 
-BASE = "https://instructor-pay.preview.emergentagent.com"
+BASE = os.environ.get("BASE_URL", "https://lpa.saisanathana.com")
 API = f"{BASE}/api"
 EMAIL = "lpathreya@gmail.com"
 PASSWORD = "prashanth"
