@@ -394,12 +394,22 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
         qr_img = RLImage(io.BytesIO(qr_bytes))
         qr_img.drawWidth = 26 * mm
         qr_img.drawHeight = 26 * mm
-        qr_cell = [
-            qr_img,
-            Paragraph("Scan to pay via UPI", ParagraphStyle(
-                "qr-caption", parent=styles["footer"], fontSize=7.5, alignment=1)),
-        ]
-        row = Table([[qr_cell, summary_tbl]], colWidths=[40 * mm, _PAGE_W - 40 * mm])
+        qr_caption = Paragraph("Scan to pay via UPI", ParagraphStyle(
+            "qr-caption", parent=styles["footer"], fontSize=7.5, alignment=1))
+        # QR + caption as their own single-column table so the caption
+        # actually centers under the QR image, rather than the whole block
+        # being left-aligned in the outer row (which left-hung the narrower
+        # caption text against the wider image).
+        qr_block = Table([[qr_img], [qr_caption]], colWidths=[26 * mm])
+        qr_block.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (0, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 1), (-1, 1), 1),
+        ]))
+
+        row = Table([[qr_block, summary_tbl]], colWidths=[40 * mm, _PAGE_W - 40 * mm])
         row.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN", (0, 0), (0, 0), "LEFT"),
@@ -412,18 +422,6 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
     else:
         story.append(summary_tbl)
     story.append(Spacer(1, 7 * mm))
-
-    if studio_contact and balance_due > 0:
-        contact_bits = []
-        if studio_contact.get("contact_upi"):
-            contact_bits.append(f"UPI: <b>{studio_contact['contact_upi']}</b>")
-        if studio_contact.get("contact_phone"):
-            contact_bits.append(f"Phone: {studio_contact['contact_phone']}")
-        if studio_contact.get("contact_email"):
-            contact_bits.append(f"Email: {studio_contact['contact_email']}")
-        if contact_bits:
-            story.append(Paragraph("<b>Pay to:</b> " + " · ".join(contact_bits), styles["label"]))
-            story.append(Spacer(1, 4 * mm))
 
     story.append(Paragraph(
         "Thank you for learning with us. Please remit any balance at your earliest convenience.",

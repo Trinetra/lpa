@@ -153,19 +153,11 @@ export default function SharedInvoicePage() {
                   <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Credit balance</span><span>{fmt(Math.abs(balanceDue))}</span></div>
                 )}
                 <div className="flex justify-between gap-6 font-serif-display text-lg mt-2 px-3 py-2 rounded"
-                  style={{ background: hasCredit ? "var(--success)" : (balanceDue > 0 ? "var(--error)" : "var(--success)"), color: "white" }}>
+                  style={{ background: MAROON, color: "white" }}>
                   <span>Final Amount Due</span><span>{fmt(hasCredit ? 0 : balanceDue)}</span>
                 </div>
               </div>
             </div>
-
-            {(studio.contact_upi || studio.contact_phone || studio.contact_email) && balanceDue > 0 && (
-              <div className="text-xs mt-4 pt-4" style={{ borderTop: `1px solid ${RULE}`, color: LABEL }} data-testid="shared-payto">
-                <span className="font-medium" style={{ color: "var(--text)" }}>Pay to: </span>
-                {[studio.contact_upi && `UPI: ${studio.contact_upi}`, studio.contact_phone && `Phone: ${studio.contact_phone}`, studio.contact_email && `Email: ${studio.contact_email}`]
-                  .filter(Boolean).join(" · ")}
-              </div>
-            )}
           </div>
         </div>
 

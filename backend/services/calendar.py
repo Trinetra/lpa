@@ -25,7 +25,8 @@ from db import db
 logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.events",
-          "https://www.googleapis.com/auth/calendar.app.created"]
+          "https://www.googleapis.com/auth/calendar.app.created",
+          "https://www.googleapis.com/auth/drive.file"]
 DEFAULT_CALENDAR_NAME = "Lakshmi's Dance Classes"
 TIMEZONE = "Asia/Kolkata"  # GMT+5:30 — all classes are in India
 
@@ -101,10 +102,13 @@ async def disconnect(owner_id: str) -> None:
     )
 
 
-async def _get_service(owner_id: str):
+async def get_credentials(owner_id: str) -> Optional[Credentials]:
+    """Shared OAuth credentials for any Google API the connected account has
+    granted a scope for (Calendar, Drive, ...) — one refresh_token covers
+    every scope in SCOPES since they're requested together at connect time."""
     user = await db.users.find_one({"_id": ObjectId(owner_id)})
     if not user or not user.get("google_refresh_token"):
-        return None, None
+        return None
     creds = Credentials(
         token=None,
         refresh_token=user["google_refresh_token"],
@@ -114,6 +118,14 @@ async def _get_service(owner_id: str):
         scopes=SCOPES,
     )
     creds.refresh(GoogleAuthRequest())
+    return creds
+
+
+async def _get_service(owner_id: str):
+    creds = await get_credentials(owner_id)
+    if not creds:
+        return None, None
+    user = await db.users.find_one({"_id": ObjectId(owner_id)})
     service = build("calendar", "v3", credentials=creds)
     return service, user["google_calendar_id"]
 
