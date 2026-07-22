@@ -183,6 +183,20 @@ class InvoiceRequest(BaseModel):
     end_date: Optional[str] = None
     include_paid: bool = False
 
+class ScheduleBlockCreate(BaseModel):
+    day_of_week: int  # 0=Monday .. 6=Sunday, matches Python's date.weekday()
+    start_time: str  # "HH:MM", 24h
+    end_time: str    # "HH:MM", 24h
+    student_ids: List[str]
+    notes: Optional[str] = None
+
+class ScheduleBlockUpdate(BaseModel):
+    day_of_week: Optional[int] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    student_ids: Optional[List[str]] = None
+    notes: Optional[str] = None
+
 # --------------- Serializers -----------------
 def ser_student(doc):
     return {
@@ -217,6 +231,17 @@ def ser_payment(doc):
         "amount": doc.get("amount"),
         "paid_on": doc.get("paid_on"),
         "method": doc.get("method"),
+        "notes": doc.get("notes"),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_schedule_block(doc):
+    return {
+        "id": str(doc["_id"]),
+        "day_of_week": doc.get("day_of_week"),
+        "start_time": doc.get("start_time"),
+        "end_time": doc.get("end_time"),
+        "student_ids": doc.get("student_ids", []),
         "notes": doc.get("notes"),
         "created_at": doc.get("created_at"),
     }
@@ -1014,6 +1039,76 @@ async def send_invoice(invoice_id: str, body: SendInvoiceRequest,
     return {"status": "sent", "to": body.to_email, "student": student_name,
             "email_id": result.get("id")}
 
+# --------------- Schedule endpoints -----------------
+def _time_to_minutes(t: str) -> int:
+    h, m = t.split(":")
+    return int(h) * 60 + int(m)
+
+def _blocks_overlap(a_start, a_end, b_start, b_end) -> bool:
+    return a_start < b_end and b_start < a_end
+
+async def _assert_no_overlap(owner_id: str, day_of_week: int, start_time: str,
+                              end_time: str, exclude_id: Optional[str] = None):
+    start_m = _time_to_minutes(start_time)
+    end_m = _time_to_minutes(end_time)
+    if end_m <= start_m:
+        raise HTTPException(status_code=400, detail="end_time must be after start_time")
+    query = {"owner_id": owner_id, "day_of_week": day_of_week}
+    async for b in db.schedule_blocks.find(query):
+        if exclude_id and str(b["_id"]) == exclude_id:
+            continue
+        if _blocks_overlap(start_m, end_m, _time_to_minutes(b["start_time"]), _time_to_minutes(b["end_time"])):
+            raise HTTPException(status_code=409, detail="This overlaps an existing schedule block")
+
+@api_router.get("/schedule")
+async def list_schedule(user: dict = Depends(get_current_user)):
+    cur = db.schedule_blocks.find({"owner_id": user["_id"]}).sort("start_time", 1)
+    out = []
+    async for d in cur:
+        out.append(ser_schedule_block(d))
+    return out
+
+@api_router.post("/schedule")
+async def create_schedule_block(body: ScheduleBlockCreate, user: dict = Depends(get_current_user)):
+    if not (0 <= body.day_of_week <= 6):
+        raise HTTPException(status_code=400, detail="day_of_week must be 0-6")
+    if not body.student_ids:
+        raise HTTPException(status_code=400, detail="student_ids must not be empty")
+    await _assert_no_overlap(user["_id"], body.day_of_week, body.start_time, body.end_time)
+    doc = body.model_dump()
+    doc["owner_id"] = user["_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.schedule_blocks.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_schedule_block(doc)
+
+@api_router.patch("/schedule/{block_id}")
+async def update_schedule_block(block_id: str, body: ScheduleBlockUpdate, user: dict = Depends(get_current_user)):
+    existing = await db.schedule_blocks.find_one({"_id": ObjectId(block_id), "owner_id": user["_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Schedule block not found")
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    if "student_ids" in updates and not updates["student_ids"]:
+        raise HTTPException(status_code=400, detail="student_ids must not be empty")
+
+    day_of_week = updates.get("day_of_week", existing["day_of_week"])
+    start_time = updates.get("start_time", existing["start_time"])
+    end_time = updates.get("end_time", existing["end_time"])
+    await _assert_no_overlap(user["_id"], day_of_week, start_time, end_time, exclude_id=block_id)
+
+    await db.schedule_blocks.update_one({"_id": ObjectId(block_id)}, {"$set": updates})
+    doc = await db.schedule_blocks.find_one({"_id": ObjectId(block_id)})
+    return ser_schedule_block(doc)
+
+@api_router.delete("/schedule/{block_id}")
+async def delete_schedule_block(block_id: str, user: dict = Depends(get_current_user)):
+    res = await db.schedule_blocks.delete_one({"_id": ObjectId(block_id), "owner_id": user["_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Schedule block not found")
+    return {"ok": True}
+
 # --------------- App wiring -----------------
 app.include_router(api_router)
 
@@ -1036,6 +1131,7 @@ async def on_startup():
     await db.invoices.create_index("share_token", unique=True)
     await db.password_reset_tokens.create_index("token", unique=True)
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
+    await db.schedule_blocks.create_index([("owner_id", 1), ("day_of_week", 1)])
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

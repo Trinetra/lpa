@@ -13,6 +13,7 @@ import {
   Sun,
   Moon,
   LogOut,
+  CalendarClock,
 } from "lucide-react";
 
 export default function AppLayout() {
@@ -28,6 +29,7 @@ export default function AppLayout() {
   const links = [
     { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, tid: "nav-dashboard" },
     { to: "/students", label: "Students", icon: Users, tid: "nav-students" },
+    { to: "/schedule", label: "Schedule", icon: CalendarClock, tid: "nav-schedule" },
     { to: "/classes", label: "Classes", icon: BookOpenCheck, tid: "nav-classes" },
     { to: "/payments", label: "Payments", icon: Wallet, tid: "nav-payments" },
     { to: "/invoices", label: "Invoices", icon: FileText, tid: "nav-invoices" },

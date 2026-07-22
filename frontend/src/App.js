@@ -9,6 +9,7 @@ import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
 import StudentsPage from "@/pages/StudentsPage";
 import StudentDetailPage from "@/pages/StudentDetailPage";
+import SchedulePage from "@/pages/SchedulePage";
 import ClassesPage from "@/pages/ClassesPage";
 import PaymentsPage from "@/pages/PaymentsPage";
 import InvoicesPage from "@/pages/InvoicesPage";
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/students/:id" element={<StudentDetailPage />} />
+        <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/classes" element={<ClassesPage />} />
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/invoices" element={<InvoicesPage />} />
