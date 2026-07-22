@@ -16,6 +16,7 @@ import {
   Moon,
   LogOut,
   CalendarClock,
+  Plane,
 } from "lucide-react";
 
 export default function AppLayout() {
@@ -42,6 +43,7 @@ export default function AppLayout() {
     { to: "/classes", label: "Classes", icon: BookOpenCheck, tid: "nav-classes" },
     { to: "/payments", label: "Payments", icon: Wallet, tid: "nav-payments" },
     { to: "/invoices", label: "Invoices", icon: FileText, tid: "nav-invoices" },
+    { to: "/tours", label: "Tours", icon: Plane, tid: "nav-tours" },
     { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
     { to: "/settings", label: "Settings", icon: Settings, tid: "nav-settings" },
   ];

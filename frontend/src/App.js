@@ -17,6 +17,9 @@ import ChartsPage from "@/pages/ChartsPage";
 import SettingsPage from "@/pages/SettingsPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import SharedInvoicePage from "@/pages/SharedInvoicePage";
+import ToursPage from "@/pages/ToursPage";
+import TourDetailPage from "@/pages/TourDetailPage";
+import SharedTourPage from "@/pages/SharedTourPage";
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -37,6 +40,7 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/invoice/:token" element={<SharedInvoicePage />} />
+      <Route path="/tour/:token" element={<SharedTourPage />} />
       <Route
         element={
           <ProtectedRoute>
@@ -52,6 +56,8 @@ function AppRoutes() {
         <Route path="/classes" element={<ClassesPage />} />
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/invoices" element={<InvoicesPage />} />
+        <Route path="/tours" element={<ToursPage />} />
+        <Route path="/tours/:id" element={<TourDetailPage />} />
         <Route path="/charts" element={<ChartsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
