@@ -2,8 +2,70 @@ import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
-import { KeyRound, Upload, Save, Loader2, CalendarClock, Link2, Unlink, CheckCircle2 } from "lucide-react";
+import { KeyRound, Upload, Save, Loader2, CalendarClock, Link2, Unlink, CheckCircle2, HardDriveDownload } from "lucide-react";
 import { toast } from "sonner";
+
+function BackupCard() {
+  const [status, setStatus] = useState(null);
+  const [running, setRunning] = useState(false);
+
+  const load = () => {
+    api.get("/backup/status").then((r) => setStatus(r.data)).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+
+  const runNow = async () => {
+    setRunning(true);
+    try {
+      const { data } = await api.post("/backup/run");
+      toast.success(`Backup uploaded: ${data.filename}`);
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Backup failed");
+      load();
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  if (!status) return null;
+
+  return (
+    <div data-testid="backup-card" className="surface p-6">
+      <div className="flex items-center gap-2 mb-1">
+        <HardDriveDownload size={14} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
+        <div className="uppercase-label">Data safety</div>
+      </div>
+      <h2 className="font-serif-display text-2xl mb-2">Automatic backups</h2>
+      <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
+        {status.connected
+          ? "A daily backup (a restorable database archive plus CSV exports of every record) is uploaded to a \"Backups\" folder in your connected Google Drive."
+          : "Connect Google Calendar above to enable automatic backups — the same connection is used for both."}
+      </p>
+
+      {status.last_backup_at && (
+        <div className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
+          Last attempt: {new Date(status.last_backup_at).toLocaleString("en-IN")} —{" "}
+          <span style={{ color: status.last_backup_ok ? "var(--success)" : "var(--error)" }}>
+            {status.last_backup_ok ? "succeeded" : "failed"}
+          </span>
+        </div>
+      )}
+
+      {status.connected && (
+        <button
+          type="button"
+          onClick={runNow}
+          disabled={running}
+          data-testid="backup-run-btn"
+          className="btn-pill flex items-center gap-2"
+        >
+          <HardDriveDownload size={16} /> {running ? "Backing up…" : "Back up now"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 function CalendarConnectCard() {
   const [status, setStatus] = useState(null);
@@ -422,6 +484,7 @@ export default function SettingsPage() {
       </header>
       {profile && <StudioProfileCard profile={profile} onSaved={setProfile} />}
       <CalendarConnectCard />
+      <BackupCard />
       <ChangePasswordCard />
     </div>
   );

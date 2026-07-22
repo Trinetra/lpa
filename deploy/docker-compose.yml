@@ -60,6 +60,9 @@ services:
       GOOGLE_OAUTH_CLIENT_ID: "${GOOGLE_OAUTH_CLIENT_ID:-}"
       GOOGLE_OAUTH_CLIENT_SECRET: "${GOOGLE_OAUTH_CLIENT_SECRET:-}"
       GOOGLE_OAUTH_REDIRECT_URI: "${GOOGLE_OAUTH_REDIRECT_URI:-}"
+      # Shared secret for the host cron job that triggers the daily backup
+      # (no user session exists in a cron context, so this is the auth).
+      BACKUP_CRON_SECRET: "${BACKUP_CRON_SECRET:-}"
     volumes:
       - ./data/uploads:/data/uploads
     ports:

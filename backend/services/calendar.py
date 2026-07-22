@@ -24,9 +24,15 @@ from db import db
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.events",
-          "https://www.googleapis.com/auth/calendar.app.created",
-          "https://www.googleapis.com/auth/drive.file"]
+CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.events",
+                    "https://www.googleapis.com/auth/calendar.app.created"]
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+# Requested together at connect time (the OAuth consent screen). Existing
+# connections only actually hold CALENDAR_SCOPES until she reconnects —
+# Credentials.refresh() validates the *requested* scope list against what
+# was granted, so anything using an old token must request only the
+# subset it actually has, not this full list.
+SCOPES = CALENDAR_SCOPES + DRIVE_SCOPES
 DEFAULT_CALENDAR_NAME = "Lakshmi's Dance Classes"
 TIMEZONE = "Asia/Kolkata"  # GMT+5:30 — all classes are in India
 
@@ -102,10 +108,13 @@ async def disconnect(owner_id: str) -> None:
     )
 
 
-async def get_credentials(owner_id: str) -> Optional[Credentials]:
-    """Shared OAuth credentials for any Google API the connected account has
-    granted a scope for (Calendar, Drive, ...) — one refresh_token covers
-    every scope in SCOPES since they're requested together at connect time."""
+async def get_credentials(owner_id: str, scopes: Optional[list] = None) -> Optional[Credentials]:
+    """OAuth credentials for the given scopes (defaults to the full SCOPES
+    list). Pass the narrower CALENDAR_SCOPES explicitly for Calendar
+    operations so accounts that connected before Drive access was added
+    keep working without needing to reconnect — Credentials.refresh()
+    fails if the requested scopes exceed what the stored token actually
+    grants, even for scopes the token does have."""
     user = await db.users.find_one({"_id": ObjectId(owner_id)})
     if not user or not user.get("google_refresh_token"):
         return None
@@ -115,14 +124,14 @@ async def get_credentials(owner_id: str) -> Optional[Credentials]:
         token_uri="https://oauth2.googleapis.com/token",
         client_id=os.environ["GOOGLE_OAUTH_CLIENT_ID"],
         client_secret=os.environ["GOOGLE_OAUTH_CLIENT_SECRET"],
-        scopes=SCOPES,
+        scopes=scopes or SCOPES,
     )
     creds.refresh(GoogleAuthRequest())
     return creds
 
 
 async def _get_service(owner_id: str):
-    creds = await get_credentials(owner_id)
+    creds = await get_credentials(owner_id, scopes=CALENDAR_SCOPES)
     if not creds:
         return None, None
     user = await db.users.find_one({"_id": ObjectId(owner_id)})

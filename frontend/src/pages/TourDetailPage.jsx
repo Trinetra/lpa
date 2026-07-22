@@ -493,6 +493,7 @@ function InvoiceForm({ tourId, invoice, contacts, onClose, onSaved }) {
   const [contactId, setContactId] = useState(invoice.contact_id || "");
   const [recipientName, setRecipientName] = useState(invoice.recipient_name || "");
   const [recipientEmail, setRecipientEmail] = useState(invoice.recipient_email || "");
+  const [recipientPhone, setRecipientPhone] = useState(invoice.recipient_phone || "");
   const [description, setDescription] = useState(invoice.description || "");
   const [invoiceDate, setInvoiceDate] = useState(invoice.invoice_date || new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState(invoice.amount ?? "");
@@ -501,10 +502,13 @@ function InvoiceForm({ tourId, invoice, contacts, onClose, onSaved }) {
 
   const pickContact = (id) => {
     setContactId(id);
+    // Only fill contact details (email/phone) — the recipient name is often
+    // an organization ("Theatre X, Paris"), not the contact person, so it's
+    // never overwritten here; she types or edits it separately.
     const c = contacts.find((x) => x.id === id);
     if (c) {
-      setRecipientName(c.name);
       setRecipientEmail(c.email || "");
+      setRecipientPhone(c.phone || "");
     }
   };
 
@@ -516,6 +520,7 @@ function InvoiceForm({ tourId, invoice, contacts, onClose, onSaved }) {
         contact_id: contactId || null,
         recipient_name: recipientName,
         recipient_email: recipientEmail || null,
+        recipient_phone: recipientPhone || null,
         description,
         invoice_date: invoiceDate,
         amount: Number(amount) || 0,
@@ -534,7 +539,7 @@ function InvoiceForm({ tourId, invoice, contacts, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
-      <form onSubmit={submit} data-testid="invoice-form" className="surface w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+      <form onSubmit={submit} data-testid="invoice-form" className="surface w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-serif-display text-2xl">{isNew ? "New invoice" : "Edit invoice"}</h3>
           <button type="button" onClick={onClose}><X size={18} /></button>
@@ -542,25 +547,37 @@ function InvoiceForm({ tourId, invoice, contacts, onClose, onSaved }) {
 
         {contacts.length > 0 && (
           <label className="block mb-3">
-            <span className="uppercase-label block mb-1">Fill from contact (optional)</span>
+            <span className="uppercase-label block mb-1">Fill email/phone from a contact (optional)</span>
             <select value={contactId} onChange={(e) => pickContact(e.target.value)} data-testid="invoice-contact-select"
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2">
               <option value="" style={{ color: "#000" }}>— Select a contact —</option>
               {contacts.map((c) => <option key={c.id} value={c.id} style={{ color: "#000" }}>{c.name}</option>)}
             </select>
+            <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              Invoices are often billed to an organization, not a person — this only fills contact details, the recipient name stays yours to type.
+            </div>
           </label>
         )}
 
         <label className="block mb-3">
-          <span className="uppercase-label block mb-1">Recipient name</span>
+          <span className="uppercase-label block mb-1">Recipient name / organization</span>
           <input required value={recipientName} onChange={(e) => setRecipientName(e.target.value)} data-testid="invoice-name-input"
+            placeholder="e.g. Theatre X, Paris"
             className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
         </label>
-        <label className="block mb-3">
-          <span className="uppercase-label block mb-1">Recipient email</span>
-          <input type="email" value={recipientEmail} onChange={(e) => setRecipientEmail(e.target.value)} data-testid="invoice-email-input"
-            className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
-        </label>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <label className="block">
+            <span className="uppercase-label block mb-1">Recipient email</span>
+            <input type="email" value={recipientEmail} onChange={(e) => setRecipientEmail(e.target.value)} data-testid="invoice-email-input"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          </label>
+          <label className="block">
+            <span className="uppercase-label block mb-1">Recipient phone</span>
+            <input value={recipientPhone} onChange={(e) => setRecipientPhone(e.target.value)} data-testid="invoice-phone-input"
+              placeholder="For WhatsApp send"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          </label>
+        </div>
         <label className="block mb-3">
           <span className="uppercase-label block mb-1">Description</span>
           <textarea required rows={2} value={description} onChange={(e) => setDescription(e.target.value)} data-testid="invoice-description-input"
@@ -655,7 +672,7 @@ function SendInvoiceModal({ tourId, invoice, onClose, onSent }) {
         )}
         {result && !result.whatsapp && whatsappChecked && (
           <div className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
-            No phone number on file for this contact — WhatsApp link unavailable.
+            No phone number on this invoice — add one (or pick a contact with a phone number) to get a WhatsApp link.
           </div>
         )}
 

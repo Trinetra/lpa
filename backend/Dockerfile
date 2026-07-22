@@ -11,6 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libjpeg-dev zlib1g-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
+# mongodump — used by services/backup.py to produce a restorable archive
+# alongside the human-readable CSVs in the daily Drive backup. The Debian 12
+# .deb installs cleanly on this (Debian 13) base image.
+RUN curl -fsSL -o /tmp/mongo-tools.deb \
+      https://fastdl.mongodb.org/tools/db/mongodb-database-tools-debian12-x86_64-100.10.0.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends /tmp/mongo-tools.deb \
+    && rm -f /tmp/mongo-tools.deb \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy backend source (context is /app/backend from docker-compose)
 COPY requirements.txt ./
 RUN pip install -r requirements.txt

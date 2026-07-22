@@ -31,6 +31,11 @@ class _LazyDB:
     def __getattr__(self, name):
         return getattr(get_db(), name)
 
+    def __getitem__(self, name):
+        """Supports db["collection_name"] for dynamic/programmatic access
+        (e.g. iterating a list of collection names), same as db.collection_name."""
+        return get_db()[name]
+
 
 db = _LazyDB()
 

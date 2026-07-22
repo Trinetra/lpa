@@ -30,6 +30,7 @@ from services import invoices as invoices_service
 from services import storage as storage_service
 from services import calendar as calendar_service
 from services import tours as tours_service
+from services import backup as backup_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
@@ -285,6 +286,7 @@ class TourInvoiceCreate(BaseModel):
     contact_id: Optional[str] = None
     recipient_name: str
     recipient_email: Optional[EmailStr] = None
+    recipient_phone: Optional[str] = None
     description: str
     invoice_date: str  # ISO date
     amount: float
@@ -293,6 +295,7 @@ class TourInvoiceCreate(BaseModel):
 class TourInvoiceUpdate(BaseModel):
     recipient_name: Optional[str] = None
     recipient_email: Optional[str] = None
+    recipient_phone: Optional[str] = None
     description: Optional[str] = None
     invoice_date: Optional[str] = None
     amount: Optional[float] = None
@@ -428,6 +431,7 @@ def ser_tour_invoice(doc):
         "invoice_number": doc.get("invoice_number"),
         "recipient_name": doc.get("recipient_name"),
         "recipient_email": doc.get("recipient_email"),
+        "recipient_phone": doc.get("recipient_phone"),
         "description": doc.get("description"),
         "invoice_date": doc.get("invoice_date"),
         "amount": doc.get("amount"),
@@ -1779,10 +1783,10 @@ async def send_tour_invoice(tour_id: str, invoice_id: str, body: TourInvoiceSend
             result["email"] = "failed"
 
     if "whatsapp" in body.channels:
-        contact = None
-        if inv.get("contact_id"):
+        phone = inv.get("recipient_phone")
+        if not phone and inv.get("contact_id"):
             contact = await db.tour_contacts.find_one({"_id": ObjectId(inv["contact_id"])})
-        phone = (contact or {}).get("phone")
+            phone = (contact or {}).get("phone")
         if phone:
             symbol = CURRENCY_SYMBOLS.get(inv["currency"], inv["currency"])
             msg = (f"Hi {inv['recipient_name']}, here's your invoice for "
@@ -1815,6 +1819,52 @@ async def get_shared_tour(share_token: str):
         "location": tour.get("location"),
         "stops": stops,
     }
+
+# --------------- Backups -----------------
+@api_router.get("/backup/status")
+async def backup_status(user: dict = Depends(get_current_user)):
+    full = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    return {
+        "connected": bool(full and full.get("google_refresh_token")),
+        "last_backup_at": (full or {}).get("last_backup_at"),
+        "last_backup_ok": (full or {}).get("last_backup_ok"),
+    }
+
+@api_router.post("/backup/run")
+async def backup_run(user: dict = Depends(get_current_user)):
+    result = await backup_service.run_daily_backup(user["_id"])
+    await db.users.update_one(
+        {"_id": ObjectId(user["_id"])},
+        {"$set": {
+            "last_backup_at": datetime.now(timezone.utc).isoformat(),
+            "last_backup_ok": result.get("ok", False),
+        }},
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("reason", "Backup failed"))
+    return result
+
+@api_router.post("/backup/cron")
+async def backup_cron(secret: str = Query(...)):
+    """Triggered by a host cron job (no user session available there), so
+    auth is a shared secret rather than the normal cookie/bearer flow.
+    Runs the backup for the single admin account this app serves."""
+    expected = os.environ.get("BACKUP_CRON_SECRET")
+    if not expected or secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    admin_email = os.environ.get("ADMIN_EMAIL", "").lower()
+    user = await db.users.find_one({"email": admin_email})
+    if not user:
+        raise HTTPException(status_code=404, detail="Admin user not found")
+    result = await backup_service.run_daily_backup(str(user["_id"]))
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {
+            "last_backup_at": datetime.now(timezone.utc).isoformat(),
+            "last_backup_ok": result.get("ok", False),
+        }},
+    )
+    return result
 
 # --------------- App wiring -----------------
 app.include_router(api_router)
