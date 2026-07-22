@@ -3,14 +3,16 @@ import { api, formatApiErrorDetail, API } from "@/lib/api";
 import { FileText, Download, Link as LinkIcon, Copy, Mail, MessageCircle, X, Trash2, Send } from "lucide-react";
 import { toast } from "sonner";
 import BulkSendModal from "@/components/BulkSendModal";
+import { useAuth } from "@/context/AuthContext";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 function EmailInvoiceModal({ invoice, studentMap, onClose }) {
+  const { user } = useAuth();
   const student = studentMap[invoice.student_id] || {};
   const shareLink = `${window.location.origin}/invoice/${invoice.share_token}`;
   const [to, setTo] = useState(student.email || "");
-  const [replyTo, setReplyTo] = useState("");
+  const [replyTo, setReplyTo] = useState(user?.email || "");
   const [msg, setMsg] = useState(
     `Hi ${student.name || "there"}, please find your invoice attached (₹${invoice.summary?.balance_due} due).`
   );
