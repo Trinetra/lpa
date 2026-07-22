@@ -72,7 +72,13 @@ async def handle_oauth_callback(owner_id: str, code: str) -> None:
     calendar_name = (user or {}).get("google_calendar_name") or DEFAULT_CALENDAR_NAME
 
     service = build("calendar", "v3", credentials=creds)
-    calendar_id = _find_or_create_calendar(service, calendar_name)
+    # calendar.app.created only grants access to calendars this app itself
+    # creates — it can't list her existing calendars (calendarList().list()
+    # needs a broader scope), so each connect creates a fresh one. Disconnect
+    # clears our stored google_calendar_id, so there's no duplicate-detection
+    # need across reconnects.
+    created = service.calendars().insert(body={"summary": calendar_name}).execute()
+    calendar_id = created["id"]
 
     await db.users.update_one(
         {"_id": owner_id},
@@ -89,15 +95,6 @@ async def disconnect(owner_id: str) -> None:
         {"_id": owner_id},
         {"$unset": {"google_refresh_token": "", "google_calendar_id": ""}},
     )
-
-
-def _find_or_create_calendar(service, calendar_name: str) -> str:
-    existing = service.calendarList().list().execute()
-    for cal in existing.get("items", []):
-        if cal.get("summary") == calendar_name:
-            return cal["id"]
-    created = service.calendars().insert(body={"summary": calendar_name}).execute()
-    return created["id"]
 
 
 async def _get_service(owner_id: str):
