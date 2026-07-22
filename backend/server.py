@@ -29,6 +29,7 @@ from services import email as email_service
 from services import invoices as invoices_service
 from services import storage as storage_service
 from services import calendar as calendar_service
+from services import tours as tours_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
@@ -200,6 +201,77 @@ class ScheduleBlockUpdate(BaseModel):
 class CalendarNameUpdate(BaseModel):
     calendar_name: str
 
+EXPENSE_CATEGORIES = ["Flights", "Accommodation", "Local Transport", "Food",
+                       "Venue/Equipment", "Other"]
+
+class TourCreate(BaseModel):
+    name: str
+    start_date: str  # ISO date
+    end_date: str
+    location: Optional[str] = None
+    notes: Optional[str] = None
+
+class TourUpdate(BaseModel):
+    name: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    location: Optional[str] = None
+    notes: Optional[str] = None
+
+class TourStopCreate(BaseModel):
+    city: str
+    venue: Optional[str] = None
+    stop_date: str  # ISO date
+    stop_time: Optional[str] = None  # "HH:MM", 24h
+    notes: Optional[str] = None
+
+class TourStopUpdate(BaseModel):
+    city: Optional[str] = None
+    venue: Optional[str] = None
+    stop_date: Optional[str] = None
+    stop_time: Optional[str] = None
+    notes: Optional[str] = None
+
+class TourExpenseCreate(BaseModel):
+    category: str
+    amount: float
+    expense_date: str  # ISO date
+    notes: Optional[str] = None
+    receipt_path: Optional[str] = None
+
+class TourExpenseUpdate(BaseModel):
+    category: Optional[str] = None
+    amount: Optional[float] = None
+    expense_date: Optional[str] = None
+    notes: Optional[str] = None
+    receipt_path: Optional[str] = None
+
+class TourCheckinCreate(BaseModel):
+    latitude: float
+    longitude: float
+    note: Optional[str] = None
+
+class TourContactCreate(BaseModel):
+    name: str
+    role: Optional[str] = None  # e.g. "Venue manager", "Promoter"
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+
+class TourContactUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    notes: Optional[str] = None
+
+class TourTodoCreate(BaseModel):
+    text: str
+
+class TourTodoUpdate(BaseModel):
+    text: Optional[str] = None
+    done: Optional[bool] = None
+
 # --------------- Serializers -----------------
 def ser_student(doc):
     return {
@@ -248,6 +320,73 @@ def ser_schedule_block(doc):
         "notes": doc.get("notes"),
         "created_at": doc.get("created_at"),
         "synced_to_calendar": bool(doc.get("google_event_id")),
+    }
+
+def ser_tour(doc):
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get("name"),
+        "start_date": doc.get("start_date"),
+        "end_date": doc.get("end_date"),
+        "location": doc.get("location"),
+        "notes": doc.get("notes"),
+        "share_token": doc.get("share_token"),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_tour_stop(doc):
+    return {
+        "id": str(doc["_id"]),
+        "tour_id": doc.get("tour_id"),
+        "city": doc.get("city"),
+        "venue": doc.get("venue"),
+        "stop_date": doc.get("stop_date"),
+        "stop_time": doc.get("stop_time"),
+        "notes": doc.get("notes"),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_tour_expense(doc):
+    return {
+        "id": str(doc["_id"]),
+        "tour_id": doc.get("tour_id"),
+        "category": doc.get("category"),
+        "amount": doc.get("amount"),
+        "expense_date": doc.get("expense_date"),
+        "notes": doc.get("notes"),
+        "receipt_path": doc.get("receipt_path"),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_tour_checkin(doc):
+    return {
+        "id": str(doc["_id"]),
+        "tour_id": doc.get("tour_id"),
+        "latitude": doc.get("latitude"),
+        "longitude": doc.get("longitude"),
+        "note": doc.get("note"),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_tour_contact(doc):
+    return {
+        "id": str(doc["_id"]),
+        "tour_id": doc.get("tour_id"),
+        "name": doc.get("name"),
+        "role": doc.get("role"),
+        "phone": doc.get("phone"),
+        "email": doc.get("email"),
+        "notes": doc.get("notes"),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_tour_todo(doc):
+    return {
+        "id": str(doc["_id"]),
+        "tour_id": doc.get("tour_id"),
+        "text": doc.get("text"),
+        "done": doc.get("done", False),
+        "created_at": doc.get("created_at"),
     }
 
 # --------------- Auth endpoints -----------------
@@ -1197,6 +1336,282 @@ async def calendar_disconnect(user: dict = Depends(get_current_user)):
     await calendar_service.disconnect(user["_id"])
     return {"ok": True}
 
+# --------------- Tours endpoints -----------------
+async def _get_owned_tour(tour_id: str, owner_id: str) -> dict:
+    tour = await db.tours.find_one({"_id": ObjectId(tour_id), "owner_id": owner_id})
+    if not tour:
+        raise HTTPException(status_code=404, detail="Tour not found")
+    return tour
+
+@api_router.get("/tours")
+async def list_tours(user: dict = Depends(get_current_user)):
+    cur = db.tours.find({"owner_id": user["_id"]}).sort("start_date", -1)
+    return [ser_tour(d) async for d in cur]
+
+@api_router.post("/tours")
+async def create_tour(body: TourCreate, user: dict = Depends(get_current_user)):
+    doc = body.model_dump()
+    doc["owner_id"] = user["_id"]
+    doc["share_token"] = secrets.token_urlsafe(24)
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.tours.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_tour(doc)
+
+@api_router.get("/tours/{tour_id}")
+async def get_tour(tour_id: str, user: dict = Depends(get_current_user)):
+    return ser_tour(await _get_owned_tour(tour_id, user["_id"]))
+
+@api_router.patch("/tours/{tour_id}")
+async def update_tour(tour_id: str, body: TourUpdate, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.tours.update_one({"_id": ObjectId(tour_id)}, {"$set": updates})
+    return ser_tour(await db.tours.find_one({"_id": ObjectId(tour_id)}))
+
+@api_router.delete("/tours/{tour_id}")
+async def delete_tour(tour_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    await db.tours.delete_one({"_id": ObjectId(tour_id)})
+    await db.tour_stops.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
+    await db.tour_expenses.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
+    await db.tour_checkins.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
+    await db.tour_contacts.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
+    await db.tour_todos.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
+    return {"ok": True}
+
+# --------------- Tour stops (schedule) -----------------
+@api_router.get("/tours/{tour_id}/stops")
+async def list_tour_stops(tour_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    cur = db.tour_stops.find({"tour_id": tour_id, "owner_id": user["_id"]}).sort("stop_date", 1)
+    return [ser_tour_stop(d) async for d in cur]
+
+@api_router.post("/tours/{tour_id}/stops")
+async def create_tour_stop(tour_id: str, body: TourStopCreate, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    doc = body.model_dump()
+    doc["tour_id"] = tour_id
+    doc["owner_id"] = user["_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.tour_stops.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_tour_stop(doc)
+
+@api_router.patch("/tours/{tour_id}/stops/{stop_id}")
+async def update_tour_stop(tour_id: str, stop_id: str, body: TourStopUpdate,
+                            user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    res = await db.tour_stops.update_one(
+        {"_id": ObjectId(stop_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Stop not found")
+    return ser_tour_stop(await db.tour_stops.find_one({"_id": ObjectId(stop_id)}))
+
+@api_router.delete("/tours/{tour_id}/stops/{stop_id}")
+async def delete_tour_stop(tour_id: str, stop_id: str, user: dict = Depends(get_current_user)):
+    res = await db.tour_stops.delete_one(
+        {"_id": ObjectId(stop_id), "tour_id": tour_id, "owner_id": user["_id"]}
+    )
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Stop not found")
+    return {"ok": True}
+
+# --------------- Tour expenses -----------------
+@api_router.get("/tours/{tour_id}/expenses")
+async def list_tour_expenses(tour_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    cur = db.tour_expenses.find({"tour_id": tour_id, "owner_id": user["_id"]}).sort("expense_date", -1)
+    return [ser_tour_expense(d) async for d in cur]
+
+@api_router.post("/tours/{tour_id}/expenses")
+async def create_tour_expense(tour_id: str, body: TourExpenseCreate, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    doc = body.model_dump()
+    doc["tour_id"] = tour_id
+    doc["owner_id"] = user["_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.tour_expenses.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_tour_expense(doc)
+
+@api_router.patch("/tours/{tour_id}/expenses/{expense_id}")
+async def update_tour_expense(tour_id: str, expense_id: str, body: TourExpenseUpdate,
+                               user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    res = await db.tour_expenses.update_one(
+        {"_id": ObjectId(expense_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    return ser_tour_expense(await db.tour_expenses.find_one({"_id": ObjectId(expense_id)}))
+
+@api_router.delete("/tours/{tour_id}/expenses/{expense_id}")
+async def delete_tour_expense(tour_id: str, expense_id: str, user: dict = Depends(get_current_user)):
+    res = await db.tour_expenses.delete_one(
+        {"_id": ObjectId(expense_id), "tour_id": tour_id, "owner_id": user["_id"]}
+    )
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    return {"ok": True}
+
+@api_router.get("/tours/{tour_id}/expenses/export.csv")
+async def export_tour_expenses_csv(tour_id: str, user: dict = Depends(get_current_user)):
+    tour = await _get_owned_tour(tour_id, user["_id"])
+    cur = db.tour_expenses.find({"tour_id": tour_id, "owner_id": user["_id"]}).sort("expense_date", 1)
+    expenses = [d async for d in cur]
+    csv_bytes = tours_service.expenses_to_csv(tour, expenses)
+    filename = f"expenses_{tour['name'].replace(' ', '_')}.csv"
+    return StreamingResponse(io.BytesIO(csv_bytes), media_type="text/csv",
+                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+@api_router.get("/tours/{tour_id}/expenses/export.pdf")
+async def export_tour_expenses_pdf(tour_id: str, user: dict = Depends(get_current_user)):
+    tour = await _get_owned_tour(tour_id, user["_id"])
+    cur = db.tour_expenses.find({"tour_id": tour_id, "owner_id": user["_id"]}).sort("expense_date", 1)
+    expenses = [d async for d in cur]
+    pdf_bytes = pdf_service.generate_tour_expense_pdf(tour, expenses)
+    filename = f"expenses_{tour['name'].replace(' ', '_')}.pdf"
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
+                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+# --------------- Tour check-ins (GPS log) -----------------
+@api_router.get("/tours/{tour_id}/checkins")
+async def list_tour_checkins(tour_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    cur = db.tour_checkins.find({"tour_id": tour_id, "owner_id": user["_id"]}).sort("created_at", -1)
+    return [ser_tour_checkin(d) async for d in cur]
+
+@api_router.post("/tours/{tour_id}/checkins")
+async def create_tour_checkin(tour_id: str, body: TourCheckinCreate, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    doc = body.model_dump()
+    doc["tour_id"] = tour_id
+    doc["owner_id"] = user["_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.tour_checkins.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_tour_checkin(doc)
+
+@api_router.delete("/tours/{tour_id}/checkins/{checkin_id}")
+async def delete_tour_checkin(tour_id: str, checkin_id: str, user: dict = Depends(get_current_user)):
+    res = await db.tour_checkins.delete_one(
+        {"_id": ObjectId(checkin_id), "tour_id": tour_id, "owner_id": user["_id"]}
+    )
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Check-in not found")
+    return {"ok": True}
+
+# --------------- Tour contacts -----------------
+@api_router.get("/tours/{tour_id}/contacts")
+async def list_tour_contacts(tour_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    cur = db.tour_contacts.find({"tour_id": tour_id, "owner_id": user["_id"]}).sort("created_at", -1)
+    return [ser_tour_contact(d) async for d in cur]
+
+@api_router.post("/tours/{tour_id}/contacts")
+async def create_tour_contact(tour_id: str, body: TourContactCreate, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    doc = body.model_dump()
+    doc["tour_id"] = tour_id
+    doc["owner_id"] = user["_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.tour_contacts.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_tour_contact(doc)
+
+@api_router.patch("/tours/{tour_id}/contacts/{contact_id}")
+async def update_tour_contact(tour_id: str, contact_id: str, body: TourContactUpdate,
+                               user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    res = await db.tour_contacts.update_one(
+        {"_id": ObjectId(contact_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return ser_tour_contact(await db.tour_contacts.find_one({"_id": ObjectId(contact_id)}))
+
+@api_router.delete("/tours/{tour_id}/contacts/{contact_id}")
+async def delete_tour_contact(tour_id: str, contact_id: str, user: dict = Depends(get_current_user)):
+    res = await db.tour_contacts.delete_one(
+        {"_id": ObjectId(contact_id), "tour_id": tour_id, "owner_id": user["_id"]}
+    )
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    return {"ok": True}
+
+# --------------- Tour to-do list -----------------
+@api_router.get("/tours/{tour_id}/todos")
+async def list_tour_todos(tour_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    cur = db.tour_todos.find({"tour_id": tour_id, "owner_id": user["_id"]}).sort("created_at", 1)
+    return [ser_tour_todo(d) async for d in cur]
+
+@api_router.post("/tours/{tour_id}/todos")
+async def create_tour_todo(tour_id: str, body: TourTodoCreate, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    doc = {
+        "tour_id": tour_id,
+        "owner_id": user["_id"],
+        "text": body.text,
+        "done": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    res = await db.tour_todos.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_tour_todo(doc)
+
+@api_router.patch("/tours/{tour_id}/todos/{todo_id}")
+async def update_tour_todo(tour_id: str, todo_id: str, body: TourTodoUpdate,
+                            user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    res = await db.tour_todos.update_one(
+        {"_id": ObjectId(todo_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="To-do not found")
+    return ser_tour_todo(await db.tour_todos.find_one({"_id": ObjectId(todo_id)}))
+
+@api_router.delete("/tours/{tour_id}/todos/{todo_id}")
+async def delete_tour_todo(tour_id: str, todo_id: str, user: dict = Depends(get_current_user)):
+    res = await db.tour_todos.delete_one(
+        {"_id": ObjectId(todo_id), "tour_id": tour_id, "owner_id": user["_id"]}
+    )
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="To-do not found")
+    return {"ok": True}
+
+# --------------- Public tour schedule page -----------------
+@api_router.get("/tours/share/{share_token}")
+async def get_shared_tour(share_token: str):
+    tour = await db.tours.find_one({"share_token": share_token})
+    if not tour:
+        raise HTTPException(status_code=404, detail="Tour not found")
+    cur = db.tour_stops.find({"tour_id": str(tour["_id"])}).sort("stop_date", 1)
+    stops = [ser_tour_stop(d) async for d in cur]
+    return {
+        "name": tour.get("name"),
+        "start_date": tour.get("start_date"),
+        "end_date": tour.get("end_date"),
+        "location": tour.get("location"),
+        "stops": stops,
+    }
+
 # --------------- App wiring -----------------
 app.include_router(api_router)
 
@@ -1220,6 +1635,13 @@ async def on_startup():
     await db.password_reset_tokens.create_index("token", unique=True)
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
     await db.schedule_blocks.create_index([("owner_id", 1), ("day_of_week", 1)])
+    await db.tours.create_index("owner_id")
+    await db.tours.create_index("share_token", unique=True)
+    await db.tour_stops.create_index([("tour_id", 1), ("stop_date", 1)])
+    await db.tour_expenses.create_index([("tour_id", 1), ("expense_date", 1)])
+    await db.tour_checkins.create_index("tour_id")
+    await db.tour_contacts.create_index("tour_id")
+    await db.tour_todos.create_index("tour_id")
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

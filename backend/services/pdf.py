@@ -224,3 +224,56 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
     doc.build(story)
     buf.seek(0)
     return buf.read()
+
+
+def generate_tour_expense_pdf(tour: dict, expenses: list) -> bytes:
+    styles = _pdf_styles()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            leftMargin=18 * mm, rightMargin=18 * mm,
+                            topMargin=18 * mm, bottomMargin=18 * mm)
+    story = []
+    story.append(Paragraph("Tour Expenses", styles["title"]))
+    story.append(Paragraph(f"<b>{tour.get('name', '')}</b>", styles["label"]))
+    period = f"{tour.get('start_date', '')} — {tour.get('end_date', '')}"
+    story.append(Paragraph(period, styles["label"]))
+    story.append(Spacer(1, 8 * mm))
+
+    rows = [["Date", "Category", "Amount (INR)", "Notes"]]
+    total = 0.0
+    for e in expenses:
+        amount = float(e.get("amount", 0))
+        total += amount
+        rows.append([
+            e.get("expense_date", ""),
+            e.get("category", ""),
+            f"{amount:.2f}",
+            e.get("notes") or "",
+        ])
+    tbl = Table(rows, colWidths=[28 * mm, 40 * mm, 30 * mm, 76 * mm], repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), _PDF_HEADER_BG),
+        ("TEXTCOLOR", (0, 0), (-1, 0), _PDF_TEXT_DARK),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.25, _PDF_GRID),
+        ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(tbl)
+    story.append(Spacer(1, 6 * mm))
+
+    total_tbl = Table([["Total", f"INR {total:.2f}"]], colWidths=[134 * mm, 40 * mm], hAlign="RIGHT")
+    total_tbl.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 12),
+        ("LINEABOVE", (0, 0), (-1, 0), 0.6, _PDF_RULE),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+    ]))
+    story.append(total_tbl)
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
