@@ -23,7 +23,12 @@ def filter_by_date(items: list, start: Optional[str], end: Optional[str], key: s
 
 
 def wa_link(phone: str, message: str) -> str:
+    # wa.me needs a full international number. Bare 10-digit Indian numbers
+    # (saved before phones were normalized on write) are assumed +91 here too,
+    # so existing students don't need to be re-edited for WhatsApp to work.
     digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    if len(digits) == 10:
+        digits = f"91{digits}"
     return f"https://wa.me/{digits}?text={quote(message)}"
 
 

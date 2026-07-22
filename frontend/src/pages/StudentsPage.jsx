@@ -126,6 +126,7 @@ function StudentForm({ initial, onClose, onSaved }) {
           <label>
             <span className="uppercase-label block mb-1">Phone</span>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} data-testid="student-phone-input"
+              placeholder="10-digit number, +91 added automatically"
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2 focus:outline-none focus:border-[color:var(--primary)]" />
           </label>
           <label>

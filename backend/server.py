@@ -425,6 +425,23 @@ async def get_file(path: str = Query(...), auth: Optional[str] = Query(None), re
     return Response(content=data, media_type=record.get("content_type", ct))
 
 # --------------- Students endpoints -----------------
+def _normalize_phone(phone: Optional[str]) -> Optional[str]:
+    """Add the +91 country code to bare 10-digit Indian mobile numbers.
+
+    wa.me links need a full international number to resolve — a phone saved
+    as e.g. "9884430099" silently fails to open in WhatsApp otherwise. Numbers
+    that already carry a country code (start with '+', or '91' for an
+    11-12 digit number) are left untouched.
+    """
+    if not phone:
+        return phone
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if phone.strip().startswith("+"):
+        return f"+{digits}"
+    if len(digits) == 10:
+        return f"+91{digits}"
+    return phone
+
 @api_router.get("/students")
 async def list_students(user: dict = Depends(get_current_user)):
     cur = db.students.find({"owner_id": user["_id"]}).sort("created_at", -1)
@@ -436,6 +453,7 @@ async def list_students(user: dict = Depends(get_current_user)):
 @api_router.post("/students")
 async def create_student(body: StudentCreate, user: dict = Depends(get_current_user)):
     doc = body.model_dump()
+    doc["phone"] = _normalize_phone(doc.get("phone"))
     doc["owner_id"] = user["_id"]
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     res = await db.students.insert_one(doc)
@@ -454,6 +472,8 @@ async def update_student(sid: str, body: StudentUpdate, user: dict = Depends(get
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "phone" in updates:
+        updates["phone"] = _normalize_phone(updates["phone"])
     res = await db.students.update_one(
         {"_id": ObjectId(sid), "owner_id": user["_id"]}, {"$set": updates}
     )

@@ -140,7 +140,8 @@ export default function InvoicesPage() {
     const msg =
       `Hi ${s.name || ""}, here's your dance-class invoice ` +
       `(₹${inv.summary?.balance_due || 0} due):\n${link}`;
-    const phone = (s.phone || "").replace(/\D/g, "");
+    let phone = (s.phone || "").replace(/\D/g, "");
+    if (phone.length === 10) phone = `91${phone}`; // wa.me needs a country code
     const url = phone
       ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
       : `https://wa.me/?text=${encodeURIComponent(msg)}`;

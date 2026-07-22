@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
+import { api } from "@/lib/api";
+import AuthImage from "@/components/AuthImage";
 import {
   LayoutDashboard,
   Users,
@@ -20,6 +22,13 @@ export default function AppLayout() {
   const { user, logout } = useAuth();
   const { theme, toggle } = useTheme();
   const nav = useNavigate();
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    api.get("/profile").then((r) => setProfile(r.data)).catch(() => {});
+  }, []);
+
+  const studioName = profile?.studio_name || "Lakshmi Studio Ledger";
 
   const handleLogout = async () => {
     await logout();
@@ -45,11 +54,22 @@ export default function AppLayout() {
         className="hidden md:flex md:flex-col w-64 shrink-0 px-5 py-8 gap-2"
         style={{ background: "var(--bg)", borderRight: "1px solid var(--border)" }}
       >
-        <div className="mb-10">
-          <div className="font-serif-display text-2xl" style={{ color: "var(--primary)" }}>
-            Lakshmi
+        <div className="mb-10 flex items-center gap-3">
+          {profile?.logo_path && (
+            <AuthImage
+              path={profile.logo_path}
+              alt=""
+              className="w-10 h-10 rounded-full object-cover shrink-0"
+            />
+          )}
+          <div className="min-w-0">
+            <div className="font-serif-display text-2xl truncate" style={{ color: "var(--primary)" }}>
+              {studioName}
+            </div>
+            {profile?.teacher_name && (
+              <div className="uppercase-label mt-1 truncate">{profile.teacher_name}</div>
+            )}
           </div>
-          <div className="uppercase-label mt-1">Studio Ledger</div>
         </div>
         <nav className="flex flex-col gap-1">
           {links.map((l) => (
@@ -94,7 +114,16 @@ export default function AppLayout() {
       {/* Mobile top bar */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 py-3"
         style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
-        <div className="font-serif-display text-xl" style={{ color: "var(--primary)" }}>Lakshmi</div>
+        <div className="flex items-center gap-2 min-w-0">
+          {profile?.logo_path && (
+            <AuthImage
+              path={profile.logo_path}
+              alt=""
+              className="w-7 h-7 rounded-full object-cover shrink-0"
+            />
+          )}
+          <div className="font-serif-display text-xl truncate" style={{ color: "var(--primary)" }}>{studioName}</div>
+        </div>
         <div className="flex items-center gap-2">
           <button data-testid="m-theme-toggle-btn" onClick={toggle} className="btn-ghost text-xs p-2" type="button"
             title={theme === "dark" ? "Light mode" : "Dark mode"}>
