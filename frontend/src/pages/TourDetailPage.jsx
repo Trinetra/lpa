@@ -8,16 +8,20 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fmtDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "");
 
 const TABS = [
   { key: "schedule", label: "Schedule" },
   { key: "expenses", label: "Expenses" },
+  { key: "invoices", label: "Invoices" },
   { key: "checkins", label: "Check-ins" },
   { key: "contacts", label: "Contacts" },
   { key: "todos", label: "To-dos" },
 ];
+
+const CURRENCIES = ["INR", "EUR", "USD", "GBP"];
+const CURRENCY_SYMBOLS = { INR: "₹", EUR: "€", USD: "$", GBP: "£" };
+const fmtMoney = (n, currency) => `${CURRENCY_SYMBOLS[currency] || currency + " "}${Number(n || 0).toLocaleString("en-IN")}`;
 
 function TabButton({ active, onClick, children, testid }) {
   return (
@@ -185,13 +189,26 @@ function ExpensesTab({ tourId }) {
 
   if (expenses === null) return <div className="uppercase-label">Loading…</div>;
 
-  const total = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  // Expenses can span more than one currency on a tour (flights in USD,
+  // local transport in GBP, etc.) — a single blended sum would be
+  // meaningless, so totals are shown per currency actually used.
+  const totalsByCurrency = {};
+  expenses.forEach((e) => {
+    const c = e.currency || "INR";
+    totalsByCurrency[c] = (totalsByCurrency[c] || 0) + Number(e.amount || 0);
+  });
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-          Total: <span style={{ color: "var(--text)" }} className="font-medium">{fmt(total)}</span>
+          Total:{" "}
+          {Object.entries(totalsByCurrency).map(([c, t], i) => (
+            <span key={c} style={{ color: "var(--text)" }} className="font-medium">
+              {i > 0 && " · "}{fmtMoney(t, c)}
+            </span>
+          ))}
+          {Object.keys(totalsByCurrency).length === 0 && <span style={{ color: "var(--text)" }} className="font-medium">{fmtMoney(0, "INR")}</span>}
         </div>
         <div className="flex gap-2">
           <a href={`${API}/tours/${tourId}/expenses/export.csv`} target="_blank" rel="noreferrer"
@@ -221,7 +238,7 @@ function ExpensesTab({ tourId }) {
               </div>
             </div>
             <div className="flex items-center gap-3 shrink-0">
-              <div className="font-serif-display">{fmt(e.amount)}</div>
+              <div className="font-serif-display">{fmtMoney(e.amount, e.currency || "INR")}</div>
               <button onClick={() => setEditing(e)} data-testid={`edit-expense-${e.id}`} className="btn-ghost text-xs">Edit</button>
             </div>
           </div>
@@ -241,6 +258,7 @@ function ExpenseForm({ tourId, expense, onClose, onSaved }) {
   const [category, setCategory] = useState(isNew ? "Flights" : (knownCategory ? expense.category : "Other"));
   const [customCategory, setCustomCategory] = useState(!isNew && !knownCategory ? expense.category : "");
   const [amount, setAmount] = useState(expense.amount ?? "");
+  const [currency, setCurrency] = useState(expense.currency || "INR");
   const [expenseDate, setExpenseDate] = useState(expense.expense_date || "");
   const [notes, setNotes] = useState(expense.notes || "");
   const [receiptPath, setReceiptPath] = useState(expense.receipt_path || null);
@@ -273,6 +291,7 @@ function ExpenseForm({ tourId, expense, onClose, onSaved }) {
       const body = {
         category: finalCategory,
         amount: Number(amount) || 0,
+        currency,
         expense_date: expenseDate,
         notes: notes || null,
         receipt_path: receiptPath || null,
@@ -323,12 +342,19 @@ function ExpenseForm({ tourId, expense, onClose, onSaved }) {
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
           </label>
         )}
-        <div className="grid grid-cols-2 gap-3 mb-3">
+        <div className="grid grid-cols-3 gap-3 mb-3">
           <label className="block">
-            <span className="uppercase-label block mb-1">Amount (INR)</span>
+            <span className="uppercase-label block mb-1">Amount</span>
             <input required type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)}
               data-testid="expense-amount-input"
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          </label>
+          <label className="block">
+            <span className="uppercase-label block mb-1">Currency</span>
+            <select value={currency} onChange={(e) => setCurrency(e.target.value)} data-testid="expense-currency-select"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2">
+              {CURRENCIES.map((c) => <option key={c} value={c} style={{ color: "#000" }}>{c}</option>)}
+            </select>
           </label>
           <label className="block">
             <span className="uppercase-label block mb-1">Date</span>
@@ -369,6 +395,277 @@ function ExpenseForm({ tourId, expense, onClose, onSaved }) {
           </div>
         </div>
       </form>
+    </div>
+  );
+}
+
+// --------------- Invoices tab -----------------
+function InvoicesTab({ tourId }) {
+  const [invoices, setInvoices] = useState(null);
+  const [contacts, setContacts] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [sending, setSending] = useState(null);
+
+  const load = () => {
+    api.get(`/tours/${tourId}/invoices`).then((r) => setInvoices(r.data));
+    api.get(`/tours/${tourId}/contacts`).then((r) => setContacts(r.data));
+  };
+  useEffect(() => { load(); }, [tourId]);
+
+  const togglePaid = async (inv) => {
+    try {
+      await api.patch(`/tours/${tourId}/invoices/${inv.id}`, { paid: !inv.paid });
+      load();
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Failed to update");
+    }
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm("Delete this invoice?")) return;
+    try {
+      await api.delete(`/tours/${tourId}/invoices/${id}`);
+      load();
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Delete failed");
+    }
+  };
+
+  if (invoices === null) return <div className="uppercase-label">Loading…</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={() => setEditing({})} data-testid="add-invoice-btn" className="btn-pill flex items-center gap-2 text-sm">
+          <Plus size={14} /> New invoice
+        </button>
+      </div>
+      {invoices.length === 0 && (
+        <div className="surface p-8 text-center" style={{ color: "var(--text-muted)" }}>No invoices yet.</div>
+      )}
+      <div className="surface divide-y" style={{ borderColor: "var(--border)" }}>
+        {invoices.map((inv) => (
+          <div key={inv.id} className="flex items-center justify-between px-6 py-4 gap-4" style={{ borderTop: "1px solid var(--border)" }}
+            data-testid={`invoice-row-${inv.id}`}>
+            <div className="min-w-0">
+              <div className="truncate">{inv.invoice_number} · {inv.recipient_name}</div>
+              <div className="text-xs truncate" style={{ color: "var(--text-muted)" }}>
+                {fmtDate(inv.invoice_date)} · {inv.description}
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="font-serif-display" style={{ color: inv.paid ? "var(--success)" : "var(--error)" }}>
+                {fmtMoney(inv.amount, inv.currency)}
+              </div>
+              <button
+                onClick={() => togglePaid(inv)}
+                data-testid={`invoice-paid-toggle-${inv.id}`}
+                className="text-[10px] uppercase tracking-widest px-2 py-1 rounded-full"
+                style={{
+                  color: inv.paid ? "var(--success)" : "var(--error)",
+                  border: `1px solid ${inv.paid ? "var(--success)" : "var(--error)"}`,
+                }}
+              >
+                {inv.paid ? "Paid" : "Unpaid"}
+              </button>
+              <button onClick={() => setSending(inv)} data-testid={`invoice-send-${inv.id}`} className="btn-ghost text-xs">Send</button>
+              <button onClick={() => setEditing(inv)} data-testid={`edit-invoice-${inv.id}`} className="btn-ghost text-xs">Edit</button>
+              <button onClick={() => remove(inv.id)} data-testid={`invoice-delete-${inv.id}`} className="p-1" style={{ color: "var(--error)" }}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {editing && (
+        <InvoiceForm tourId={tourId} invoice={editing} contacts={contacts} onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }} />
+      )}
+      {sending && (
+        <SendInvoiceModal tourId={tourId} invoice={sending} onClose={() => setSending(null)} onSent={load} />
+      )}
+    </div>
+  );
+}
+
+function InvoiceForm({ tourId, invoice, contacts, onClose, onSaved }) {
+  const isNew = !invoice.id;
+  const [contactId, setContactId] = useState(invoice.contact_id || "");
+  const [recipientName, setRecipientName] = useState(invoice.recipient_name || "");
+  const [recipientEmail, setRecipientEmail] = useState(invoice.recipient_email || "");
+  const [description, setDescription] = useState(invoice.description || "");
+  const [invoiceDate, setInvoiceDate] = useState(invoice.invoice_date || new Date().toISOString().slice(0, 10));
+  const [amount, setAmount] = useState(invoice.amount ?? "");
+  const [currency, setCurrency] = useState(invoice.currency || "INR");
+  const [saving, setSaving] = useState(false);
+
+  const pickContact = (id) => {
+    setContactId(id);
+    const c = contacts.find((x) => x.id === id);
+    if (c) {
+      setRecipientName(c.name);
+      setRecipientEmail(c.email || "");
+    }
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const body = {
+        contact_id: contactId || null,
+        recipient_name: recipientName,
+        recipient_email: recipientEmail || null,
+        description,
+        invoice_date: invoiceDate,
+        amount: Number(amount) || 0,
+        currency,
+      };
+      if (isNew) await api.post(`/tours/${tourId}/invoices`, body);
+      else await api.patch(`/tours/${tourId}/invoices/${invoice.id}`, body);
+      toast.success(isNew ? "Invoice created" : "Invoice updated");
+      onSaved();
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
+      <form onSubmit={submit} data-testid="invoice-form" className="surface w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="font-serif-display text-2xl">{isNew ? "New invoice" : "Edit invoice"}</h3>
+          <button type="button" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {contacts.length > 0 && (
+          <label className="block mb-3">
+            <span className="uppercase-label block mb-1">Fill from contact (optional)</span>
+            <select value={contactId} onChange={(e) => pickContact(e.target.value)} data-testid="invoice-contact-select"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2">
+              <option value="" style={{ color: "#000" }}>— Select a contact —</option>
+              {contacts.map((c) => <option key={c.id} value={c.id} style={{ color: "#000" }}>{c.name}</option>)}
+            </select>
+          </label>
+        )}
+
+        <label className="block mb-3">
+          <span className="uppercase-label block mb-1">Recipient name</span>
+          <input required value={recipientName} onChange={(e) => setRecipientName(e.target.value)} data-testid="invoice-name-input"
+            className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+        </label>
+        <label className="block mb-3">
+          <span className="uppercase-label block mb-1">Recipient email</span>
+          <input type="email" value={recipientEmail} onChange={(e) => setRecipientEmail(e.target.value)} data-testid="invoice-email-input"
+            className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+        </label>
+        <label className="block mb-3">
+          <span className="uppercase-label block mb-1">Description</span>
+          <textarea required rows={2} value={description} onChange={(e) => setDescription(e.target.value)} data-testid="invoice-description-input"
+            placeholder="e.g. Performance at Theatre X, Paris"
+            className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+        </label>
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <label className="block">
+            <span className="uppercase-label block mb-1">Amount</span>
+            <input required type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)}
+              data-testid="invoice-amount-input"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          </label>
+          <label className="block">
+            <span className="uppercase-label block mb-1">Currency</span>
+            <select value={currency} onChange={(e) => setCurrency(e.target.value)} data-testid="invoice-currency-select"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2">
+              {CURRENCIES.map((c) => <option key={c} value={c} style={{ color: "#000" }}>{c}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="uppercase-label block mb-1">Date</span>
+            <input required type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)}
+              data-testid="invoice-date-input"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          </label>
+        </div>
+        <div className="flex justify-end gap-3">
+          <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+          <button type="submit" disabled={saving} data-testid="invoice-save-btn" className="btn-pill">
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function SendInvoiceModal({ tourId, invoice, onClose, onSent }) {
+  const [emailChecked, setEmailChecked] = useState(!!invoice.recipient_email);
+  const [whatsappChecked, setWhatsappChecked] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const send = async () => {
+    const channels = [];
+    if (emailChecked) channels.push("email");
+    if (whatsappChecked) channels.push("whatsapp");
+    if (channels.length === 0) {
+      toast.error("Pick at least one channel");
+      return;
+    }
+    setSending(true);
+    try {
+      const { data } = await api.post(`/tours/${tourId}/invoices/${invoice.id}/send`, { channels });
+      setResult(data);
+      if (data.email === "sent") toast.success("Emailed");
+      onSent();
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Send failed");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
+      <div data-testid="send-invoice-modal" className="surface w-full max-w-sm p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="font-serif-display text-2xl">Send invoice</h3>
+          <button type="button" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
+          To <span style={{ color: "var(--text)" }}>{invoice.recipient_name}</span> — {fmtMoney(invoice.amount, invoice.currency)}
+        </div>
+        <label className="flex items-center gap-2 mb-3">
+          <input type="checkbox" checked={emailChecked} onChange={(e) => setEmailChecked(e.target.checked)}
+            disabled={!invoice.recipient_email} data-testid="send-email-checkbox" />
+          Email {!invoice.recipient_email && <span style={{ color: "var(--text-muted)" }}>(no address on file)</span>}
+        </label>
+        <label className="flex items-center gap-2 mb-6">
+          <input type="checkbox" checked={whatsappChecked} onChange={(e) => setWhatsappChecked(e.target.checked)}
+            data-testid="send-whatsapp-checkbox" />
+          WhatsApp
+        </label>
+
+        {result?.whatsapp && (
+          <a href={result.whatsapp} target="_blank" rel="noreferrer" data-testid="whatsapp-link"
+            className="btn-pill w-full flex items-center justify-center mb-3">
+            Open WhatsApp message
+          </a>
+        )}
+        {result && !result.whatsapp && whatsappChecked && (
+          <div className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
+            No phone number on file for this contact — WhatsApp link unavailable.
+          </div>
+        )}
+
+        <div className="flex justify-end gap-3">
+          <button type="button" onClick={onClose} className="btn-ghost">Close</button>
+          <button type="button" onClick={send} disabled={sending} data-testid="send-invoice-btn" className="btn-pill">
+            {sending ? "Sending…" : "Send"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -732,6 +1029,7 @@ export default function TourDetailPage() {
 
       {tab === "schedule" && <ScheduleTab tourId={id} />}
       {tab === "expenses" && <ExpensesTab tourId={id} />}
+      {tab === "invoices" && <InvoicesTab tourId={id} />}
       {tab === "checkins" && <CheckinsTab tourId={id} />}
       {tab === "contacts" && <ContactsTab tourId={id} />}
       {tab === "todos" && <TodosTab tourId={id} />}
