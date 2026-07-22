@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
-import { KeyRound, Upload, Save, Loader2, CalendarClock, Link2, Unlink } from "lucide-react";
+import { KeyRound, Upload, Save, Loader2, CalendarClock, Link2, Unlink, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
 function CalendarConnectCard() {
@@ -78,7 +78,18 @@ function CalendarConnectCard() {
         <CalendarClock size={14} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
         <div className="uppercase-label">Integrations</div>
       </div>
-      <h2 className="font-serif-display text-2xl mb-2">Google Calendar</h2>
+      <div className="flex items-center gap-3 mb-2">
+        <h2 className="font-serif-display text-2xl">Google Calendar</h2>
+        {status.connected && (
+          <span
+            data-testid="calendar-connected-badge"
+            className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full"
+            style={{ color: "var(--success)", background: "color-mix(in srgb, var(--success) 15%, transparent)" }}
+          >
+            <CheckCircle2 size={12} /> Connected
+          </span>
+        )}
+      </div>
 
       {!status.configured && (
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
