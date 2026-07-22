@@ -232,6 +232,7 @@ function StudioProfileCard({ profile, onSaved }) {
     social_youtube: profile?.social_youtube || "",
     social_instagram: profile?.social_instagram || "",
     social_facebook: profile?.social_facebook || "",
+    international_payment_details: profile?.international_payment_details || "",
   });
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -271,6 +272,7 @@ function StudioProfileCard({ profile, onSaved }) {
         social_youtube: form.social_youtube,
         social_instagram: form.social_instagram,
         social_facebook: form.social_facebook,
+        international_payment_details: form.international_payment_details,
       };
       const { data } = await api.patch("/profile", body);
       toast.success("Studio profile saved");
@@ -377,6 +379,17 @@ function StudioProfileCard({ profile, onSaved }) {
               data-testid="studio-facebook-input"
               placeholder="Facebook URL"
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          </div>
+        </label>
+        <label className="sm:col-span-2">
+          <span className="uppercase-label block mb-1">International payment details (for foreign tour invoices)</span>
+          <textarea rows={3} value={form.international_payment_details}
+            onChange={(e) => setForm({ ...form, international_payment_details: e.target.value })}
+            data-testid="studio-intl-payment-input"
+            placeholder="Bank name, account number, SWIFT/IBAN, etc."
+            className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+            Shown instead of your UPI details on non-INR tour invoices, since UPI only works for INR payments.
           </div>
         </label>
       </div>

@@ -4,7 +4,9 @@ import io
 import os
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote
 
+import qrcode
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -50,8 +52,6 @@ _INK = colors.HexColor("#2B2B2B")
 _LABEL = colors.HexColor("#8A6D3B")
 _RULE = colors.HexColor("#E4D9C8")
 _ROW_TINT = colors.HexColor("#FBF5EC")
-_DUE = colors.HexColor("#7A1F2B")
-_PAID = colors.HexColor("#5C7A5E")
 
 _PAGE_W = 174 * mm  # A4 width minus 18mm margins each side
 _RUPEE = "₹"
@@ -145,33 +145,44 @@ def _fmt_money(n, currency: str = "INR") -> str:
     return f"{symbol}{v:,.2f}"
 
 
+def _upi_qr_bytes(vpa: str, payee_name: str, amount: float) -> Optional[bytes]:
+    """Generate a scannable UPI payment QR as PNG bytes, or None on failure.
+    UPI deep-link format: upi://pay?pa=<vpa>&pn=<name>&am=<amount>&cu=INR"""
+    try:
+        uri = (
+            f"upi://pay?pa={quote(vpa)}&pn={quote(payee_name)}"
+            f"&am={amount:.2f}&cu=INR"
+        )
+        img = qrcode.make(uri, box_size=4, border=1)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
 def _letterhead(styles, teacher_name: str, studio_name: Optional[str] = None,
                 logo_bytes: Optional[bytes] = None, doc_label: str = "Invoice"):
-    """Centered logo (large), studio name in a smaller elegant serif caption
-    beneath it — mirrors the centered symmetry of the outreach letterhead
-    rather than a left-logo/right-text business-card layout."""
-    els = [Paragraph(doc_label.upper(), styles["eyebrow"]), Spacer(1, 3 * mm)]
+    """Centered logo (large), the document label (e.g. "Invoice") centered
+    beneath it — no studio-name caption or teacher tagline here, per the
+    reference letterhead."""
+    els = []
 
     if logo_bytes:
         try:
             img = RLImage(io.BytesIO(logo_bytes))
             ratio = (img.imageWidth or 1) / (img.imageHeight or 1)
-            img.drawHeight = 30 * mm
-            img.drawWidth = 30 * mm * ratio
+            img.drawHeight = 34 * mm
+            img.drawWidth = 34 * mm * ratio
             img.hAlign = "CENTER"
             els.append(img)
-            els.append(Spacer(1, 3 * mm))
+            els.append(Spacer(1, 4 * mm))
         except Exception:
             pass
 
-    if studio_name:
-        els.append(Paragraph(studio_name, styles["studio"]))
-        els.append(Spacer(1, 1 * mm))
-        els.append(Paragraph(f"{teacher_name} · Dance", styles["tagline"]))
-    else:
-        els.append(Paragraph(teacher_name, styles["studio"]))
-        els.append(Spacer(1, 1 * mm))
-        els.append(Paragraph("Dance Classes", styles["tagline"]))
+    els.append(Paragraph(doc_label.upper(), ParagraphStyle(
+        "doc-label", parent=styles["eyebrow"], fontSize=16, leading=19,
+    )))
 
     els.append(Spacer(1, 5 * mm))
     els.append(Table([[""]], colWidths=[_PAGE_W], rowHeights=[0.8],
@@ -219,8 +230,13 @@ def _line_items_table(styles, header_labels: list, data_rows: list, col_widths: 
         ("BACKGROUND", (0, 0), (-1, 0), _MAROON),
         ("LINEBELOW", (0, 1), (-1, -2), 0.4, _RULE),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5.5),
+        # Header row: just enough padding to bleed slightly past the text
+        # (~10px), not the same generous padding as body rows — a thick
+        # header band read as heavy-handed.
+        ("TOPPADDING", (0, 0), (-1, 0), 2.6),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 2.6),
+        ("TOPPADDING", (0, 1), (-1, -1), 5.5),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 5.5),
         ("LEFTPADDING", (0, 0), (-1, -1), 4 * mm),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4 * mm),
     ]
@@ -246,10 +262,8 @@ def _summary_card(styles, rows: list, emphasis_index: int, emphasis_color) -> Ta
 
     tbl = Table(cells, colWidths=[65 * mm, 45 * mm], hAlign="RIGHT")
     style = [
-        ("TOPPADDING", (0, 0), (-1, -2), 2.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -2), 2.5),
-        ("TOPPADDING", (0, emphasis_index), (-1, emphasis_index), 5),
-        ("BOTTOMPADDING", (0, emphasis_index), (-1, emphasis_index), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
         ("BACKGROUND", (0, emphasis_index), (-1, emphasis_index), emphasis_color),
         ("LEFTPADDING", (0, emphasis_index), (0, emphasis_index), 4 * mm),
         ("RIGHTPADDING", (0, emphasis_index), (-1, emphasis_index), 4 * mm),
@@ -365,13 +379,38 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
     if has_credit:
         summary_rows.append(("Credit balance", _fmt_money(abs(balance_due))))
         summary_rows.append(("Final Amount Due", _fmt_money(0)))
-        emphasis_color = _PAID
     else:
         summary_rows.append(("Final Amount Due", _fmt_money(balance_due)))
-        emphasis_color = _DUE if balance_due > 0 else _PAID
 
-    story.append(_summary_card(styles, summary_rows, emphasis_index=len(summary_rows) - 1,
-                                emphasis_color=emphasis_color))
+    summary_tbl = _summary_card(styles, summary_rows, emphasis_index=len(summary_rows) - 1,
+                                 emphasis_color=_MAROON)
+
+    # UPI QR code — only meaningful for domestic (INR) dance-class invoices;
+    # a foreign/tour invoice recipient can't pay via UPI, so this is never
+    # shown there (generate_tour_invoice_pdf doesn't call this at all).
+    upi_vpa = (studio_contact or {}).get("contact_upi")
+    qr_bytes = _upi_qr_bytes(upi_vpa, teacher_name, balance_due) if (upi_vpa and balance_due > 0) else None
+    if qr_bytes:
+        qr_img = RLImage(io.BytesIO(qr_bytes))
+        qr_img.drawWidth = 26 * mm
+        qr_img.drawHeight = 26 * mm
+        qr_cell = [
+            qr_img,
+            Paragraph("Scan to pay via UPI", ParagraphStyle(
+                "qr-caption", parent=styles["footer"], fontSize=7.5, alignment=1)),
+        ]
+        row = Table([[qr_cell, summary_tbl]], colWidths=[40 * mm, _PAGE_W - 40 * mm])
+        row.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (0, 0), (0, 0), "LEFT"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(row)
+    else:
+        story.append(summary_tbl)
     story.append(Spacer(1, 7 * mm))
 
     if studio_contact and balance_due > 0:
@@ -388,7 +427,7 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
 
     story.append(Paragraph(
         "Thank you for learning with us. Please remit any balance at your earliest convenience.",
-        ParagraphStyle("thanks", parent=styles["footer"], alignment=0)))
+        styles["footer"]))
 
     story.extend(_footer(styles, teacher_name, studio_contact))
 
@@ -482,25 +521,38 @@ def generate_tour_invoice_pdf(teacher_name: str, studio_name: Optional[str],
         styles,
         [("Paid" if paid else "Amount Due", _fmt_money(invoice.get("amount", 0), currency))],
         emphasis_index=0,
-        emphasis_color=_PAID if paid else _DUE,
+        emphasis_color=_MAROON,
     ))
     story.append(Spacer(1, 7 * mm))
 
     if studio_contact and not paid:
-        contact_bits = []
-        if studio_contact.get("contact_upi"):
-            contact_bits.append(f"UPI: <b>{studio_contact['contact_upi']}</b>")
-        if studio_contact.get("contact_phone"):
-            contact_bits.append(f"Phone: {studio_contact['contact_phone']}")
-        if studio_contact.get("contact_email"):
-            contact_bits.append(f"Email: {studio_contact['contact_email']}")
-        if contact_bits:
-            story.append(Paragraph("<b>Pay to:</b> " + " · ".join(contact_bits), styles["label"]))
-            story.append(Spacer(1, 4 * mm))
+        if currency == "INR":
+            # UPI/phone are India-specific — meaningful for a domestic payer.
+            contact_bits = []
+            if studio_contact.get("contact_upi"):
+                contact_bits.append(f"UPI: <b>{studio_contact['contact_upi']}</b>")
+            if studio_contact.get("contact_phone"):
+                contact_bits.append(f"Phone: {studio_contact['contact_phone']}")
+            if studio_contact.get("contact_email"):
+                contact_bits.append(f"Email: {studio_contact['contact_email']}")
+            if contact_bits:
+                story.append(Paragraph("<b>Pay to:</b> " + " · ".join(contact_bits), styles["label"]))
+                story.append(Spacer(1, 4 * mm))
+        else:
+            # A UPI ID can't receive foreign currency — show international
+            # bank details instead, if she's set them, plus an email for
+            # wire-transfer/PayPal coordination.
+            intl = studio_contact.get("international_payment_details")
+            if intl:
+                story.append(Paragraph(f"<b>Pay to:</b> {intl}", styles["label"]))
+                story.append(Spacer(1, 4 * mm))
+            if studio_contact.get("contact_email"):
+                story.append(Paragraph(f"<b>Contact:</b> {studio_contact['contact_email']}", styles["label"]))
+                story.append(Spacer(1, 4 * mm))
 
     story.append(Paragraph(
         "Thank you for the opportunity to perform. Please remit payment at your earliest convenience.",
-        ParagraphStyle("thanks", parent=styles["footer"], alignment=0)))
+        styles["footer"]))
 
     story.extend(_footer(styles, teacher_name, studio_contact))
 

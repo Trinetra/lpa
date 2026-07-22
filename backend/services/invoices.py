@@ -65,6 +65,7 @@ def build_studio_snapshot(user_doc: Optional[dict]) -> dict:
         "social_youtube": u.get("social_youtube"),
         "social_instagram": u.get("social_instagram"),
         "social_facebook": u.get("social_facebook"),
+        "international_payment_details": u.get("international_payment_details"),
     }
 
 

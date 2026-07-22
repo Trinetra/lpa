@@ -139,6 +139,7 @@ class ProfileUpdate(BaseModel):
     social_youtube: Optional[str] = None
     social_instagram: Optional[str] = None
     social_facebook: Optional[str] = None
+    international_payment_details: Optional[str] = None
 
 class StudentCreate(BaseModel):
     name: str
@@ -559,6 +560,7 @@ def _ser_profile(user_doc: dict) -> dict:
         "social_youtube": user_doc.get("social_youtube"),
         "social_instagram": user_doc.get("social_instagram"),
         "social_facebook": user_doc.get("social_facebook"),
+        "international_payment_details": user_doc.get("international_payment_details"),
     }
 
 @api_router.get("/profile")
