@@ -827,10 +827,11 @@ async def dashboard(user: dict = Depends(get_current_user)):
 
 def _generate_invoice_pdf(teacher_name, student, classes, payments, summary,
                            start, end, studio_name=None, logo_bytes=None,
-                           studio_contact=None):
+                           studio_contact=None, invoice_number=None, created_at=None):
     return pdf_service.generate_invoice_pdf(
         teacher_name, student, classes, payments, summary, start, end,
         studio_name=studio_name, logo_bytes=logo_bytes, studio_contact=studio_contact,
+        invoice_number=invoice_number, created_at=created_at,
     )
 
 
@@ -905,6 +906,8 @@ async def invoice_pdf(invoice_id: str, token: Optional[str] = Query(None),
         studio_name=studio.get("studio_name"),
         logo_bytes=logo_bytes,
         studio_contact=studio,
+        invoice_number=inv.get("invoice_number"),
+        created_at=inv.get("created_at"),
     )
     filename = f"invoice_{invoice_id}.pdf"
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
@@ -917,6 +920,7 @@ async def get_shared_invoice(share_token: str):
         raise HTTPException(status_code=404, detail="Invoice not found")
     return {
         "invoice_id": inv["invoice_id"],
+        "invoice_number": inv.get("invoice_number"),
         "share_token": inv["share_token"],
         "teacher_name": inv.get("teacher_name"),
         "studio": inv.get("studio_snapshot") or {},

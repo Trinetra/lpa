@@ -3,7 +3,21 @@ import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 import { API } from "@/lib/api";
 
+const MAROON = "#7A1F2B";
+const GOLD = "#C98A3A";
+const LABEL = "#8A6D3B";
+const RULE = "#E4D9C8";
+const CREAM = "#FBF5EC";
+
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+const fmtDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "");
+const fmtHours = (h) => {
+  const n = Number(h);
+  const whole = Math.trunc(n);
+  const frac = n - whole;
+  if (Math.abs(frac - 0.5) < 1e-6) return whole ? <>{whole} <sup>1/2</sup></> : <sup>1/2</sup>;
+  return String(n);
+};
 
 export default function SharedInvoicePage() {
   const { token } = useParams();
@@ -33,135 +47,141 @@ export default function SharedInvoicePage() {
   const brandName = studio.studio_name || inv.teacher_name;
   const logoUrl = studio.logo_path ? `${API}/invoices/share/${token}/logo` : null;
 
+  const totalBilled = inv.summary?.total_billed || 0;
+  const totalPaid = inv.summary?.total_paid || 0;
+  const balanceDue = inv.summary?.balance_due || 0;
+  const hasCredit = balanceDue < 0;
+
   return (
-    <div className="min-h-screen py-14 px-6" style={{ background: "var(--bg)" }}>
-      <div className="max-w-3xl mx-auto">
-        <header className="flex items-start justify-between mb-10 gap-4 flex-wrap pb-6"
-          style={{ borderBottom: "1px solid var(--border)" }}>
-          <div className="flex items-center gap-4">
-            {logoUrl && (
-              <img src={logoUrl} alt="" data-testid="shared-logo"
-                className="w-14 h-14 object-contain rounded shrink-0"
-                style={{ background: "var(--surface-2)" }} />
-            )}
-            <div>
-              <div className="uppercase-label mb-1" style={{ color: "var(--primary)" }}>Invoice</div>
-              <div className="font-serif-display text-3xl" data-testid="shared-brand">
-                {brandName}
-              </div>
-              {studio.studio_name && inv.teacher_name && studio.studio_name !== inv.teacher_name && (
-                <div className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>{inv.teacher_name} — Dance Classes</div>
-              )}
-            </div>
+    <div className="min-h-screen py-14 px-6" style={{ background: "#FFFDF9" }}>
+      <div className="max-w-2xl mx-auto">
+        {/* Letterhead — centered, mirrors the PDF */}
+        <header className="text-center mb-8">
+          <div className="uppercase-label mb-3" style={{ color: MAROON, letterSpacing: "1px" }}>Invoice</div>
+          {logoUrl && (
+            <img src={logoUrl} alt="" data-testid="shared-logo"
+              className="w-24 h-24 object-contain rounded mx-auto mb-3" />
+          )}
+          <div className="font-serif-display text-2xl" style={{ color: MAROON }} data-testid="shared-brand">
+            {brandName}
           </div>
+          <div className="text-sm mt-1" style={{ color: LABEL }}>
+            {studio.studio_name && inv.teacher_name && studio.studio_name !== inv.teacher_name
+              ? `${inv.teacher_name} · Dance`
+              : "Dance Classes"}
+          </div>
+          <div className="mt-5 mx-auto" style={{ borderBottom: `1px solid ${GOLD}`, maxWidth: "100%" }} />
+        </header>
+
+        <div className="flex justify-end mb-4">
           <a href={pdfUrl} target="_blank" rel="noreferrer" className="btn-pill" data-testid="shared-download-pdf">
             Download PDF
           </a>
-        </header>
+        </div>
 
-        <div className="surface p-8 mb-6">
-          <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="surface p-0 mb-6 overflow-hidden">
+          {/* Meta info card */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 p-6" style={{ background: CREAM }}>
             <div>
-              <div className="uppercase-label mb-1">Billed to</div>
-              <div className="font-serif-display text-xl">{inv.student?.name}</div>
-              <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                {inv.student?.email} {inv.student?.phone && ` · ${inv.student.phone}`}
-              </div>
+              <div className="uppercase-label" style={{ color: LABEL, fontSize: "0.65rem" }}>Billed to</div>
+              <div className="font-medium">{inv.student?.name}</div>
             </div>
-            <div className="text-right">
-              <div className="uppercase-label mb-1">Period</div>
-              <div>{inv.start_date || "All time"} — {inv.end_date || "today"}</div>
+            <div className="sm:text-right">
+              <div className="uppercase-label" style={{ color: LABEL, fontSize: "0.65rem" }}>Period</div>
+              <div className="font-medium">{fmtDate(inv.start_date) || "All time"} – {fmtDate(inv.end_date) || "Today"}</div>
+            </div>
+            <div className="sm:col-span-2 text-sm" style={{ color: LABEL }}>
+              {inv.student?.email} {inv.student?.phone && ` · ${inv.student.phone}`}
             </div>
           </div>
 
-          <div className="divider-dashed my-4" />
-
-          <div className="uppercase-label mb-2">Classes</div>
-          <table className="w-full text-sm mb-6">
-            <thead>
-              <tr style={{ color: "var(--text-muted)" }}>
-                <th className="text-left py-2">Date</th>
-                <th className="text-right">Hrs</th>
-                <th className="text-right">Rate</th>
-                <th className="text-right">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {inv.classes.map((c) => (
-                <tr key={c.id} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td className="py-2">{c.class_date}</td>
-                  <td className="text-right">{c.hours}</td>
-                  <td className="text-right">{fmt(c.rate)}</td>
-                  <td className="text-right">{fmt(c.amount)}</td>
+          <div className="p-6">
+            <div className="uppercase-label mb-2" style={{ color: "var(--text)" }}>Classes</div>
+            <table className="w-full text-sm mb-6">
+              <thead>
+                <tr style={{ background: MAROON, color: "white" }}>
+                  <th className="text-center py-2 rounded-l">Date</th>
+                  <th className="text-center">Hours</th>
+                  <th className="text-center">Amount</th>
+                  <th className="text-center rounded-r">Notes</th>
                 </tr>
-              ))}
-              {inv.classes.length === 0 && (
-                <tr><td colSpan="4" className="py-4 text-center" style={{ color: "var(--text-muted)" }}>No classes in this period.</td></tr>
-              )}
-            </tbody>
-          </table>
-
-          {inv.payments.length > 0 && (
-            <>
-              <div className="uppercase-label mb-2">Payments received</div>
-              <table className="w-full text-sm mb-6">
-                <thead>
-                  <tr style={{ color: "var(--text-muted)" }}>
-                    <th className="text-left py-2">Date</th>
-                    <th className="text-left">Method</th>
-                    <th className="text-right">Amount</th>
+              </thead>
+              <tbody>
+                {inv.classes.map((c, i) => (
+                  <tr key={c.id} style={{ background: i % 2 === 1 ? CREAM : "transparent" }}>
+                    <td className="py-2 text-center">{fmtDate(c.class_date)}</td>
+                    <td className="text-center">{fmtHours(c.hours)}</td>
+                    <td className="text-center">{fmt(c.amount)}</td>
+                    <td className="text-center" style={{ color: LABEL }}>{c.notes || ""}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {inv.payments.map((p) => (
-                    <tr key={p.id} style={{ borderTop: "1px solid var(--border)" }}>
-                      <td className="py-2">{p.paid_on}</td>
-                      <td>{p.method || "-"}</td>
-                      <td className="text-right">{fmt(p.amount)}</td>
+                ))}
+                {inv.classes.length === 0 && (
+                  <tr><td colSpan="4" className="py-4 text-center" style={{ color: LABEL }}>No classes in this period.</td></tr>
+                )}
+              </tbody>
+            </table>
+
+            {inv.payments.length > 0 && (
+              <>
+                <div className="uppercase-label mb-2" style={{ color: "var(--text)" }}>Payments received</div>
+                <table className="w-full text-sm mb-6">
+                  <thead>
+                    <tr style={{ background: MAROON, color: "white" }}>
+                      <th className="text-center py-2 rounded-l">Date</th>
+                      <th className="text-center">Method</th>
+                      <th className="text-center rounded-r">Amount</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-
-          <div className="divider-dashed my-4" />
-
-          <div className="flex flex-wrap justify-between items-start gap-6">
-            {(studio.contact_upi || studio.contact_phone || studio.contact_email) && (inv.summary?.balance_due > 0) && (
-              <div className="text-xs space-y-1" data-testid="shared-payto">
-                <div className="uppercase-label mb-1">Pay to</div>
-                {studio.contact_upi && <div>UPI: <span style={{ color: "var(--text)" }}>{studio.contact_upi}</span></div>}
-                {studio.contact_phone && <div>Phone: {studio.contact_phone}</div>}
-                {studio.contact_email && <div>Email: {studio.contact_email}</div>}
-              </div>
+                  </thead>
+                  <tbody>
+                    {inv.payments.map((p, i) => (
+                      <tr key={p.id} style={{ background: i % 2 === 1 ? CREAM : "transparent" }}>
+                        <td className="py-2 text-center">{fmtDate(p.paid_on)}</td>
+                        <td className="text-center">{p.method || "—"}</td>
+                        <td className="text-center">{fmt(p.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
             )}
-            <div className="w-full sm:w-auto sm:max-w-xs text-sm space-y-1 ml-auto">
-              <div className="flex justify-between gap-6"><span>Total billed</span><span>{fmt(inv.summary?.total_billed)}</span></div>
-              <div className="flex justify-between gap-6"><span>Total paid</span><span>{fmt(inv.summary?.total_paid)}</span></div>
-              <div className="flex justify-between gap-6 font-serif-display text-lg pt-2"
-                style={{ borderTop: "1px solid var(--border)", color: inv.summary?.balance_due > 0 ? "var(--error)" : "var(--success)" }}>
-                <span>Balance due</span><span>{fmt(inv.summary?.balance_due)}</span>
+
+            <div className="flex justify-end">
+              <div className="w-full sm:w-auto sm:min-w-[280px] text-sm">
+                <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Total billed</span><span>{fmt(totalBilled)}</span></div>
+                <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Total paid</span><span>{fmt(totalPaid)}</span></div>
+                {hasCredit && (
+                  <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Credit balance</span><span>{fmt(Math.abs(balanceDue))}</span></div>
+                )}
+                <div className="flex justify-between gap-6 font-serif-display text-lg mt-2 px-3 py-2 rounded"
+                  style={{ background: hasCredit ? "var(--success)" : (balanceDue > 0 ? "var(--error)" : "var(--success)"), color: "white" }}>
+                  <span>Final Amount Due</span><span>{fmt(hasCredit ? 0 : balanceDue)}</span>
+                </div>
               </div>
             </div>
+
+            {(studio.contact_upi || studio.contact_phone || studio.contact_email) && balanceDue > 0 && (
+              <div className="text-xs mt-4 pt-4" style={{ borderTop: `1px solid ${RULE}`, color: LABEL }} data-testid="shared-payto">
+                <span className="font-medium" style={{ color: "var(--text)" }}>Pay to: </span>
+                {[studio.contact_upi && `UPI: ${studio.contact_upi}`, studio.contact_phone && `Phone: ${studio.contact_phone}`, studio.contact_email && `Email: ${studio.contact_email}`]
+                  .filter(Boolean).join(" · ")}
+              </div>
+            )}
           </div>
         </div>
 
-        {(studio.social_youtube || studio.social_instagram || studio.social_facebook) && (
-          <div className="text-center text-xs mb-3 space-x-4" data-testid="shared-socials">
-            {studio.social_youtube && (
-              <a href={studio.social_youtube} target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--text-muted)" }}>YouTube</a>
-            )}
-            {studio.social_instagram && (
-              <a href={studio.social_instagram} target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--text-muted)" }}>Instagram</a>
-            )}
-            {studio.social_facebook && (
-              <a href={studio.social_facebook} target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--text-muted)" }}>Facebook</a>
-            )}
-          </div>
-        )}
+        {/* Centered footer — mirrors the PDF's sign-off block */}
+        <div className="text-center pt-6 mb-3" style={{ borderTop: `1px solid ${RULE}`, maxWidth: "280px", margin: "0 auto" }}>
+          <div className="font-serif-display text-lg" style={{ color: MAROON }}>{inv.teacher_name}</div>
+          {(studio.social_youtube || studio.social_instagram || studio.social_facebook) && (
+            <div className="text-xs mt-2 space-x-3" data-testid="shared-socials">
+              {studio.social_youtube && <a href={studio.social_youtube} target="_blank" rel="noreferrer" className="underline" style={{ color: LABEL }}>YouTube</a>}
+              {studio.social_instagram && <a href={studio.social_instagram} target="_blank" rel="noreferrer" className="underline" style={{ color: LABEL }}>Instagram</a>}
+              {studio.social_facebook && <a href={studio.social_facebook} target="_blank" rel="noreferrer" className="underline" style={{ color: LABEL }}>Facebook</a>}
+            </div>
+          )}
+        </div>
 
-        <div className="text-center text-xs" style={{ color: "var(--text-muted)" }}>
+        <div className="text-center text-xs mt-8" style={{ color: "var(--text-muted)" }}>
           <Link to="/" className="underline">Powered by {brandName} · Studio Ledger</Link>
         </div>
       </div>

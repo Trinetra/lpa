@@ -6,8 +6,25 @@ from typing import Optional
 from urllib.parse import quote
 
 from bson import ObjectId
+from pymongo import ReturnDocument
 
 from db import db
+
+
+async def next_invoice_number(owner_id: str, on_date: datetime) -> str:
+    """Atomically allocate the next sequential invoice number for the day, as
+    yyyyMMddNN (NN wraps 00-99 — plenty for a single-teacher studio's daily
+    volume). Stored on the invoice at creation so it never changes on
+    re-render, unlike a number computed fresh from 'now' each time."""
+    day_key = on_date.strftime("%Y%m%d")
+    counter = await db.invoice_counters.find_one_and_update(
+        {"_id": f"{owner_id}:{day_key}"},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    seq = counter["seq"] % 100
+    return f"INV-{day_key}{seq:02d}"
 
 
 def filter_by_date(items: list, start: Optional[str], end: Optional[str], key: str) -> list:
@@ -79,8 +96,10 @@ async def create_invoice_for_student(owner_id: str, student: dict,
         user_doc = await db.users.find_one({"_id": ObjectId(owner_id)})
     studio_snapshot = build_studio_snapshot(user_doc)
 
+    now = datetime.now(timezone.utc)
     invoice_doc = {
         "invoice_id": str(uuid.uuid4()),
+        "invoice_number": await next_invoice_number(owner_id, now),
         "share_token": uuid.uuid4().hex,
         "owner_id": owner_id,
         "student_id": student_id,
@@ -92,7 +111,7 @@ async def create_invoice_for_student(owner_id: str, student: dict,
         "summary": summary,
         "start_date": start_date,
         "end_date": end_date,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now.isoformat(),
     }
     await db.invoices.insert_one(invoice_doc)
     return invoice_doc
