@@ -118,7 +118,7 @@ async def _get_service(owner_id: str):
     return service, user["google_calendar_id"]
 
 
-def _event_body(block: dict, student_names: list) -> dict:
+def _event_body(block: dict, student_names: list, zoom_meeting_id: Optional[str] = None) -> dict:
     # Anchor the first occurrence on the next upcoming instance of that
     # weekday so the RRULE's UNTIL-less weekly recurrence starts "now".
     from datetime import date, timedelta
@@ -130,15 +130,30 @@ def _event_body(block: dict, student_names: list) -> dict:
     start_dt = f"{anchor.isoformat()}T{start_h}:{start_m}:00"
     end_dt = f"{anchor.isoformat()}T{end_h}:{end_m}:00"
 
+    zoom_link = None
+    if zoom_meeting_id:
+        zoom_id_clean = "".join(ch for ch in zoom_meeting_id if ch.isdigit())
+        if zoom_id_clean:
+            zoom_link = f"https://zoom.us/j/{zoom_id_clean}"
+
     summary = "Class: " + (", ".join(student_names) if student_names else "Class")
-    return {
+    description_parts = []
+    if zoom_link:
+        description_parts.append(f"Join Zoom Meeting: {zoom_link}")
+    if block.get("notes"):
+        description_parts.append(block["notes"])
+
+    body = {
         "summary": summary,
-        "description": block.get("notes") or "",
+        "description": "\n\n".join(description_parts),
         "start": {"dateTime": start_dt, "timeZone": TIMEZONE},
         "end": {"dateTime": end_dt, "timeZone": TIMEZONE},
         "recurrence": [f"RRULE:FREQ=WEEKLY;BYDAY={DAY_RRULE[block['day_of_week']]}"],
         "reminders": {"useDefault": False, "overrides": [{"method": "email", "minutes": 30}]},
     }
+    if zoom_link:
+        body["location"] = zoom_link
+    return body
 
 
 async def sync_block_upsert(owner_id: str, block: dict, student_names: list) -> Optional[str]:
@@ -147,7 +162,9 @@ async def sync_block_upsert(owner_id: str, block: dict, student_names: list) -> 
     service, calendar_id = await _get_service(owner_id)
     if not service:
         return None
-    body = _event_body(block, student_names)
+    user = await db.users.find_one({"_id": ObjectId(owner_id)})
+    zoom_meeting_id = (user or {}).get("zoom_meeting_id")
+    body = _event_body(block, student_names, zoom_meeting_id)
     try:
         if block.get("google_event_id"):
             event = service.events().update(

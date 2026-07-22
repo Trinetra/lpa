@@ -134,6 +134,7 @@ class ProfileUpdate(BaseModel):
     contact_upi: Optional[str] = None
     contact_email: Optional[EmailStr] = None
     logo_path: Optional[str] = None
+    zoom_meeting_id: Optional[str] = None
 
 class StudentCreate(BaseModel):
     name: str
@@ -366,6 +367,7 @@ def _ser_profile(user_doc: dict) -> dict:
         "contact_upi": user_doc.get("contact_upi"),
         "contact_email": user_doc.get("contact_email") or user_doc.get("email"),
         "logo_path": user_doc.get("logo_path"),
+        "zoom_meeting_id": user_doc.get("zoom_meeting_id"),
     }
 
 @api_router.get("/profile")
