@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 SCOPES = ["https://www.googleapis.com/auth/calendar.events",
           "https://www.googleapis.com/auth/calendar.app.created"]
 DEFAULT_CALENDAR_NAME = "Lakshmi's Dance Classes"
+TIMEZONE = "Asia/Kolkata"  # GMT+5:30 — all classes are in India
 
 DAY_RRULE = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
 
@@ -77,7 +78,9 @@ async def handle_oauth_callback(owner_id: str, code: str) -> None:
     # needs a broader scope), so each connect creates a fresh one. Disconnect
     # clears our stored google_calendar_id, so there's no duplicate-detection
     # need across reconnects.
-    created = service.calendars().insert(body={"summary": calendar_name}).execute()
+    created = service.calendars().insert(
+        body={"summary": calendar_name, "timeZone": TIMEZONE}
+    ).execute()
     calendar_id = created["id"]
 
     await db.users.update_one(
@@ -130,8 +133,8 @@ def _event_body(block: dict, student_names: list) -> dict:
     return {
         "summary": summary,
         "description": block.get("notes") or "",
-        "start": {"dateTime": start_dt, "timeZone": "Asia/Kolkata"},
-        "end": {"dateTime": end_dt, "timeZone": "Asia/Kolkata"},
+        "start": {"dateTime": start_dt, "timeZone": TIMEZONE},
+        "end": {"dateTime": end_dt, "timeZone": TIMEZONE},
         "recurrence": [f"RRULE:FREQ=WEEKLY;BYDAY={DAY_RRULE[block['day_of_week']]}"],
         "reminders": {"useDefault": False, "overrides": [{"method": "email", "minutes": 30}]},
     }

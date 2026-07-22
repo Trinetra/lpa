@@ -38,23 +38,64 @@ def _pdf_styles():
 def _pdf_header(styles, teacher_name: str, studio_name: Optional[str] = None,
                 logo_bytes: Optional[bytes] = None):
     els = []
+
+    # Logo + studio name side by side, with "Invoice" as a small label above
+    # the studio name rather than a competing headline — reads as one
+    # letterhead block instead of two stacked, disconnected titles.
+    label = Paragraph("INVOICE", ParagraphStyle(
+        "inv-label", parent=styles["label"], fontSize=10, textColor=_PDF_ACCENT,
+        leading=12, spaceAfter=1,
+    ))
+    name_style = ParagraphStyle(
+        "s", parent=styles["title"], fontSize=20, leading=23,
+        textColor=_PDF_TEXT_DARK, spaceAfter=0,
+    )
+    name_para = Paragraph(studio_name, name_style) if studio_name else None
+    teacher_para = Paragraph(f"{teacher_name} — Dance Classes", styles["label"])
+
+    logo_cell = None
     if logo_bytes:
         try:
             img = RLImage(io.BytesIO(logo_bytes))
             ratio = (img.imageWidth or 1) / (img.imageHeight or 1)
-            img.drawHeight = 22 * mm
-            img.drawWidth = 22 * mm * ratio
-            img.hAlign = "LEFT"
-            els.append(img)
-            els.append(Spacer(1, 3 * mm))
+            img.drawHeight = 16 * mm
+            img.drawWidth = 16 * mm * ratio
+            logo_cell = img
         except Exception:
-            pass
-    if studio_name:
-        studio_style = ParagraphStyle("s", parent=styles["title"], fontSize=16, textColor=_PDF_TEXT_DARK)
-        els.append(Paragraph(studio_name, studio_style))
-    els.append(Paragraph("Invoice", styles["title"]))
-    els.append(Paragraph(f"From <b>{teacher_name}</b> — Dance Classes", styles["label"]))
-    els.append(Spacer(1, 8 * mm))
+            logo_cell = None
+
+    text_cell = [label]
+    if name_para:
+        text_cell.append(name_para)
+    else:
+        # No studio name set — "Invoice" alone still needs to read as a
+        # proper headline rather than a small eyebrow label with nothing
+        # under it.
+        text_cell[-1] = Paragraph("Invoice", styles["title"])
+    text_cell.append(Spacer(1, 1.5 * mm))
+    text_cell.append(teacher_para)
+
+    if logo_cell:
+        header_table = Table(
+            [[logo_cell, text_cell]],
+            colWidths=[20 * mm, 140 * mm],
+        )
+        header_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (0, 0), 0),
+            ("LEFTPADDING", (1, 0), (1, 0), 6 * mm),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        els.append(header_table)
+    else:
+        els.extend(text_cell)
+
+    els.append(Spacer(1, 3 * mm))
+    els.append(Table([[""]], colWidths=[174 * mm], rowHeights=[0.6],
+                      style=TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.6, _PDF_RULE)])))
+    els.append(Spacer(1, 6 * mm))
     return els
 
 
