@@ -196,6 +196,9 @@ class ScheduleBlockUpdate(BaseModel):
     student_ids: Optional[List[str]] = None
     notes: Optional[str] = None
 
+class CalendarNameUpdate(BaseModel):
+    calendar_name: str
+
 # --------------- Serializers -----------------
 def ser_student(doc):
     return {
@@ -1158,7 +1161,19 @@ async def calendar_status(user: dict = Depends(get_current_user)):
     return {
         "configured": calendar_service.is_configured(),
         "connected": bool(full and full.get("google_refresh_token")),
+        "calendar_name": (full or {}).get("google_calendar_name") or calendar_service.DEFAULT_CALENDAR_NAME,
     }
+
+@api_router.patch("/calendar/name")
+async def calendar_set_name(body: CalendarNameUpdate, user: dict = Depends(get_current_user)):
+    name = body.calendar_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Calendar name can't be empty")
+    full = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    if full and full.get("google_refresh_token"):
+        raise HTTPException(status_code=400, detail="Disconnect before renaming — the connected calendar keeps its current name")
+    await db.users.update_one({"_id": user["_id"]}, {"$set": {"google_calendar_name": name}})
+    return {"calendar_name": name}
 
 @api_router.get("/calendar/connect")
 async def calendar_connect(user: dict = Depends(get_current_user)):

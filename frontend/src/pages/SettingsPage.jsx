@@ -7,12 +7,17 @@ import { toast } from "sonner";
 
 function CalendarConnectCard() {
   const [status, setStatus] = useState(null);
+  const [calendarName, setCalendarName] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [savingName, setSavingName] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const load = () => {
-    api.get("/calendar/status").then((r) => setStatus(r.data)).catch(() => {});
+    api.get("/calendar/status").then((r) => {
+      setStatus(r.data);
+      setCalendarName(r.data.calendar_name);
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -24,6 +29,19 @@ function CalendarConnectCard() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const saveName = async () => {
+    setSavingName(true);
+    try {
+      await api.patch("/calendar/name", { calendar_name: calendarName });
+      toast.success("Calendar name saved");
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Couldn't save name");
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const connect = async () => {
     setConnecting(true);
@@ -52,6 +70,8 @@ function CalendarConnectCard() {
 
   if (!status) return null;
 
+  const nameChanged = calendarName.trim() && calendarName.trim() !== status.calendar_name;
+
   return (
     <div data-testid="calendar-connect-card" className="surface p-6">
       <div className="flex items-center gap-2 mb-1">
@@ -70,9 +90,36 @@ function CalendarConnectCard() {
         <>
           <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
             {status.connected
-              ? "Your weekly schedule syncs to a dedicated \"Lakshmi Studio Ledger — Classes\" calendar, with reminders 30 minutes before each class."
+              ? `Your weekly schedule syncs to your "${status.calendar_name}" calendar, with reminders 30 minutes before each class.`
               : "Connect your Google account to automatically keep a calendar in sync with your weekly schedule."}
           </p>
+
+          {!status.connected && (
+            <label className="block mb-4 max-w-sm">
+              <span className="uppercase-label block mb-1">Calendar name</span>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={calendarName}
+                  onChange={(e) => setCalendarName(e.target.value)}
+                  data-testid="calendar-name-input"
+                  className="w-full bg-transparent border border-white/10 rounded px-3 py-2"
+                />
+                {nameChanged && (
+                  <button
+                    type="button"
+                    onClick={saveName}
+                    disabled={savingName}
+                    data-testid="calendar-name-save-btn"
+                    className="btn-ghost shrink-0"
+                  >
+                    {savingName ? "Saving…" : "Save"}
+                  </button>
+                )}
+              </div>
+            </label>
+          )}
+
           {status.connected ? (
             <button
               type="button"

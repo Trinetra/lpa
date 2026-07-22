@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.events",
           "https://www.googleapis.com/auth/calendar.app.created"]
-CALENDAR_NAME = "Lakshmi Studio Ledger — Classes"
+DEFAULT_CALENDAR_NAME = "Lakshmi's Dance Classes"
 
 DAY_RRULE = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
 
@@ -68,14 +68,18 @@ async def handle_oauth_callback(owner_id: str, code: str) -> None:
     flow.fetch_token(code=code)
     creds = flow.credentials
 
+    user = await db.users.find_one({"_id": owner_id})
+    calendar_name = (user or {}).get("google_calendar_name") or DEFAULT_CALENDAR_NAME
+
     service = build("calendar", "v3", credentials=creds)
-    calendar_id = _find_or_create_calendar(service)
+    calendar_id = _find_or_create_calendar(service, calendar_name)
 
     await db.users.update_one(
         {"_id": owner_id},
         {"$set": {
             "google_refresh_token": creds.refresh_token,
             "google_calendar_id": calendar_id,
+            "google_calendar_name": calendar_name,
         }},
     )
 
@@ -87,12 +91,12 @@ async def disconnect(owner_id: str) -> None:
     )
 
 
-def _find_or_create_calendar(service) -> str:
+def _find_or_create_calendar(service, calendar_name: str) -> str:
     existing = service.calendarList().list().execute()
     for cal in existing.get("items", []):
-        if cal.get("summary") == CALENDAR_NAME:
+        if cal.get("summary") == calendar_name:
             return cal["id"]
-    created = service.calendars().insert(body={"summary": CALENDAR_NAME}).execute()
+    created = service.calendars().insert(body={"summary": calendar_name}).execute()
     return created["id"]
 
 
