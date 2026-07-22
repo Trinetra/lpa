@@ -13,6 +13,7 @@ import logging
 import os
 from typing import Optional
 
+from bson import ObjectId
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request as GoogleAuthRequest
@@ -69,7 +70,7 @@ async def handle_oauth_callback(owner_id: str, code: str) -> None:
     flow.fetch_token(code=code)
     creds = flow.credentials
 
-    user = await db.users.find_one({"_id": owner_id})
+    user = await db.users.find_one({"_id": ObjectId(owner_id)})
     calendar_name = (user or {}).get("google_calendar_name") or DEFAULT_CALENDAR_NAME
 
     service = build("calendar", "v3", credentials=creds)
@@ -84,7 +85,7 @@ async def handle_oauth_callback(owner_id: str, code: str) -> None:
     calendar_id = created["id"]
 
     await db.users.update_one(
-        {"_id": owner_id},
+        {"_id": ObjectId(owner_id)},
         {"$set": {
             "google_refresh_token": creds.refresh_token,
             "google_calendar_id": calendar_id,
@@ -95,13 +96,13 @@ async def handle_oauth_callback(owner_id: str, code: str) -> None:
 
 async def disconnect(owner_id: str) -> None:
     await db.users.update_one(
-        {"_id": owner_id},
+        {"_id": ObjectId(owner_id)},
         {"$unset": {"google_refresh_token": "", "google_calendar_id": ""}},
     )
 
 
 async def _get_service(owner_id: str):
-    user = await db.users.find_one({"_id": owner_id})
+    user = await db.users.find_one({"_id": ObjectId(owner_id)})
     if not user or not user.get("google_refresh_token"):
         return None, None
     creds = Credentials(

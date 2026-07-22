@@ -1172,7 +1172,7 @@ async def calendar_set_name(body: CalendarNameUpdate, user: dict = Depends(get_c
     full = await db.users.find_one({"_id": ObjectId(user["_id"])})
     if full and full.get("google_refresh_token"):
         raise HTTPException(status_code=400, detail="Disconnect before renaming — the connected calendar keeps its current name")
-    await db.users.update_one({"_id": user["_id"]}, {"$set": {"google_calendar_name": name}})
+    await db.users.update_one({"_id": ObjectId(user["_id"])}, {"$set": {"google_calendar_name": name}})
     return {"calendar_name": name}
 
 @api_router.get("/calendar/connect")
