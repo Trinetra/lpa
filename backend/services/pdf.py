@@ -516,11 +516,10 @@ def generate_tour_invoice_pdf(teacher_name: str, studio_name: Optional[str],
 
     paid = invoice.get("paid", False)
     amount_label = "Paid" if paid else "Amount Due"
-    story.append(Paragraph(
-        f'<font size="10">{amount_label.upper()}</font><br/>'
-        f'<font name="{_FONT_BOLD}" size="18" color="#7A1F2B">{_fmt_money(invoice.get("amount", 0), currency)}</font>',
-        ParagraphStyle("amountDue", parent=styles["label"], leading=22),
-    ))
+    story.append(Paragraph(amount_label.upper(), styles["sectionHead"]))
+    story.append(Spacer(1, 2.5 * mm))
+    story.append(Paragraph(_fmt_money(invoice.get("amount", 0), currency), ParagraphStyle(
+        "amountDue", parent=styles["label"], fontSize=10.5, textColor=_INK, leading=15)))
     story.append(Spacer(1, 8 * mm))
 
     if studio_contact and not paid:
