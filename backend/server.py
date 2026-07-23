@@ -8,7 +8,7 @@ import os
 import io
 import uuid
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional
 
 import bcrypt
@@ -274,10 +274,12 @@ class TourContactUpdate(BaseModel):
 
 class TourTodoCreate(BaseModel):
     text: str
+    due_date: Optional[str] = None  # ISO date str
 
 class TourTodoUpdate(BaseModel):
     text: Optional[str] = None
     done: Optional[bool] = None
+    due_date: Optional[str] = None
 
 TOUR_CURRENCIES = ["INR", "EUR", "USD", "GBP"]
 CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
@@ -317,6 +319,7 @@ def ser_student(doc):
         "description": doc.get("description"),
         "hourly_rate": doc.get("hourly_rate", 0.0),
         "photo_path": doc.get("photo_path"),
+        "is_active": doc.get("is_active", True),
         "created_at": doc.get("created_at"),
     }
 
@@ -420,6 +423,7 @@ def ser_tour_todo(doc):
         "tour_id": doc.get("tour_id"),
         "text": doc.get("text"),
         "done": doc.get("done", False),
+        "due_date": doc.get("due_date"),
         "created_at": doc.get("created_at"),
     }
 
@@ -694,6 +698,40 @@ async def delete_student(sid: str, user: dict = Depends(get_current_user)):
     await db.payments.delete_many({"student_id": sid, "owner_id": user["_id"]})
     return {"ok": True}
 
+@api_router.post("/students/{sid}/deactivate")
+async def deactivate_student(sid: str, user: dict = Depends(get_current_user)):
+    doc = await db.students.find_one({"_id": ObjectId(sid), "owner_id": user["_id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Student not found")
+    await db.students.update_one({"_id": ObjectId(sid)}, {"$set": {"is_active": False}})
+
+    # A deactivated student shouldn't keep occupying a slot on the weekly
+    # schedule (or its synced Calendar event) — pull them out of every block,
+    # removing the block entirely if they were its only student.
+    async for block in db.schedule_blocks.find({"owner_id": user["_id"], "student_ids": sid}):
+        remaining = [s for s in block["student_ids"] if s != sid]
+        if remaining:
+            await db.schedule_blocks.update_one({"_id": block["_id"]}, {"$set": {"student_ids": remaining}})
+            names = await _student_names(user["_id"], remaining)
+            updated = await db.schedule_blocks.find_one({"_id": block["_id"]})
+            event_id = await calendar_service.sync_block_upsert(user["_id"], updated, names)
+            if event_id and event_id != updated.get("google_event_id"):
+                await db.schedule_blocks.update_one({"_id": block["_id"]}, {"$set": {"google_event_id": event_id}})
+        else:
+            await calendar_service.sync_block_delete(user["_id"], block.get("google_event_id"))
+            await db.schedule_blocks.delete_one({"_id": block["_id"]})
+
+    return ser_student(await db.students.find_one({"_id": ObjectId(sid)}))
+
+@api_router.post("/students/{sid}/reactivate")
+async def reactivate_student(sid: str, user: dict = Depends(get_current_user)):
+    res = await db.students.update_one(
+        {"_id": ObjectId(sid), "owner_id": user["_id"]}, {"$set": {"is_active": True}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return ser_student(await db.students.find_one({"_id": ObjectId(sid)}))
+
 # --------------- Classes endpoints -----------------
 @api_router.get("/classes")
 async def list_classes(student_id: Optional[str] = None, limit: int = 500,
@@ -835,6 +873,64 @@ async def student_summary(sid: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Student not found")
     return await compute_student_summary(user["_id"], sid)
 
+# --------------- Page visit tracking (for dashboard shortcuts) -----------------
+# Static labels/paths for the top-level pages. Tour pages are dynamic (one
+# per tour + tab) and their labels are resolved at read time since a tour's
+# name can change after a visit was recorded.
+_STATIC_DEST_LABELS = {
+    "students": ("Students", "/students"),
+    "schedule": ("Schedule", "/schedule"),
+    "classes": ("Classes", "/classes"),
+    "payments": ("Payments", "/payments"),
+    "invoices": ("Invoices", "/invoices"),
+    "charts": ("Charts", "/charts"),
+}
+_TOUR_TAB_LABELS = {
+    "schedule": "Schedule", "expenses": "Expenses", "invoices": "Invoices",
+    "checkins": "Check-ins", "contacts": "Contacts", "todos": "To-dos",
+}
+
+class VisitRecord(BaseModel):
+    dest_key: str  # e.g. "students" or "tour:<tour_id>:todos"
+
+@api_router.post("/visits")
+async def record_visit(body: VisitRecord, user: dict = Depends(get_current_user)):
+    dest_key = body.dest_key
+    if not (dest_key in _STATIC_DEST_LABELS or dest_key.startswith("tour:")):
+        raise HTTPException(status_code=400, detail="Unknown destination")
+    await db.page_visits.update_one(
+        {"owner_id": user["_id"], "dest_key": dest_key},
+        {"$inc": {"count": 1}, "$set": {"last_visited_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+async def _top_shortcuts(owner_id: str, limit: int = 4) -> list:
+    cur = db.page_visits.find({"owner_id": owner_id}).sort("count", -1).limit(limit + 5)
+    candidates = [v async for v in cur]
+    tour_name_cache = {}
+    out = []
+    for v in candidates:
+        key = v["dest_key"]
+        if key in _STATIC_DEST_LABELS:
+            label, path = _STATIC_DEST_LABELS[key]
+        elif key.startswith("tour:"):
+            _, tour_id, tab = key.split(":", 2)
+            if tour_id not in tour_name_cache:
+                tour_doc = await db.tours.find_one({"_id": ObjectId(tour_id), "owner_id": owner_id})
+                tour_name_cache[tour_id] = tour_doc.get("name") if tour_doc else None
+            tour_name = tour_name_cache[tour_id]
+            if not tour_name:
+                continue  # tour was deleted since — skip, don't link to a dead page
+            label = f"{tour_name} — {_TOUR_TAB_LABELS.get(tab, tab.title())}"
+            path = f"/tours/{tour_id}?tab={tab}"
+        else:
+            continue
+        out.append({"dest_key": key, "label": label, "path": path, "count": v["count"]})
+        if len(out) == limit:
+            break
+    return out
+
 @api_router.get("/dashboard")
 async def dashboard(user: dict = Depends(get_current_user)):
     total_billed = 0.0
@@ -863,6 +959,46 @@ async def dashboard(user: dict = Depends(get_current_user)):
         st = student_map.get(c["student_id"])
         item["student_name"] = st.get("name") if st else "Unknown"
         recent.append(item)
+
+    # Today's scheduled classes, from the recurring weekly schedule (not the
+    # classes log, which records classes already given).
+    today = date.today()
+    today_classes = []
+    cur = db.schedule_blocks.find({"owner_id": user["_id"], "day_of_week": today.weekday()}).sort("start_time", 1)
+    async for b in cur:
+        names = [student_map[sid]["name"] for sid in b.get("student_ids", []) if sid in student_map]
+        today_classes.append({
+            "id": str(b["_id"]),
+            "start_time": b.get("start_time"),
+            "end_time": b.get("end_time"),
+            "student_names": names,
+        })
+
+    # Tour to-dos due today or overdue, still open — across every tour, so
+    # she doesn't have to check each tour individually to know what's urgent.
+    today_str = today.isoformat()
+    todos_due = []
+    cur = db.tour_todos.find({
+        "owner_id": user["_id"], "done": False,
+        "due_date": {"$ne": None, "$lte": today_str},
+    }).sort("due_date", 1)
+    tour_name_cache = {}
+    async for t in cur:
+        tid = t["tour_id"]
+        if tid not in tour_name_cache:
+            tour_doc = await db.tours.find_one({"_id": ObjectId(tid)})
+            tour_name_cache[tid] = tour_doc.get("name") if tour_doc else "Tour"
+        todos_due.append({
+            "id": str(t["_id"]),
+            "tour_id": tid,
+            "tour_name": tour_name_cache[tid],
+            "text": t.get("text"),
+            "due_date": t.get("due_date"),
+            "overdue": t.get("due_date") < today_str,
+        })
+
+    shortcuts = await _top_shortcuts(user["_id"])
+
     return {
         "total_students": len(student_map),
         "total_billed": round(total_billed, 2),
@@ -870,6 +1006,9 @@ async def dashboard(user: dict = Depends(get_current_user)):
         "total_due": round(total_billed - total_paid, 2),
         "students": per_student,
         "recent_classes": recent,
+        "today_classes": today_classes,
+        "todos_due": todos_due,
+        "shortcuts": shortcuts,
     }
 
 # --------------- Invoice endpoints -----------------
@@ -1630,6 +1769,7 @@ async def create_tour_todo(tour_id: str, body: TourTodoCreate, user: dict = Depe
         "owner_id": user["_id"],
         "text": body.text,
         "done": False,
+        "due_date": body.due_date,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     res = await db.tour_todos.insert_one(doc)
@@ -1898,6 +2038,7 @@ async def on_startup():
     await db.tour_todos.create_index("tour_id")
     await db.tour_invoices.create_index("tour_id")
     await db.tour_invoices.create_index("share_token", unique=True)
+    await db.page_visits.create_index([("owner_id", 1), ("dest_key", 1)], unique=True)
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

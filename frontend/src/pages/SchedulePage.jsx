@@ -226,10 +226,10 @@ function BlockModal({ block, students, onClose, onSaved, onDeleted }) {
         <div className="block mb-3">
           <span className="uppercase-label block mb-2">Students</span>
           <div className="max-h-40 overflow-y-auto space-y-1 border rounded p-2" style={{ borderColor: "var(--border)" }}>
-            {students.length === 0 && (
-              <div className="text-sm" style={{ color: "var(--text-muted)" }}>No students yet.</div>
+            {students.filter((s) => s.is_active !== false).length === 0 && (
+              <div className="text-sm" style={{ color: "var(--text-muted)" }}>No active students yet.</div>
             )}
-            {students.map((s) => (
+            {students.filter((s) => s.is_active !== false).map((s) => (
               <label key={s.id} className="flex items-center gap-2 px-1 py-1 text-sm cursor-pointer">
                 <input
                   type="checkbox"

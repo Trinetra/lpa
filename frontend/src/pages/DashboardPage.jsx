@@ -2,7 +2,20 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
-import { IndianRupee, TrendingUp, TrendingDown, Users as UsersIcon, Clock } from "lucide-react";
+import {
+  IndianRupee, TrendingUp, TrendingDown, Users as UsersIcon, Clock,
+  CalendarClock, ListChecks, ArrowRight, AlertTriangle,
+} from "lucide-react";
+
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const fmtTime = (t) => {
+  if (!t) return "";
+  const [h, m] = t.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+};
+const fmtDueDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "");
 
 function StatCard({ label, value, icon: Icon, tone, testid }) {
   return (
@@ -35,6 +48,8 @@ export default function DashboardPage() {
   if (!data) return null;
 
   const studentsOwing = data.students.filter((s) => s.balance_due > 0);
+  const jsDay = new Date().getDay(); // 0=Sunday..6=Saturday
+  const todayName = DAY_NAMES[jsDay === 0 ? 6 : jsDay - 1]; // convert to 0=Monday..6=Sunday
 
   return (
     <div data-testid="dashboard-page" className="space-y-10">
@@ -49,6 +64,79 @@ export default function DashboardPage() {
           Log a class
         </Link>
       </header>
+
+      {(data.shortcuts?.length > 0) && (
+        <section data-testid="dashboard-shortcuts">
+          <div className="uppercase-label mb-3">Shortcuts</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {data.shortcuts.map((s) => (
+              <Link
+                key={s.dest_key}
+                to={s.path}
+                data-testid={`shortcut-${s.dest_key.replace(/[:/]/g, "-")}`}
+                className="surface surface-hover p-4 flex items-center justify-between gap-2"
+              >
+                <span className="text-sm truncate">{s.label}</span>
+                <ArrowRight size={14} strokeWidth={1.5} style={{ color: "var(--text-muted)" }} className="shrink-0" />
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {(data.today_classes?.length > 0 || data.todos_due?.length > 0) && (
+        <section data-testid="dashboard-today" className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="surface p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <CalendarClock size={16} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
+              <div className="uppercase-label">Today · {todayName}</div>
+            </div>
+            {data.today_classes.length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>No classes scheduled today.</p>
+            ) : (
+              <div className="space-y-3">
+                {data.today_classes.map((c) => (
+                  <div key={c.id} data-testid={`today-class-${c.id}`} className="flex items-center justify-between gap-3">
+                    <span className="text-sm truncate">{c.student_names.join(", ") || "Class"}</span>
+                    <span className="text-xs shrink-0" style={{ color: "var(--text-muted)" }}>
+                      {fmtTime(c.start_time)} – {fmtTime(c.end_time)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="surface p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <ListChecks size={16} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
+              <div className="uppercase-label">Tour to-dos due</div>
+            </div>
+            {data.todos_due.length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>Nothing due — you're all caught up.</p>
+            ) : (
+              <div className="space-y-3">
+                {data.todos_due.map((t) => (
+                  <Link
+                    key={t.id}
+                    to={`/tours/${t.tour_id}?tab=todos`}
+                    data-testid={`todo-due-${t.id}`}
+                    className="flex items-center justify-between gap-3 hover:text-[color:var(--primary)] transition-colors"
+                  >
+                    <span className="text-sm truncate flex items-center gap-2">
+                      {t.overdue && <AlertTriangle size={13} style={{ color: "var(--error)" }} className="shrink-0" />}
+                      {t.text}
+                    </span>
+                    <span className="text-xs shrink-0" style={{ color: t.overdue ? "var(--error)" : "var(--text-muted)" }}>
+                      {t.tour_name} · {fmtDueDate(t.due_date)}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Students" value={data.total_students} icon={UsersIcon} testid="stat-students" />

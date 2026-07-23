@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
-import { Plus, Trash2, Pencil, Upload, X } from "lucide-react";
+import { Plus, Trash2, Pencil, Upload, X, UserX, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -172,6 +172,7 @@ export default function StudentsPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // null / student object / "new"
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showInactive, setShowInactive] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -197,6 +198,29 @@ export default function StudentsPage() {
     }
   };
 
+  const deactivate = async (s) => {
+    try {
+      await api.post(`/students/${s.id}/deactivate`);
+      toast.success(`${s.name} deactivated — removed from the weekly schedule`);
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Failed to deactivate");
+    }
+  };
+
+  const reactivate = async (s) => {
+    try {
+      await api.post(`/students/${s.id}/reactivate`);
+      toast.success(`${s.name} reactivated`);
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Failed to reactivate");
+    }
+  };
+
+  const visibleStudents = students.filter((s) => showInactive || s.is_active !== false);
+  const inactiveCount = students.filter((s) => s.is_active === false).length;
+
   return (
     <div data-testid="students-page" className="space-y-8">
       <header className="flex items-end justify-between flex-wrap gap-4">
@@ -204,9 +228,22 @@ export default function StudentsPage() {
           <div className="uppercase-label mb-2">Roster</div>
           <h1 className="font-serif-display text-4xl sm:text-5xl">Students</h1>
         </div>
-        <button data-testid="add-student-btn" onClick={() => setEditing("new")} className="btn-pill flex items-center gap-2">
-          <Plus size={16} /> Add student
-        </button>
+        <div className="flex items-center gap-3">
+          {inactiveCount > 0 && (
+            <label className="flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+                data-testid="show-inactive-toggle"
+              />
+              Show inactive ({inactiveCount})
+            </label>
+          )}
+          <button data-testid="add-student-btn" onClick={() => setEditing("new")} className="btn-pill flex items-center gap-2">
+            <Plus size={16} /> Add student
+          </button>
+        </div>
       </header>
 
       {loading ? (
@@ -221,10 +258,11 @@ export default function StudentsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {students.map((s) => {
+          {visibleStudents.map((s) => {
             const due = dueMap[s.id] || {};
+            const inactive = s.is_active === false;
             return (
-              <div key={s.id} data-testid={`student-card-${s.id}`} className="surface p-6 surface-hover">
+              <div key={s.id} data-testid={`student-card-${s.id}`} className="surface p-6 surface-hover" style={{ opacity: inactive ? 0.6 : 1 }}>
                 <div className="flex items-start gap-4">
                   <div className="w-14 h-14 rounded-full overflow-hidden shrink-0" style={{ background: "var(--surface-2)" }}>
                     <AuthImage
@@ -246,6 +284,12 @@ export default function StudentsPage() {
                       >
                         {s.name}
                       </Link>
+                      {inactive && (
+                        <span className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full shrink-0"
+                          style={{ color: "var(--text-muted)", border: "1px solid var(--border)" }}>
+                          Inactive
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                       {s.level || "No level"}
@@ -282,6 +326,28 @@ export default function StudentsPage() {
                   >
                     <Pencil size={15} strokeWidth={1.5} />
                   </button>
+                  {inactive ? (
+                    <button
+                      data-testid={`reactivate-student-${s.id}`}
+                      onClick={() => reactivate(s)}
+                      className="p-2 rounded hover:bg-white/5 transition-colors"
+                      title="Reactivate"
+                      type="button"
+                      style={{ color: "var(--success)" }}
+                    >
+                      <UserCheck size={15} strokeWidth={1.5} />
+                    </button>
+                  ) : (
+                    <button
+                      data-testid={`deactivate-student-${s.id}`}
+                      onClick={() => deactivate(s)}
+                      className="p-2 rounded hover:bg-white/5 transition-colors"
+                      title="Deactivate (removes from weekly schedule)"
+                      type="button"
+                    >
+                      <UserX size={15} strokeWidth={1.5} />
+                    </button>
+                  )}
                   <button
                     data-testid={`delete-student-${s.id}`}
                     onClick={() => setConfirmDelete(s)}

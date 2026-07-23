@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import { api, formatApiErrorDetail, API } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
 import {
@@ -926,6 +926,7 @@ function ContactForm({ tourId, contact, onClose, onSaved }) {
 function TodosTab({ tourId }) {
   const [todos, setTodos] = useState(null);
   const [text, setText] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [adding, setAdding] = useState(false);
 
   const load = () => api.get(`/tours/${tourId}/todos`).then((r) => setTodos(r.data));
@@ -936,8 +937,9 @@ function TodosTab({ tourId }) {
     if (!text.trim()) return;
     setAdding(true);
     try {
-      await api.post(`/tours/${tourId}/todos`, { text: text.trim() });
+      await api.post(`/tours/${tourId}/todos`, { text: text.trim(), due_date: dueDate || null });
       setText("");
+      setDueDate("");
       load();
     } catch (e2) {
       toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Failed to add");
@@ -968,10 +970,13 @@ function TodosTab({ tourId }) {
 
   return (
     <div className="space-y-4">
-      <form onSubmit={add} className="surface p-4 flex gap-2">
+      <form onSubmit={add} className="surface p-4 flex flex-wrap gap-2">
         <input value={text} onChange={(e) => setText(e.target.value)} data-testid="todo-input"
           placeholder="Add a planning task…"
-          className="flex-1 bg-transparent border border-white/10 rounded px-3 py-2" />
+          className="flex-1 min-w-[180px] bg-transparent border border-white/10 rounded px-3 py-2" />
+        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} data-testid="todo-due-input"
+          title="Due by (optional)"
+          className="bg-transparent border border-white/10 rounded px-3 py-2 text-sm" />
         <button type="submit" disabled={adding} data-testid="todo-add-btn" className="btn-pill flex items-center gap-2 text-sm shrink-0">
           <Plus size={14} /> Add
         </button>
@@ -988,6 +993,11 @@ function TodosTab({ tourId }) {
               <span className="truncate" style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--text-muted)" : "var(--text)" }}>
                 {t.text}
               </span>
+              {t.due_date && !t.done && (
+                <span className="text-xs shrink-0" style={{ color: t.due_date < new Date().toISOString().slice(0, 10) ? "var(--error)" : "var(--text-muted)" }}>
+                  Due {fmtDate(t.due_date)}
+                </span>
+              )}
             </button>
             <button onClick={() => remove(t.id)} data-testid={`todo-delete-${t.id}`} className="p-1 shrink-0" style={{ color: "var(--error)" }}>
               <Trash2 size={14} />
@@ -1002,12 +1012,24 @@ function TodosTab({ tourId }) {
 // --------------- Page -----------------
 export default function TourDetailPage() {
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tour, setTour] = useState(null);
-  const [tab, setTab] = useState("schedule");
+  const initialTab = TABS.some((t) => t.key === searchParams.get("tab")) ? searchParams.get("tab") : "schedule";
+  const [tab, setTab] = useState(initialTab);
 
   useEffect(() => {
     api.get(`/tours/${id}`).then((r) => setTour(r.data)).catch(() => setTour(false));
   }, [id]);
+
+  // Record the visit for dashboard shortcuts — best-effort, never blocks the UI.
+  useEffect(() => {
+    api.post("/visits", { dest_key: `tour:${id}:${tab}` }).catch(() => {});
+  }, [id, tab]);
+
+  const selectTab = (key) => {
+    setTab(key);
+    setSearchParams({ tab: key }, { replace: true });
+  };
 
   const copyShareLink = () => {
     const link = `${window.location.origin}/tour/${tour.share_token}`;
@@ -1038,7 +1060,7 @@ export default function TourDetailPage() {
 
       <div className="flex gap-1 overflow-x-auto" style={{ borderBottom: "1px solid var(--border)" }}>
         {TABS.map((t) => (
-          <TabButton key={t.key} active={tab === t.key} onClick={() => setTab(t.key)} testid={`tab-${t.key}`}>
+          <TabButton key={t.key} active={tab === t.key} onClick={() => selectTab(t.key)} testid={`tab-${t.key}`}>
             {t.label}
           </TabButton>
         ))}

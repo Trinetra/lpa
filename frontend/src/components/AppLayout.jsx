@@ -31,6 +31,15 @@ export default function AppLayout() {
 
   useEffect(() => { setMoreOpen(false); }, [location.pathname]);
 
+  // Record top-level page visits for dashboard shortcuts. Tour tab visits are
+  // tracked separately inside TourDetailPage (it knows which tab is active).
+  useEffect(() => {
+    const destKey = location.pathname.replace(/^\//, "").split("/")[0];
+    if (["students", "schedule", "classes", "payments", "invoices", "charts"].includes(destKey)) {
+      api.post("/visits", { dest_key: destKey }).catch(() => {});
+    }
+  }, [location.pathname]);
+
   useEffect(() => {
     api.get("/profile").then((r) => setProfile(r.data)).catch(() => {});
   }, []);
