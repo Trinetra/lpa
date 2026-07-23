@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { api } from "@/lib/api";
@@ -17,13 +17,19 @@ import {
   LogOut,
   CalendarClock,
   Plane,
+  MoreHorizontal,
+  X,
 } from "lucide-react";
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const { theme, toggle } = useTheme();
   const nav = useNavigate();
+  const location = useLocation();
   const [profile, setProfile] = useState(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  useEffect(() => { setMoreOpen(false); }, [location.pathname]);
 
   useEffect(() => {
     api.get("/profile").then((r) => setProfile(r.data)).catch(() => {});
@@ -47,6 +53,15 @@ export default function AppLayout() {
     { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
     { to: "/settings", label: "Settings", icon: Settings, tid: "nav-settings" },
   ];
+
+  // The bottom bar only has room for a handful of one-tap items on a phone
+  // screen — the rest live behind "More" so nothing gets squeezed unreadably
+  // small or clipped off-screen.
+  const primaryLinks = links.filter((l) =>
+    ["/dashboard", "/students", "/classes", "/payments"].includes(l.to)
+  );
+  const overflowLinks = links.filter((l) => !primaryLinks.includes(l));
+  const overflowHasActive = overflowLinks.some((l) => location.pathname.startsWith(l.to));
 
   return (
     <div className="min-h-screen flex" style={{ background: "var(--bg)" }}>
@@ -137,11 +152,53 @@ export default function AppLayout() {
         </div>
       </div>
 
+      {/* Mobile "More" sheet */}
+      {moreOpen && (
+        <div className="md:hidden fixed inset-0 z-40 flex items-end" onClick={() => setMoreOpen(false)}>
+          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
+          <div
+            data-testid="mobile-more-sheet"
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full rounded-t-2xl px-4 pt-4 pb-8"
+            style={{ background: "var(--bg)", borderTop: "1px solid var(--border)" }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="uppercase-label">More</div>
+              <button type="button" onClick={() => setMoreOpen(false)} data-testid="mobile-more-close" className="btn-ghost p-2">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex flex-col gap-1">
+              {overflowLinks.map((l) => (
+                <NavLink
+                  key={l.to}
+                  to={l.to}
+                  data-testid={`m-${l.tid}`}
+                  className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+                >
+                  <l.icon size={18} strokeWidth={1.5} />
+                  <span>{l.label}</span>
+                </NavLink>
+              ))}
+              <button
+                data-testid="mobile-more-logout-btn"
+                onClick={handleLogout}
+                className="nav-link w-full mt-2"
+                type="button"
+              >
+                <LogOut size={18} strokeWidth={1.5} />
+                <span>Log out</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="flex-1 px-6 md:px-10 py-16 md:py-10 max-w-[1400px] mx-auto w-full">
         {/* Mobile bottom nav */}
         <div className="md:hidden fixed bottom-0 left-0 right-0 z-30 flex justify-around px-2 py-2"
           style={{ background: "var(--bg)", borderTop: "1px solid var(--border)" }}>
-          {links.map((l) => (
+          {primaryLinks.map((l) => (
             <NavLink
               key={l.to}
               to={l.to}
@@ -152,6 +209,16 @@ export default function AppLayout() {
               <span>{l.label}</span>
             </NavLink>
           ))}
+          <button
+            type="button"
+            onClick={() => setMoreOpen(true)}
+            data-testid="mobile-more-btn"
+            className="flex flex-col items-center gap-1 px-2 py-1 text-[10px]"
+            style={{ color: overflowHasActive ? "var(--primary)" : "var(--text-muted)" }}
+          >
+            <MoreHorizontal size={18} strokeWidth={1.5} />
+            <span>More</span>
+          </button>
         </div>
         <Outlet />
       </main>
