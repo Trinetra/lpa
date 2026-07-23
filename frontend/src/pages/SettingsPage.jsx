@@ -39,7 +39,7 @@ function BackupCard() {
       <h2 className="font-serif-display text-2xl mb-2">Automatic backups</h2>
       <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
         {status.connected
-          ? "A daily backup (a restorable database archive plus CSV exports of every record) is uploaded to a \"Backups\" folder in your connected Google Drive."
+          ? "A daily backup (a restorable database archive plus an Excel workbook with every record, one sheet per type) is uploaded to a \"Backups\" folder in your connected Google Drive."
           : "Connect Google Calendar above to enable automatic backups — the same connection is used for both."}
       </p>
 

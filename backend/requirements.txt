@@ -61,6 +61,7 @@ mypy==2.3.0
 mypy_extensions==1.1.0
 numpy==2.4.6
 oauthlib==3.3.1
+openpyxl==3.1.5
 packaging==26.2
 pandas==3.0.3
 passlib==1.7.4

@@ -1,16 +1,16 @@
-"""Daily backup: a restorable mongodump archive + human-readable CSVs,
-zipped together and uploaded to a "Backups" folder in the teacher's Google
-Drive (via the same OAuth connection used for Calendar).
+"""Daily backup: a restorable mongodump archive + a human-readable Excel
+workbook, zipped together and uploaded to a "Backups" folder in the
+teacher's Google Drive (via the same OAuth connection used for Calendar).
 
 Two formats in one ZIP because they serve different purposes:
 - mongo.archive.gz: exact, complete, restorable with
   `mongorestore --archive=mongo.archive.gz --gzip`. This is the real
   disaster-recovery path.
-- *.csv: human-readable, openable in Excel/Sheets without any tooling,
-  for "let me just look something up" during an outage.
+- records.xlsx: human-readable, one sheet per record type, openable in
+  Excel/Sheets without any tooling, for "let me just look something up"
+  during an outage.
 """
 
-import csv
 import io
 import logging
 import os
@@ -19,6 +19,8 @@ import zipfile
 from datetime import datetime, timezone
 from typing import Optional
 
+import openpyxl
+from openpyxl.utils import get_column_letter
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -43,8 +45,8 @@ _RECORD_COLLECTIONS = [
 
 def _flatten(doc: dict, prefix: str = "") -> dict:
     """Flatten nested dicts (e.g. invoice.summary.total_billed) into
-    dotted-key columns so CSVs stay one-row-per-record instead of needing
-    a second sheet for nested data."""
+    dotted-key columns so each sheet stays one-row-per-record instead of
+    needing a second sheet for nested data."""
     out = {}
     for k, v in doc.items():
         key = f"{prefix}{k}"
@@ -57,44 +59,55 @@ def _flatten(doc: dict, prefix: str = "") -> dict:
     return out
 
 
-async def _collection_to_csv(name: str, owner_id: str) -> Optional[bytes]:
+async def _collection_rows(name: str, owner_id: str) -> list:
     docs = []
     async for d in db[name].find({"owner_id": owner_id}):
         d["_id"] = str(d["_id"])
         docs.append(_flatten(d))
-    if not docs:
-        return None
-    fieldnames = []
-    for d in docs:
-        for k in d.keys():
-            if k not in fieldnames:
-                fieldnames.append(k)
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
-    writer.writeheader()
-    writer.writerows(docs)
-    return buf.getvalue().encode("utf-8")
+    return docs
 
 
-async def _profile_to_csv(owner_id: str) -> bytes:
+async def _profile_row(owner_id: str) -> dict:
     from bson import ObjectId
     user = await db.users.find_one({"_id": ObjectId(owner_id)})
     user = user or {}
     # Never export the password hash.
     user.pop("password_hash", None)
     user["_id"] = str(user.get("_id", ""))
-    row = _flatten(user)
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=list(row.keys()))
-    writer.writeheader()
-    writer.writerow(row)
-    return buf.getvalue().encode("utf-8")
+    return _flatten(user)
+
+
+def _sheet_title(name: str) -> str:
+    # Excel sheet names cap at 31 chars and can't contain []:*?/\ — none of
+    # our collection names hit either limit, but title-case for readability.
+    return name.replace("_", " ").title()[:31]
+
+
+def _write_sheet(wb, title: str, rows: list) -> None:
+    ws = wb.create_sheet(title=title)
+    if not rows:
+        ws.append(["(no records)"])
+        return
+    fieldnames = []
+    for row in rows:
+        for k in row.keys():
+            if k not in fieldnames:
+                fieldnames.append(k)
+    ws.append(fieldnames)
+    for cell in ws[1]:
+        cell.font = openpyxl.styles.Font(bold=True)
+    for row in rows:
+        ws.append([row.get(f, "") for f in fieldnames])
+    for i, f in enumerate(fieldnames, start=1):
+        width = max(len(f), *(len(str(row.get(f, ""))) for row in rows)) if rows else len(f)
+        ws.column_dimensions[get_column_letter(i)].width = min(max(width + 2, 10), 60)
+    ws.freeze_panes = "A2"
 
 
 def _run_mongodump() -> Optional[bytes]:
     """Run mongodump against the app's own database, return the gzipped
     archive bytes, or None if the mongodump binary/connection isn't
-    available (backup still proceeds with CSVs only in that case)."""
+    available (backup still proceeds with records.xlsx only in that case)."""
     mongo_url = os.environ.get("MONGO_URL")
     db_name = os.environ.get("DB_NAME")
     if not mongo_url or not db_name:
@@ -121,7 +134,7 @@ async def build_backup_zip(owner_id: str) -> bytes:
             "Contents:",
             "  mongo.archive.gz — full database archive. To restore:",
             "    mongorestore --archive=mongo.archive.gz --gzip",
-            "  *.csv — human-readable exports, one file per record type.",
+            "  records.xlsx — human-readable, one sheet per record type.",
             "",
         ]
 
@@ -130,17 +143,24 @@ async def build_backup_zip(owner_id: str) -> bytes:
             zf.writestr("mongo.archive.gz", archive_bytes)
             manifest_lines.append("mongo.archive.gz: included")
         else:
-            manifest_lines.append("mongo.archive.gz: NOT included (mongodump unavailable — CSVs only)")
+            manifest_lines.append("mongo.archive.gz: NOT included (mongodump unavailable — records.xlsx only)")
+
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)  # drop the default empty sheet
 
         for name in _RECORD_COLLECTIONS:
-            csv_bytes = await _collection_to_csv(name, owner_id)
-            if csv_bytes:
-                zf.writestr(f"{name}.csv", csv_bytes)
-                manifest_lines.append(f"{name}.csv: included")
+            rows = await _collection_rows(name, owner_id)
+            if rows:
+                _write_sheet(wb, _sheet_title(name), rows)
+                manifest_lines.append(f"{_sheet_title(name)} sheet: included ({len(rows)} rows)")
 
-        profile_csv = await _profile_to_csv(owner_id)
-        zf.writestr("studio_profile.csv", profile_csv)
-        manifest_lines.append("studio_profile.csv: included (password not exported)")
+        profile_row = await _profile_row(owner_id)
+        _write_sheet(wb, "Studio Profile", [profile_row])
+        manifest_lines.append("Studio Profile sheet: included (password not exported)")
+
+        xlsx_buf = io.BytesIO()
+        wb.save(xlsx_buf)
+        zf.writestr("records.xlsx", xlsx_buf.getvalue())
 
         zf.writestr("MANIFEST.txt", "\n".join(manifest_lines))
 
