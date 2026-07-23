@@ -140,7 +140,9 @@ class ProfileUpdate(BaseModel):
     social_youtube: Optional[str] = None
     social_instagram: Optional[str] = None
     social_facebook: Optional[str] = None
-    international_payment_details: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_swift_code: Optional[str] = None
 
 class StudentCreate(BaseModel):
     name: str
@@ -568,7 +570,9 @@ def _ser_profile(user_doc: dict) -> dict:
         "social_youtube": user_doc.get("social_youtube"),
         "social_instagram": user_doc.get("social_instagram"),
         "social_facebook": user_doc.get("social_facebook"),
-        "international_payment_details": user_doc.get("international_payment_details"),
+        "bank_name": user_doc.get("bank_name"),
+        "bank_account_number": user_doc.get("bank_account_number"),
+        "bank_swift_code": user_doc.get("bank_swift_code"),
     }
 
 @api_router.get("/profile")

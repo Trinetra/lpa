@@ -294,7 +294,9 @@ function StudioProfileCard({ profile, onSaved }) {
     social_youtube: profile?.social_youtube || "",
     social_instagram: profile?.social_instagram || "",
     social_facebook: profile?.social_facebook || "",
-    international_payment_details: profile?.international_payment_details || "",
+    bank_name: profile?.bank_name || "",
+    bank_account_number: profile?.bank_account_number || "",
+    bank_swift_code: profile?.bank_swift_code || "",
   });
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -334,7 +336,9 @@ function StudioProfileCard({ profile, onSaved }) {
         social_youtube: form.social_youtube,
         social_instagram: form.social_instagram,
         social_facebook: form.social_facebook,
-        international_payment_details: form.international_payment_details,
+        bank_name: form.bank_name,
+        bank_account_number: form.bank_account_number,
+        bank_swift_code: form.bank_swift_code,
       };
       const { data } = await api.patch("/profile", body);
       toast.success("Studio profile saved");
@@ -444,14 +448,23 @@ function StudioProfileCard({ profile, onSaved }) {
           </div>
         </label>
         <label className="sm:col-span-2">
-          <span className="uppercase-label block mb-1">International payment details (for foreign tour invoices)</span>
-          <textarea rows={3} value={form.international_payment_details}
-            onChange={(e) => setForm({ ...form, international_payment_details: e.target.value })}
-            data-testid="studio-intl-payment-input"
-            placeholder="Bank name, account number, SWIFT/IBAN, etc."
-            className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          <span className="uppercase-label block mb-1">Bank details (for foreign tour invoices)</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <input value={form.bank_name} onChange={(e) => setForm({ ...form, bank_name: e.target.value })}
+              data-testid="studio-bank-name-input"
+              placeholder="Bank name"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+            <input value={form.bank_account_number} onChange={(e) => setForm({ ...form, bank_account_number: e.target.value })}
+              data-testid="studio-bank-account-input"
+              placeholder="Account number"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+            <input value={form.bank_swift_code} onChange={(e) => setForm({ ...form, bank_swift_code: e.target.value })}
+              data-testid="studio-bank-swift-input"
+              placeholder="SWIFT code"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          </div>
           <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-            Shown instead of your UPI details on non-INR tour invoices, since UPI only works for INR payments.
+            Shown instead of your UPI details on non-INR tour invoices, since UPI only works for INR payments. The account number is the one thing a payer actually needs — SWIFT just identifies the bank internationally.
           </div>
         </label>
       </div>
