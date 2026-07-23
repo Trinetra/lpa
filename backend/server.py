@@ -1142,6 +1142,22 @@ async def shared_invoice_logo(share_token: str):
         raise HTTPException(status_code=404, detail="Logo unavailable")
     return Response(content=data, media_type=ct or "image/png")
 
+@api_router.get("/invoices/share/{share_token}/qr")
+async def shared_invoice_qr(share_token: str):
+    # Same scannable UPI QR as the PDF — only meaningful when there's a
+    # balance still due and a UPI ID on file.
+    inv = await db.invoices.find_one({"share_token": share_token})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    balance_due = (inv.get("summary") or {}).get("balance_due", 0)
+    upi_vpa = (inv.get("studio_snapshot") or {}).get("contact_upi")
+    if not upi_vpa or balance_due <= 0:
+        raise HTTPException(status_code=404, detail="No QR available")
+    qr_bytes = pdf_service.upi_qr_bytes(upi_vpa, inv.get("teacher_name") or "", balance_due)
+    if not qr_bytes:
+        raise HTTPException(status_code=404, detail="QR generation failed")
+    return Response(content=qr_bytes, media_type="image/png")
+
 class BulkSendRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None

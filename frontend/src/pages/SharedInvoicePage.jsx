@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import axios from "axios";
 import { API } from "@/lib/api";
 
@@ -51,6 +51,7 @@ export default function SharedInvoicePage() {
   const totalPaid = inv.summary?.total_paid || 0;
   const balanceDue = inv.summary?.balance_due || 0;
   const hasCredit = balanceDue < 0;
+  const qrUrl = (studio.contact_upi && balanceDue > 0) ? `${API}/invoices/share/${token}/qr` : null;
 
   return (
     <div className="min-h-screen py-14 px-6" style={{ background: "#FFFDF9" }}>
@@ -64,11 +65,6 @@ export default function SharedInvoicePage() {
           )}
           <div className="font-serif-display text-2xl" style={{ color: MAROON }} data-testid="shared-brand">
             {brandName}
-          </div>
-          <div className="text-sm mt-1" style={{ color: LABEL }}>
-            {studio.studio_name && inv.teacher_name && studio.studio_name !== inv.teacher_name
-              ? `${inv.teacher_name} · Dance`
-              : "Dance Classes"}
           </div>
           <div className="mt-5 mx-auto" style={{ borderBottom: `1px solid ${GOLD}`, maxWidth: "100%" }} />
         </header>
@@ -100,19 +96,19 @@ export default function SharedInvoicePage() {
             <table className="w-full text-sm mb-6">
               <thead>
                 <tr style={{ background: MAROON, color: "white" }}>
-                  <th className="text-center py-2 rounded-l">Date</th>
-                  <th className="text-center">Hours</th>
-                  <th className="text-center">Amount</th>
-                  <th className="text-center rounded-r">Notes</th>
+                  <th className="text-left py-2 px-3">Date</th>
+                  <th className="text-left px-3">Hours</th>
+                  <th className="text-left px-3">Amount</th>
+                  <th className="text-left px-3">Notes</th>
                 </tr>
               </thead>
               <tbody>
                 {inv.classes.map((c, i) => (
                   <tr key={c.id} style={{ background: i % 2 === 1 ? CREAM : "transparent" }}>
-                    <td className="py-2 text-center">{fmtDate(c.class_date)}</td>
-                    <td className="text-center">{fmtHours(c.hours)}</td>
-                    <td className="text-center">{fmt(c.amount)}</td>
-                    <td className="text-center" style={{ color: LABEL }}>{c.notes || ""}</td>
+                    <td className="py-2 px-3 text-left">{fmtDate(c.class_date)}</td>
+                    <td className="text-left px-3">{fmtHours(c.hours)}</td>
+                    <td className="text-left px-3">{fmt(c.amount)}</td>
+                    <td className="text-left px-3" style={{ color: LABEL }}>{c.notes || ""}</td>
                   </tr>
                 ))}
                 {inv.classes.length === 0 && (
@@ -127,17 +123,17 @@ export default function SharedInvoicePage() {
                 <table className="w-full text-sm mb-6">
                   <thead>
                     <tr style={{ background: MAROON, color: "white" }}>
-                      <th className="text-center py-2 rounded-l">Date</th>
-                      <th className="text-center">Method</th>
-                      <th className="text-center rounded-r">Amount</th>
+                      <th className="text-left py-2 px-3">Date</th>
+                      <th className="text-left px-3">Method</th>
+                      <th className="text-left px-3">Amount</th>
                     </tr>
                   </thead>
                   <tbody>
                     {inv.payments.map((p, i) => (
                       <tr key={p.id} style={{ background: i % 2 === 1 ? CREAM : "transparent" }}>
-                        <td className="py-2 text-center">{fmtDate(p.paid_on)}</td>
-                        <td className="text-center">{p.method || "—"}</td>
-                        <td className="text-center">{fmt(p.amount)}</td>
+                        <td className="py-2 px-3 text-left">{fmtDate(p.paid_on)}</td>
+                        <td className="text-left px-3">{p.method || "—"}</td>
+                        <td className="text-left px-3">{fmt(p.amount)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -145,7 +141,13 @@ export default function SharedInvoicePage() {
               </>
             )}
 
-            <div className="flex justify-end">
+            <div className="flex justify-between items-end flex-wrap gap-6">
+              {qrUrl ? (
+                <div className="text-center" data-testid="shared-upi-qr">
+                  <img src={qrUrl} alt="Scan to pay via UPI" className="w-28 h-28" />
+                  <div className="text-xs mt-1 italic" style={{ color: LABEL }}>Scan to pay via UPI</div>
+                </div>
+              ) : <div />}
               <div className="w-full sm:w-auto sm:min-w-[280px] text-sm">
                 <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Total billed</span><span>{fmt(totalBilled)}</span></div>
                 <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Total paid</span><span>{fmt(totalPaid)}</span></div>
@@ -171,10 +173,6 @@ export default function SharedInvoicePage() {
               {studio.social_facebook && <a href={studio.social_facebook} target="_blank" rel="noreferrer" className="underline" style={{ color: LABEL }}>Facebook</a>}
             </div>
           )}
-        </div>
-
-        <div className="text-center text-xs mt-8" style={{ color: "var(--text-muted)" }}>
-          <Link to="/" className="underline">Powered by {brandName} · Studio Ledger</Link>
         </div>
       </div>
     </div>

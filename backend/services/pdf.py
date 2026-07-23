@@ -145,6 +145,12 @@ def _fmt_money(n, currency: str = "INR") -> str:
     return f"{symbol}{v:,.2f}"
 
 
+def upi_qr_bytes(vpa: str, payee_name: str, amount: float) -> Optional[bytes]:
+    """Public entry point for the shared web invoice page, which shows the
+    same scannable UPI QR as the PDF."""
+    return _upi_qr_bytes(vpa, payee_name, amount)
+
+
 def _upi_qr_bytes(vpa: str, payee_name: str, amount: float) -> Optional[bytes]:
     """Generate a scannable UPI payment QR as PNG bytes, or None on failure.
     UPI deep-link format: upi://pay?pa=<vpa>&pn=<name>&am=<amount>&cu=INR"""
