@@ -544,10 +544,12 @@ def generate_tour_invoice_pdf(teacher_name: str, studio_name: Optional[str],
             swift_code = studio_contact.get("bank_swift_code")
             if bank_name or account_number or swift_code:
                 bank_lines = [f'<font name="{_FONT_BOLD}" size="10">My bank details</font>']
+                if teacher_name:
+                    bank_lines.append(f"Name: {teacher_name}")
                 if bank_name:
-                    bank_lines.append(f"Bank: {bank_name}")
+                    bank_lines.append(f"Bank Name: {bank_name}")
                 if account_number:
-                    bank_lines.append(f"Account No: <b>{account_number}</b>")
+                    bank_lines.append(f"Account Number: <b>{account_number}</b>")
                 if swift_code:
                     bank_lines.append(f"SWIFT: {swift_code}")
                 story.append(Paragraph("<br/>".join(bank_lines), ParagraphStyle(
