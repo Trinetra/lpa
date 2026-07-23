@@ -468,6 +468,10 @@ function InvoicesTab({ tourId }) {
               >
                 {inv.paid ? "Paid" : "Unpaid"}
               </button>
+              <a href={`${API}/tours/${tourId}/invoices/${inv.id}/pdf?token=${inv.share_token}`} target="_blank" rel="noreferrer"
+                data-testid={`invoice-pdf-${inv.id}`} className="btn-ghost flex items-center gap-1 text-xs">
+                <Download size={13} /> PDF
+              </a>
               <button onClick={() => setSending(inv)} data-testid={`invoice-send-${inv.id}`} className="btn-ghost text-xs">Send</button>
               <button onClick={() => setEditing(inv)} data-testid={`edit-invoice-${inv.id}`} className="btn-ghost text-xs">Edit</button>
               <button onClick={() => remove(inv.id)} data-testid={`invoice-delete-${inv.id}`} className="p-1" style={{ color: "var(--error)" }}>
