@@ -279,6 +279,13 @@ class TourContactUpdate(BaseModel):
     email: Optional[str] = None
     notes: Optional[str] = None
 
+class TourFileCreate(BaseModel):
+    drive_file_id: str
+    name: str
+    mime_type: Optional[str] = None
+    icon_url: Optional[str] = None
+    web_view_link: Optional[str] = None
+
 class TourTodoCreate(BaseModel):
     text: str
     due_date: Optional[str] = None  # ISO date str
@@ -422,6 +429,18 @@ def ser_tour_contact(doc):
         "phone": doc.get("phone"),
         "email": doc.get("email"),
         "notes": doc.get("notes"),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_tour_file(doc):
+    return {
+        "id": str(doc["_id"]),
+        "tour_id": doc.get("tour_id"),
+        "drive_file_id": doc.get("drive_file_id"),
+        "name": doc.get("name"),
+        "mime_type": doc.get("mime_type"),
+        "icon_url": doc.get("icon_url"),
+        "web_view_link": doc.get("web_view_link"),
         "created_at": doc.get("created_at"),
     }
 
@@ -949,7 +968,7 @@ _STATIC_DEST_LABELS = {
 }
 _TOUR_TAB_LABELS = {
     "schedule": "Schedule", "expenses": "Expenses", "invoices": "Invoices",
-    "checkins": "Check-ins", "contacts": "Contacts", "todos": "To-dos",
+    "checkins": "Check-ins", "contacts": "Contacts", "todos": "To-dos", "files": "Files",
 }
 
 class VisitRecord(BaseModel):
@@ -1656,6 +1675,7 @@ async def delete_tour(tour_id: str, user: dict = Depends(get_current_user)):
     await db.tour_contacts.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
     await db.tour_todos.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
     await db.tour_invoices.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
+    await db.tour_files.delete_many({"tour_id": tour_id, "owner_id": user["_id"]})
     return {"ok": True}
 
 # --------------- Tour stops (schedule) -----------------
@@ -1831,6 +1851,51 @@ async def delete_tour_contact(tour_id: str, contact_id: str, user: dict = Depend
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Contact not found")
     return {"ok": True}
+
+# --------------- Tour files (Google Drive attachments) -----------------
+# The file itself always lives in her Drive — the app only stores a
+# reference (drive_file_id + display metadata) picked via the Google Picker
+# widget, never the file content. See /drive/picker-token below for how the
+# frontend gets a short-lived token to open the picker.
+@api_router.get("/tours/{tour_id}/files")
+async def list_tour_files(tour_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    cur = db.tour_files.find({"tour_id": tour_id, "owner_id": user["_id"]}).sort("created_at", -1)
+    return [ser_tour_file(d) async for d in cur]
+
+@api_router.post("/tours/{tour_id}/files")
+async def create_tour_file(tour_id: str, body: TourFileCreate, user: dict = Depends(get_current_user)):
+    await _get_owned_tour(tour_id, user["_id"])
+    doc = body.model_dump()
+    doc["tour_id"] = tour_id
+    doc["owner_id"] = user["_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.tour_files.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_tour_file(doc)
+
+@api_router.delete("/tours/{tour_id}/files/{file_id}")
+async def delete_tour_file(tour_id: str, file_id: str, user: dict = Depends(get_current_user)):
+    """Only unlinks the reference — the file itself is untouched in her
+    Drive, since the app never owns it."""
+    res = await db.tour_files.delete_one(
+        {"_id": ObjectId(file_id), "tour_id": tour_id, "owner_id": user["_id"]}
+    )
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"ok": True}
+
+@api_router.get("/drive/picker-token")
+async def drive_picker_token(user: dict = Depends(get_current_user)):
+    """Mints a short-lived Drive access token for the Google Picker widget
+    to run client-side. Never exposes the stored refresh token — the
+    frontend only ever sees this token, which expires in ~1 hour and is
+    scoped to drive.file (the Picker itself further narrows this to just
+    whatever file she explicitly selects)."""
+    creds = await calendar_service.get_credentials(user["_id"], scopes=calendar_service.DRIVE_SCOPES)
+    if not creds:
+        raise HTTPException(status_code=404, detail="Google Drive not connected")
+    return {"access_token": creds.token}
 
 # --------------- Tour to-do list -----------------
 @api_router.get("/tours/{tour_id}/todos")
@@ -2134,6 +2199,7 @@ async def on_startup():
     await db.page_visits.create_index([("owner_id", 1), ("dest_key", 1)], unique=True)
     await db.reminders_sent.create_index([("block_id", 1), ("date", 1), ("student_id", 1)], unique=True)
     await db.class_topics.create_index([("owner_id", 1), ("name", 1)], unique=True)
+    await db.tour_files.create_index("tour_id")
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

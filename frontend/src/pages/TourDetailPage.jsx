@@ -4,7 +4,7 @@ import { api, formatApiErrorDetail, API } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
 import {
   ArrowLeft, Plus, X, Trash2, MapPin, Download, FileText,
-  Navigation, Users, CheckSquare, Square, Link2, Copy, Upload,
+  Navigation, Users, CheckSquare, Square, Link2, Copy, Upload, FolderOpen, ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,6 +17,7 @@ const TABS = [
   { key: "checkins", label: "Check-ins" },
   { key: "contacts", label: "Contacts" },
   { key: "todos", label: "To-dos" },
+  { key: "files", label: "Files" },
 ];
 
 const CURRENCIES = ["INR", "EUR", "USD", "GBP"];
@@ -926,6 +927,142 @@ function ContactForm({ tourId, contact, onClose, onSaved }) {
   );
 }
 
+// --------------- Files tab (Google Drive attachments) -----------------
+const GOOGLE_PICKER_API_KEY = process.env.REACT_APP_GOOGLE_PICKER_API_KEY;
+const GOOGLE_OAUTH_CLIENT_ID = process.env.REACT_APP_GOOGLE_OAUTH_CLIENT_ID;
+
+let gapiLoadPromise = null;
+function loadGooglePickerScript() {
+  if (gapiLoadPromise) return gapiLoadPromise;
+  gapiLoadPromise = new Promise((resolve, reject) => {
+    if (window.google?.picker) return resolve();
+    const script = document.createElement("script");
+    script.src = "https://apis.google.com/js/api.js";
+    script.onload = () => {
+      window.gapi.load("picker", { callback: resolve, onerror: reject });
+    };
+    script.onerror = reject;
+    document.body.appendChild(script);
+  });
+  return gapiLoadPromise;
+}
+
+function FilesTab({ tourId }) {
+  const [files, setFiles] = useState(null);
+  const [opening, setOpening] = useState(false);
+  const [configured, setConfigured] = useState(true);
+
+  const load = () => api.get(`/tours/${tourId}/files`).then((r) => setFiles(r.data));
+  useEffect(() => { load(); }, [tourId]);
+
+  const openPicker = async () => {
+    if (!GOOGLE_PICKER_API_KEY || !GOOGLE_OAUTH_CLIENT_ID) {
+      toast.error("Google Drive linking isn't configured yet");
+      return;
+    }
+    setOpening(true);
+    try {
+      const [{ data }] = await Promise.all([
+        api.get("/drive/picker-token"),
+        loadGooglePickerScript(),
+      ]);
+      const view = new window.google.picker.DocsView()
+        .setIncludeFolders(true)
+        .setSelectFolderEnabled(false);
+      const picker = new window.google.picker.PickerBuilder()
+        .addView(view)
+        .setOAuthToken(data.access_token)
+        .setDeveloperKey(GOOGLE_PICKER_API_KEY)
+        .setCallback(async (result) => {
+          if (result.action !== window.google.picker.Action.PICKED) return;
+          const doc = result.docs[0];
+          try {
+            await api.post(`/tours/${tourId}/files`, {
+              drive_file_id: doc.id,
+              name: doc.name,
+              mime_type: doc.mimeType,
+              icon_url: doc.iconUrl,
+              web_view_link: doc.url,
+            });
+            toast.success(`Attached "${doc.name}"`);
+            load();
+          } catch (e2) {
+            toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't attach file");
+          }
+        })
+        .build();
+      picker.setVisible(true);
+    } catch (e) {
+      if (e?.response?.status === 404) {
+        setConfigured(false);
+        toast.error("Connect Google Calendar in Settings first — Drive linking uses the same connection");
+      } else {
+        toast.error("Couldn't open Google Drive picker");
+      }
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm("Unlink this file? It won't be deleted from Google Drive.")) return;
+    try {
+      await api.delete(`/tours/${tourId}/files/${id}`);
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Failed to unlink");
+    }
+  };
+
+  if (files === null) return <div className="uppercase-label">Loading…</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={openPicker} disabled={opening} data-testid="attach-drive-file-btn"
+          className="btn-pill flex items-center gap-2 text-sm">
+          <FolderOpen size={14} /> {opening ? "Opening…" : "Attach from Drive"}
+        </button>
+      </div>
+      {!configured && (
+        <div className="surface p-4 text-sm" style={{ color: "var(--text-muted)" }}>
+          Google Drive isn't connected. Connect Google Calendar in Settings — the same connection is used for Drive.
+        </div>
+      )}
+      {files.length === 0 && (
+        <div className="surface p-8 text-center" style={{ color: "var(--text-muted)" }}>No files attached yet.</div>
+      )}
+      <div className="surface divide-y" style={{ borderColor: "var(--border)" }}>
+        {files.map((f) => (
+          <div key={f.id} className="flex items-center justify-between px-6 py-3 gap-4"
+            style={{ borderTop: "1px solid var(--border)" }} data-testid={`tour-file-row-${f.id}`}>
+            <div className="flex items-center gap-3 min-w-0">
+              {f.icon_url ? (
+                <img src={f.icon_url} alt="" className="w-5 h-5 shrink-0" />
+              ) : (
+                <FileText size={16} className="shrink-0" style={{ color: "var(--text-muted)" }} />
+              )}
+              <span className="truncate text-sm">{f.name}</span>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              {f.web_view_link && (
+                <a href={f.web_view_link} target="_blank" rel="noreferrer" data-testid={`tour-file-open-${f.id}`}
+                  className="btn-ghost text-xs flex items-center gap-1">
+                  <ExternalLink size={12} /> Open
+                </a>
+              )}
+              <button onClick={() => remove(f.id)} data-testid={`tour-file-remove-${f.id}`}
+                className="p-1" style={{ color: "var(--error)" }}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // --------------- To-dos tab -----------------
 function TodosTab({ tourId }) {
   const [todos, setTodos] = useState(null);
@@ -1076,6 +1213,7 @@ export default function TourDetailPage() {
       {tab === "checkins" && <CheckinsTab tourId={id} />}
       {tab === "contacts" && <ContactsTab tourId={id} />}
       {tab === "todos" && <TodosTab tourId={id} />}
+      {tab === "files" && <FilesTab tourId={id} />}
     </div>
   );
 }
