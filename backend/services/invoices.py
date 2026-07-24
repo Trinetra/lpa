@@ -67,6 +67,7 @@ def build_studio_snapshot(user_doc: Optional[dict]) -> dict:
         "social_facebook": u.get("social_facebook"),
         "bank_name": u.get("bank_name"),
         "bank_account_number": u.get("bank_account_number"),
+        "bank_ifsc_code": u.get("bank_ifsc_code"),
         "bank_swift_code": u.get("bank_swift_code"),
     }
 

@@ -143,6 +143,7 @@ class ProfileUpdate(BaseModel):
     social_facebook: Optional[str] = None
     bank_name: Optional[str] = None
     bank_account_number: Optional[str] = None
+    bank_ifsc_code: Optional[str] = None
     bank_swift_code: Optional[str] = None
 
 class StudentCreate(BaseModel):
@@ -573,6 +574,7 @@ def _ser_profile(user_doc: dict) -> dict:
         "social_facebook": user_doc.get("social_facebook"),
         "bank_name": user_doc.get("bank_name"),
         "bank_account_number": user_doc.get("bank_account_number"),
+        "bank_ifsc_code": user_doc.get("bank_ifsc_code"),
         "bank_swift_code": user_doc.get("bank_swift_code"),
     }
 

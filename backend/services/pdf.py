@@ -541,29 +541,32 @@ def generate_tour_invoice_pdf(teacher_name: str, studio_name: Optional[str],
             if contact_bits:
                 story.append(Paragraph("<b>Pay to:</b> " + " · ".join(contact_bits), styles["label"]))
                 story.append(Spacer(1, 4 * mm))
-        else:
-            # A UPI ID can't receive foreign currency — show bank transfer
-            # details instead (the account number is the one thing a payer
-            # actually needs; SWIFT identifies the bank internationally).
-            bank_name = studio_contact.get("bank_name")
-            account_number = studio_contact.get("bank_account_number")
-            swift_code = studio_contact.get("bank_swift_code")
-            if bank_name or account_number or swift_code:
-                bank_lines = [f'<font name="{_FONT_BOLD}" size="10">My bank details</font>']
-                if teacher_name:
-                    bank_lines.append(f"Name: {teacher_name}")
-                if bank_name:
-                    bank_lines.append(f"Bank Name: {bank_name}")
-                if account_number:
-                    bank_lines.append(f"Account Number: <b>{account_number}</b>")
-                if swift_code:
-                    bank_lines.append(f"SWIFT: {swift_code}")
-                story.append(Paragraph("<br/>".join(bank_lines), ParagraphStyle(
-                    "bankDetails", parent=styles["label"], fontSize=10, textColor=_INK, leading=15)))
-                story.append(Spacer(1, 5 * mm))
-            if studio_contact.get("contact_email"):
-                story.append(Paragraph(f"<b>Contact:</b> {studio_contact['contact_email']}", styles["label"]))
-                story.append(Spacer(1, 4 * mm))
+
+        # Bank transfer details, shown regardless of currency — some foreign
+        # clients pay INR into an Indian account (needs IFSC, not SWIFT),
+        # others wire genuine foreign currency (needs SWIFT, not IFSC).
+        bank_name = studio_contact.get("bank_name")
+        account_number = studio_contact.get("bank_account_number")
+        ifsc_code = studio_contact.get("bank_ifsc_code")
+        swift_code = studio_contact.get("bank_swift_code")
+        if bank_name or account_number or ifsc_code or swift_code:
+            bank_lines = [f'<font name="{_FONT_BOLD}" size="10">My bank details</font>']
+            if teacher_name:
+                bank_lines.append(f"Name: {teacher_name}")
+            if bank_name:
+                bank_lines.append(f"Bank Name: {bank_name}")
+            if account_number:
+                bank_lines.append(f"Account Number: <b>{account_number}</b>")
+            if ifsc_code:
+                bank_lines.append(f"IFSC: {ifsc_code}")
+            if swift_code:
+                bank_lines.append(f"SWIFT: {swift_code}")
+            story.append(Paragraph("<br/>".join(bank_lines), ParagraphStyle(
+                "bankDetails", parent=styles["label"], fontSize=10, textColor=_INK, leading=15)))
+            story.append(Spacer(1, 5 * mm))
+        if currency != "INR" and studio_contact.get("contact_email"):
+            story.append(Paragraph(f"<b>Contact:</b> {studio_contact['contact_email']}", styles["label"]))
+            story.append(Spacer(1, 4 * mm))
 
     story.append(Paragraph(
         "Thank you for the opportunity to perform. Please remit payment at your earliest convenience.",
