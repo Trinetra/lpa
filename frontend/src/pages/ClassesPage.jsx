@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { Plus, Trash2, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
@@ -6,13 +6,92 @@ import { toast } from "sonner";
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const today = () => new Date().toISOString().slice(0, 10);
 
-function EditClassModal({ item, students, onClose, onSaved }) {
+// Free-add, studio-wide topic tags: type a new one to create it (added to
+// the shared autocomplete list on save), or pick from what's already there.
+function TopicPicker({ topics, onChange, allTopics, testidPrefix }) {
+  const [input, setInput] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    const onClickOutside = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const addTopic = (name) => {
+    const trimmed = name.trim();
+    if (!trimmed || topics.includes(trimmed)) return;
+    onChange([...topics, trimmed]);
+    setInput("");
+    setOpen(false);
+  };
+
+  const removeTopic = (name) => onChange(topics.filter((t) => t !== name));
+
+  const suggestions = allTopics.filter(
+    (t) => !topics.includes(t) && t.toLowerCase().includes(input.toLowerCase())
+  ).slice(0, 6);
+  const isNew = input.trim() && !allTopics.some((t) => t.toLowerCase() === input.trim().toLowerCase());
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="flex flex-wrap gap-1.5 mb-1.5">
+        {topics.map((t) => (
+          <span key={t} data-testid={`${testidPrefix}-chip-${t}`}
+            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full"
+            style={{ background: "rgba(212,132,100,0.15)", color: "var(--primary)", border: "1px solid rgba(212,132,100,0.4)" }}>
+            {t}
+            <button type="button" onClick={() => removeTopic(t)} data-testid={`${testidPrefix}-remove-${t}`}>
+              <X size={11} />
+            </button>
+          </span>
+        ))}
+      </div>
+      <input
+        value={input}
+        onChange={(e) => { setInput(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); addTopic(input); }
+        }}
+        placeholder="Add a topic taught (e.g. Alarippu)…"
+        data-testid={`${testidPrefix}-input`}
+        className="w-full bg-transparent border border-white/10 rounded px-3 py-2 text-sm"
+      />
+      {open && (suggestions.length > 0 || isNew) && (
+        <div className="absolute z-10 mt-1 w-full surface p-1 max-h-48 overflow-y-auto" style={{ borderColor: "var(--border)" }}>
+          {suggestions.map((t) => (
+            <button key={t} type="button" onClick={() => addTopic(t)}
+              data-testid={`${testidPrefix}-suggestion-${t}`}
+              className="w-full text-left text-sm px-3 py-1.5 rounded hover:bg-white/5">
+              {t}
+            </button>
+          ))}
+          {isNew && (
+            <button type="button" onClick={() => addTopic(input)}
+              data-testid={`${testidPrefix}-create-new`}
+              className="w-full text-left text-sm px-3 py-1.5 rounded hover:bg-white/5"
+              style={{ color: "var(--primary)" }}>
+              + Add "{input.trim()}" as new topic
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EditClassModal({ item, students, allTopics, onClose, onSaved }) {
   const [form, setForm] = useState({
     student_id: item.student_id,
     hours: item.hours,
     class_date: item.class_date,
     notes: item.notes || "",
     rate_override: item.rate ?? "",
+    topics: item.topics || [],
   });
   const [saving, setSaving] = useState(false);
 
@@ -26,6 +105,7 @@ function EditClassModal({ item, students, onClose, onSaved }) {
         class_date: form.class_date,
         notes: form.notes || null,
         rate_override: form.rate_override === "" ? null : Number(form.rate_override),
+        topics: form.topics,
       });
       toast.success("Class updated");
       onSaved();
@@ -78,6 +158,11 @@ function EditClassModal({ item, students, onClose, onSaved }) {
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
           </label>
           <label className="sm:col-span-2">
+            <span className="uppercase-label block mb-1">Topics taught</span>
+            <TopicPicker topics={form.topics} onChange={(topics) => setForm({ ...form, topics })}
+              allTopics={allTopics} testidPrefix="edit-class-topic" />
+          </label>
+          <label className="sm:col-span-2">
             <span className="uppercase-label block mb-1">Notes</span>
             <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
               data-testid="edit-class-notes"
@@ -98,6 +183,7 @@ function EditClassModal({ item, students, onClose, onSaved }) {
 export default function ClassesPage() {
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
+  const [allTopics, setAllTopics] = useState([]);
   const [filterId, setFilterId] = useState("");
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({
@@ -106,14 +192,16 @@ export default function ClassesPage() {
     class_date: today(),
     notes: "",
     rate_override: "",
+    topics: [],
   });
   const [saving, setSaving] = useState(false);
 
   const load = () => {
     const params = filterId ? { params: { student_id: filterId } } : {};
-    Promise.all([api.get("/students"), api.get("/classes", params)]).then(([sRes, cRes]) => {
+    Promise.all([api.get("/students"), api.get("/classes", params), api.get("/class-topics")]).then(([sRes, cRes, tRes]) => {
       setStudents(sRes.data);
       setClasses(cRes.data);
+      setAllTopics(tRes.data);
     });
   };
 
@@ -132,11 +220,12 @@ export default function ClassesPage() {
         hours: Number(form.hours),
         class_date: form.class_date,
         notes: form.notes || null,
+        topics: form.topics,
         rate_override:
           form.rate_override === "" ? null : Number(form.rate_override),
       });
       toast.success("Class logged");
-      setForm({ ...form, hours: 1, notes: "", rate_override: "" });
+      setForm({ ...form, hours: 1, notes: "", rate_override: "", topics: [] });
       load();
     } catch (e2) {
       toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Save failed");
@@ -200,6 +289,11 @@ export default function ClassesPage() {
               onChange={(e) => setForm({ ...form, rate_override: e.target.value })}
               data-testid="log-rate-override-input"
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          </label>
+          <label className="md:col-span-5">
+            <span className="uppercase-label block mb-1">Topics taught</span>
+            <TopicPicker topics={form.topics} onChange={(topics) => setForm({ ...form, topics })}
+              allTopics={allTopics} testidPrefix="log-topic" />
           </label>
           <label className="md:col-span-4">
             <span className="uppercase-label block mb-1">Notes</span>
@@ -289,6 +383,16 @@ export default function ClassesPage() {
                 </button>
               </div>
             </div>
+            {c.topics && c.topics.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {c.topics.map((t) => (
+                  <span key={t} className="text-[10px] px-2 py-0.5 rounded-full"
+                    style={{ background: "rgba(212,132,100,0.15)", color: "var(--primary)" }}>
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
             {c.notes && (
               <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{c.notes}</div>
             )}
@@ -300,6 +404,7 @@ export default function ClassesPage() {
         <EditClassModal
           item={editing}
           students={students}
+          allTopics={allTopics}
           onClose={() => setEditing(null)}
           onSaved={load}
         />

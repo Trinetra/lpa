@@ -32,6 +32,11 @@ export default function StudentDetailPage() {
 
   if (!student) return <div className="uppercase-label">Loading…</div>;
 
+  // Distinct topics from the last 5 classes (already sorted newest-first by
+  // the API) — a quick "where did we leave off" glance without needing a
+  // full curriculum/syllabus model.
+  const recentTopics = [...new Set(classes.slice(0, 5).flatMap((c) => c.topics || []))];
+
   return (
     <div data-testid="student-detail-page" className="space-y-8">
       <Link to="/students" className="inline-flex items-center gap-2 text-xs uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
@@ -77,6 +82,20 @@ export default function StudentDetailPage() {
         </div>
       )}
 
+      {recentTopics.length > 0 && (
+        <section>
+          <div className="uppercase-label mb-3">Recently taught</div>
+          <div className="surface p-4 flex flex-wrap gap-2">
+            {recentTopics.map((t) => (
+              <span key={t} className="text-xs px-2.5 py-1 rounded-full"
+                style={{ background: "rgba(212,132,100,0.15)", color: "var(--primary)", border: "1px solid rgba(212,132,100,0.4)" }}>
+                {t}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section>
         <div className="uppercase-label mb-3">Class history</div>
         <div className="surface">
@@ -87,7 +106,17 @@ export default function StudentDetailPage() {
             <div key={c.id} className="flex justify-between px-6 py-3 text-sm" style={{ borderTop: "1px solid var(--border)" }}>
               <div>
                 <div>{c.class_date}</div>
-                {c.notes && <div className="text-xs" style={{ color: "var(--text-muted)" }}>{c.notes}</div>}
+                {c.topics && c.topics.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {c.topics.map((t) => (
+                      <span key={t} className="text-[10px] px-2 py-0.5 rounded-full"
+                        style={{ background: "rgba(212,132,100,0.15)", color: "var(--primary)" }}>
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {c.notes && <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{c.notes}</div>}
               </div>
               <div className="text-right">
                 <div>{c.hours}h · {fmt(c.rate)}/h</div>

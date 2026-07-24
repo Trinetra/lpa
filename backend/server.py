@@ -172,6 +172,7 @@ class ClassLogCreate(BaseModel):
     class_date: str  # ISO
     notes: Optional[str] = None
     rate_override: Optional[float] = None
+    topics: List[str] = Field(default_factory=list)
 
 class ClassLogUpdate(BaseModel):
     hours: Optional[float] = None
@@ -179,6 +180,7 @@ class ClassLogUpdate(BaseModel):
     notes: Optional[str] = None
     rate_override: Optional[float] = None
     student_id: Optional[str] = None
+    topics: Optional[List[str]] = None
 
 class PaymentCreate(BaseModel):
     student_id: str
@@ -334,6 +336,7 @@ def ser_class(doc):
         "hours": doc.get("hours"),
         "class_date": doc.get("class_date"),
         "notes": doc.get("notes"),
+        "topics": doc.get("topics", []),
         "rate": doc.get("rate"),
         "amount": doc.get("amount"),
         "created_at": doc.get("created_at"),
@@ -752,6 +755,26 @@ async def list_classes(student_id: Optional[str] = None, limit: int = 500,
         out.append(ser_class(d))
     return out
 
+async def _remember_topics(owner_id: str, topics: List[str]):
+    """Add any not-yet-seen topics to the studio-wide autocomplete list, so
+    typing "Alarippu" once makes it suggestible for every student/teacher
+    afterwards. Silently no-ops for blank/whitespace-only entries."""
+    for t in topics:
+        name = t.strip()
+        if not name:
+            continue
+        await db.class_topics.update_one(
+            {"owner_id": owner_id, "name": name},
+            {"$setOnInsert": {"owner_id": owner_id, "name": name,
+                               "created_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+
+@api_router.get("/class-topics")
+async def list_class_topics(user: dict = Depends(get_current_user)):
+    cur = db.class_topics.find({"owner_id": user["_id"]}).sort("name", 1)
+    return [t["name"] async for t in cur]
+
 @api_router.post("/classes")
 async def create_class(body: ClassLogCreate, user: dict = Depends(get_current_user)):
     student = await db.students.find_one(
@@ -760,18 +783,22 @@ async def create_class(body: ClassLogCreate, user: dict = Depends(get_current_us
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
     rate = body.rate_override if body.rate_override is not None else student.get("hourly_rate", 0.0)
+    topics = [t.strip() for t in body.topics if t.strip()]
     doc = {
         "owner_id": user["_id"],
         "student_id": body.student_id,
         "hours": body.hours,
         "class_date": body.class_date,
         "notes": body.notes,
+        "topics": topics,
         "rate": rate,
         "amount": round(body.hours * rate, 2),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     res = await db.classes.insert_one(doc)
     doc["_id"] = res.inserted_id
+    if topics:
+        await _remember_topics(user["_id"], topics)
     return ser_class(doc)
 
 @api_router.delete("/classes/{cid}")
@@ -810,8 +837,13 @@ async def update_class(cid: str, body: ClassLogUpdate, user: dict = Depends(get_
     updates["rate"] = rate
     updates["amount"] = round(float(hours) * float(rate), 2)
 
+    if "topics" in updates:
+        updates["topics"] = [t.strip() for t in updates["topics"] if t.strip()]
+
     await db.classes.update_one({"_id": ObjectId(cid)}, {"$set": updates})
     doc = await db.classes.find_one({"_id": ObjectId(cid)})
+    if updates.get("topics"):
+        await _remember_topics(user["_id"], updates["topics"])
     return ser_class(doc)
 
 # --------------- Payments endpoints -----------------
@@ -2078,6 +2110,7 @@ async def on_startup():
     await db.tour_invoices.create_index("share_token", unique=True)
     await db.page_visits.create_index([("owner_id", 1), ("dest_key", 1)], unique=True)
     await db.reminders_sent.create_index([("block_id", 1), ("date", 1), ("student_id", 1)], unique=True)
+    await db.class_topics.create_index([("owner_id", 1), ("name", 1)], unique=True)
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()
