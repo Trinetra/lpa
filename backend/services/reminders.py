@@ -31,22 +31,57 @@ def _zoom_link(zoom_meeting_id: Optional[str]) -> Optional[str]:
     return f"https://zoom.us/j/{digits}" if digits else None
 
 
+def _fmt_time_12h(t: str) -> str:
+    h, m = t.split(":")
+    h, m = int(h), int(m)
+    period = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12}:{m:02d} {period}"
+
+
 def _reminder_email_html(student_name: str, teacher_name: str, studio_name: Optional[str],
                           start_time: str, end_time: str, zoom_link: Optional[str]) -> str:
     brand = studio_name or teacher_name
-    zoom_html = (
-        f'<p style="margin:16px 0 0;"><a href="{zoom_link}" '
-        f'style="color:#7A1F2B;">Join Zoom Meeting</a></p>' if zoom_link else ""
-    )
+    time_range = f"{_fmt_time_12h(start_time)} – {_fmt_time_12h(end_time)} IST"
+
+    zoom_html = ""
+    if zoom_link:
+        zoom_html = f"""
+        <table cellpadding="0" cellspacing="0" style="margin-top:22px"><tr>
+          <td><a href="{zoom_link}" style="display:inline-block;background:#7a1f2b;color:#ffffff;
+              text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;font-size:14px;
+              font-family:Arial,sans-serif">Join Zoom Meeting</a></td>
+        </tr></table>
+        """
+
     return f"""
-    <div style="font-family: Georgia, serif; max-width: 480px; margin: 0 auto; color: #2b2b2b;">
-      <p>Hi {student_name or "there"},</p>
-      <p>This is a reminder that your dance class with {brand} starts in about
-      {REMINDER_MINUTES_BEFORE} minutes, at {start_time}–{end_time} IST today.</p>
-      {zoom_html}
-      <p style="margin-top:24px;">See you soon!<br/>{teacher_name}</p>
-    </div>
-    """
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#fffdf9;padding:24px 0;font-family:Georgia,'Times New Roman',serif">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e4d9c8;border-radius:8px;padding:32px">
+      <tr><td>
+        <div style="font-size:12px;letter-spacing:2px;color:#8a6d3b;text-transform:uppercase;
+            margin-bottom:6px;font-family:Arial,sans-serif">Class reminder</div>
+        <div style="font-size:24px;color:#7a1f2b;font-weight:700;margin-bottom:20px">{brand}</div>
+        <div style="font-size:15px;color:#2b2b2b;line-height:1.6;font-family:Arial,sans-serif">
+          Hi {student_name or "there"},<br><br>
+          Just a heads-up — your class starts in about <b>{REMINDER_MINUTES_BEFORE} minutes</b>.
+        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin:22px 0;background:#fbf5ec;
+            border:1px solid #e4d9c8;border-radius:6px">
+          <tr><td style="padding:16px 20px;font-family:Arial,sans-serif">
+            <div style="font-size:11px;letter-spacing:1px;color:#8a6d3b;text-transform:uppercase;margin-bottom:4px">Today</div>
+            <div style="font-size:19px;color:#2b2b2b;font-weight:700">{time_range}</div>
+          </td></tr>
+        </table>
+        {zoom_html}
+        <div style="font-size:13px;color:#8a6d3b;margin-top:26px;font-family:Arial,sans-serif;font-style:italic">
+          See you soon!<br/>{teacher_name}
+        </div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+""".strip()
 
 
 async def _send_block_reminders(owner_id: str, block: dict, teacher_name: str,
