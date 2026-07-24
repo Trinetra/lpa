@@ -31,6 +31,7 @@ from services import storage as storage_service
 from services import calendar as calendar_service
 from services import tours as tours_service
 from services import backup as backup_service
+from services import reminders as reminders_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
@@ -2026,6 +2027,21 @@ async def backup_cron(secret: str = Query(...)):
     )
     return result
 
+@api_router.post("/reminders/cron")
+async def reminders_cron(secret: str = Query(...)):
+    """Triggered every few minutes by a host cron job (no user session
+    available there), so auth is a shared secret rather than cookie/bearer.
+    Sends 30-min-before class reminder emails to scheduled students for the
+    single admin account this app serves."""
+    expected = os.environ.get("BACKUP_CRON_SECRET")  # reuse the same shared secret
+    if not expected or secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    admin_email = os.environ.get("ADMIN_EMAIL", "").lower()
+    user = await db.users.find_one({"email": admin_email})
+    if not user:
+        raise HTTPException(status_code=404, detail="Admin user not found")
+    return await reminders_service.send_due_reminders(str(user["_id"]))
+
 # --------------- App wiring -----------------
 app.include_router(api_router)
 
@@ -2059,6 +2075,7 @@ async def on_startup():
     await db.tour_invoices.create_index("tour_id")
     await db.tour_invoices.create_index("share_token", unique=True)
     await db.page_visits.create_index([("owner_id", 1), ("dest_key", 1)], unique=True)
+    await db.reminders_sent.create_index([("block_id", 1), ("date", 1), ("student_id", 1)], unique=True)
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()
