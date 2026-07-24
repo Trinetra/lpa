@@ -63,6 +63,11 @@ services:
       # Shared secret for the host cron job that triggers the daily backup
       # (no user session exists in a cron context, so this is the auth).
       BACKUP_CRON_SECRET: "${BACKUP_CRON_SECRET:-}"
+      # Zoom Server-to-Server OAuth (optional — class logging works without
+      # it, just without the "pick a past session" shortcut).
+      ZOOM_ACCOUNT_ID: "${ZOOM_ACCOUNT_ID:-}"
+      ZOOM_CLIENT_ID: "${ZOOM_CLIENT_ID:-}"
+      ZOOM_CLIENT_SECRET: "${ZOOM_CLIENT_SECRET:-}"
     volumes:
       - ./data/uploads:/data/uploads
     ports:

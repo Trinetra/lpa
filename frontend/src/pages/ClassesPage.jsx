@@ -1,10 +1,77 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
-import { Plus, Trash2, Pencil, X } from "lucide-react";
+import { Plus, Trash2, Pencil, X, Video, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const today = () => new Date().toISOString().slice(0, 10);
+
+const fmtMeetingWhen = (iso) => {
+  const d = new Date(iso);
+  return d.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+};
+
+// Lets her pick a real past Zoom session instead of typing date/hours by
+// hand — selecting one pre-fills the log-class form's date and duration.
+function ZoomPicker({ onPick }) {
+  const [open, setOpen] = useState(false);
+  const [meetings, setMeetings] = useState(null); // null = not loaded, [] = loaded empty
+  const [configured, setConfigured] = useState(true);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    const onClickOutside = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const load = () => {
+    if (meetings !== null) return; // cache for the session — no need to refetch every open
+    api.get("/zoom/past-meetings").then((r) => setMeetings(r.data)).catch((e) => {
+      if (e?.response?.status === 404) setConfigured(false);
+      else toast.error("Couldn't load Zoom meetings");
+      setMeetings([]);
+    });
+  };
+
+  const toggle = () => {
+    setOpen((o) => !o);
+    if (!open) load();
+  };
+
+  if (!configured) return null; // Zoom not connected — don't clutter the form with a dead button
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button type="button" onClick={toggle} data-testid="zoom-picker-btn"
+        className="btn-ghost text-xs flex items-center gap-1.5">
+        <Video size={13} /> Pick from Zoom <ChevronDown size={12} />
+      </button>
+      {open && (
+        <div className="absolute z-10 mt-1 w-72 surface p-1 max-h-64 overflow-y-auto" style={{ borderColor: "var(--border)" }}>
+          {meetings === null && (
+            <div className="p-3 text-xs text-center" style={{ color: "var(--text-muted)" }}>Loading…</div>
+          )}
+          {meetings !== null && meetings.length === 0 && (
+            <div className="p-3 text-xs text-center" style={{ color: "var(--text-muted)" }}>No recent Zoom sessions.</div>
+          )}
+          {meetings?.map((m) => (
+            <button key={m.uuid} type="button" data-testid={`zoom-meeting-${m.uuid}`}
+              onClick={() => { onPick(m); setOpen(false); }}
+              className="w-full text-left px-3 py-2 rounded hover:bg-white/5">
+              <div className="text-sm truncate">{m.topic || "Zoom Meeting"}</div>
+              <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                {fmtMeetingWhen(m.start_time)} · {m.duration_minutes} min
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Free-add, studio-wide topic tags: type a new one to create it (added to
 // the shared autocomplete list on save), or pick from what's already there.
@@ -252,7 +319,19 @@ export default function ClassesPage() {
 
       {/* Log form */}
       <form onSubmit={submit} data-testid="log-class-form" className="surface p-6">
-        <div className="uppercase-label mb-4">Log a class</div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="uppercase-label">Log a class</div>
+          <ZoomPicker onPick={(m) => {
+            const start = new Date(m.start_time);
+            const hours = Math.max(0.25, Math.round((m.duration_minutes / 60) * 4) / 4);
+            setForm({
+              ...form,
+              class_date: start.toISOString().slice(0, 10),
+              hours,
+            });
+            toast.success(`Filled in from "${m.topic || "Zoom Meeting"}" — pick the student and save`);
+          }} />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
           <label className="md:col-span-2">
             <span className="uppercase-label block mb-1">Student</span>

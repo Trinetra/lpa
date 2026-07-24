@@ -32,6 +32,7 @@ from services import calendar as calendar_service
 from services import tours as tours_service
 from services import backup as backup_service
 from services import reminders as reminders_service
+from services import zoom as zoom_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
@@ -774,6 +775,28 @@ async def _remember_topics(owner_id: str, topics: List[str]):
 async def list_class_topics(user: dict = Depends(get_current_user)):
     cur = db.class_topics.find({"owner_id": user["_id"]}).sort("name", 1)
     return [t["name"] async for t in cur]
+
+@api_router.get("/zoom/status")
+async def zoom_status(user: dict = Depends(get_current_user)):
+    return {"configured": zoom_service.is_configured()}
+
+@api_router.get("/zoom/past-meetings")
+async def zoom_past_meetings(days: int = 14, user: dict = Depends(get_current_user)):
+    """Past Zoom sessions from the last `days` days, for the "pick which
+    session this was" step when logging a class. 404s (not 200-with-empty)
+    when Zoom isn't connected, so the frontend can tell "nothing to show"
+    apart from "this isn't set up"."""
+    if not zoom_service.is_configured():
+        raise HTTPException(status_code=404, detail="Zoom not connected")
+    from datetime import date as _date, timedelta as _timedelta
+    today_d = _date.today()
+    from_date = (today_d - _timedelta(days=days)).isoformat()
+    to_date = today_d.isoformat()
+    try:
+        return await zoom_service.list_past_meetings(from_date, to_date)
+    except Exception as e:
+        logger.error(f"Zoom past-meetings fetch failed: {e}")
+        raise HTTPException(status_code=502, detail="Could not reach Zoom — check the connection in Settings")
 
 @api_router.post("/classes")
 async def create_class(body: ClassLogCreate, user: dict = Depends(get_current_user)):
