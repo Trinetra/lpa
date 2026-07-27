@@ -85,8 +85,8 @@ export default function LoginPage() {
           <div />
           <div>
             <h1
-              className="font-serif-display text-4xl sm:text-5xl lg:text-6xl leading-[1.05]"
-              style={{ color: "#f5e6d3" }}
+              className="font-serif-display text-xl sm:text-2xl italic leading-snug"
+              style={{ color: "#e8c48a", letterSpacing: "0.02em", fontWeight: 500 }}
             >
               Pravaaha Center for Movement
             </h1>
