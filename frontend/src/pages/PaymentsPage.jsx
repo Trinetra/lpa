@@ -348,7 +348,7 @@ export default function PaymentsPage() {
             <div className="md:col-span-4 flex items-end">
               <div className="surface p-3 w-full flex items-center justify-between gap-3" style={{ background: "var(--surface-2)" }}>
                 <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-                  {selectedStudent.name} bills in {selectedStudent.currency} — use the reconciliation flow to convert and allocate a payment.
+                  {selectedStudent.name} pays in {selectedStudent.currency} — use the reconciliation flow to convert and allocate a payment.
                 </span>
                 <button type="button" onClick={() => setReconciling(selectedStudent)} data-testid="open-reconcile-btn"
                   className="btn-pill text-sm shrink-0">Reconcile payment</button>
