@@ -937,7 +937,12 @@ function ContactForm({ tourId, contact, onClose, onSaved }) {
 
 // --------------- Files tab (Google Drive attachments) -----------------
 const GOOGLE_PICKER_API_KEY = process.env.REACT_APP_GOOGLE_PICKER_API_KEY;
-const GOOGLE_OAUTH_CLIENT_ID = process.env.REACT_APP_GOOGLE_OAUTH_CLIENT_ID;
+// Hardcoded rather than read from a Netlify env var — REACT_APP_GOOGLE_OAUTH_CLIENT_ID
+// was set correctly in Netlify (confirmed: right name, value, scope, no
+// duplicates) but never once made it into a built bundle across multiple
+// deploys, for reasons we couldn't pin down. Not a secret — OAuth Client
+// IDs are meant to be public — so hardcoding it removes that flakiness.
+const GOOGLE_OAUTH_CLIENT_ID = "926453845691-cr49j21buedtrnl92evgr75or18simuv.apps.googleusercontent.com";
 
 let gapiLoadPromise = null;
 function loadGooglePickerScript() {
