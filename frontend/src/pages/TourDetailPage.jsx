@@ -1158,6 +1158,71 @@ function TodosTab({ tourId }) {
   );
 }
 
+// --------------- Custom public link -----------------
+// A memorable link (e.g. pravaahacfm.com/tour2026) that resolves to the
+// same public schedule page as the random share token — lives at the root
+// domain, not window.location.origin, since app.pravaahacfm.com is the app
+// itself and the custom slug is meant to be the friendly public-facing URL.
+const ROOT_DOMAIN = "pravaahacfm.com";
+
+function CustomLinkEditor({ tourId, customSlug, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(customSlug || "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.patch(`/tours/${tourId}`, { custom_slug: value.trim() });
+      toast.success(value.trim() ? "Custom link saved" : "Custom link removed");
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Couldn't save that link");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const copy = () => {
+    navigator.clipboard.writeText(`https://${ROOT_DOMAIN}/${customSlug}`);
+    toast.success("Link copied");
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2 text-xs" data-testid="custom-link-editor">
+        <span style={{ color: "var(--text-muted)" }}>{ROOT_DOMAIN}/</span>
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+          placeholder="tour2026"
+          data-testid="custom-link-input"
+          className="bg-transparent border border-white/10 rounded px-2 py-1 w-32"
+        />
+        <button type="button" onClick={save} disabled={saving} data-testid="custom-link-save"
+          className="btn-ghost px-2 py-1">{saving ? "Saving…" : "Save"}</button>
+        <button type="button" onClick={() => { setEditing(false); setValue(customSlug || ""); }}
+          data-testid="custom-link-cancel" className="btn-ghost px-2 py-1">Cancel</button>
+      </div>
+    );
+  }
+
+  return customSlug ? (
+    <div className="flex items-center gap-2 text-xs">
+      <button type="button" onClick={copy} data-testid="custom-link-copy" className="btn-ghost text-xs flex items-center gap-1">
+        <Link2 size={12} /> {ROOT_DOMAIN}/{customSlug}
+      </button>
+      <button type="button" onClick={() => setEditing(true)} data-testid="custom-link-edit" className="btn-ghost px-2 py-1 text-xs">Edit</button>
+    </div>
+  ) : (
+    <button type="button" onClick={() => setEditing(true)} data-testid="custom-link-add"
+      className="btn-ghost text-xs flex items-center gap-1">
+      <Link2 size={12} /> Set a custom link
+    </button>
+  );
+}
+
 // --------------- Page -----------------
 export default function TourDetailPage() {
   const { id } = useParams();
@@ -1189,6 +1254,8 @@ export default function TourDetailPage() {
   if (tour === null) return <div className="uppercase-label">Loading…</div>;
   if (tour === false) return <div className="uppercase-label">Tour not found.</div>;
 
+  const reloadTour = () => api.get(`/tours/${id}`).then((r) => setTour(r.data));
+
   return (
     <div data-testid="tour-detail-page" className="space-y-6">
       <Link to="/tours" className="btn-ghost text-xs inline-flex items-center gap-1">
@@ -1202,9 +1269,12 @@ export default function TourDetailPage() {
           </div>
           <h1 className="font-serif-display text-4xl sm:text-5xl">{tour.name}</h1>
         </div>
-        <button onClick={copyShareLink} data-testid="copy-share-link-btn" className="btn-ghost text-xs flex items-center gap-2">
-          <Link2 size={13} /> Copy public schedule link
-        </button>
+        <div className="flex flex-col items-end gap-2">
+          <button onClick={copyShareLink} data-testid="copy-share-link-btn" className="btn-ghost text-xs flex items-center gap-2">
+            <Link2 size={13} /> Copy public schedule link
+          </button>
+          <CustomLinkEditor tourId={id} customSlug={tour.custom_slug} onSaved={reloadTour} />
+        </div>
       </header>
 
       <div className="flex gap-1 overflow-x-auto" style={{ borderBottom: "1px solid var(--border)" }}>

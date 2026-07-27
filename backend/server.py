@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import io
+import re
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta, date
@@ -246,6 +247,16 @@ class TourUpdate(BaseModel):
     end_date: Optional[str] = None
     location: Optional[str] = None
     notes: Optional[str] = None
+    custom_slug: Optional[str] = None
+
+# Top-level app routes a custom tour slug must never collide with (see
+# frontend/src/App.js) — the public site resolves an unknown top-level path
+# as "try this as a tour slug" only as a fallback, so a slug matching one of
+# these would make that whole page unreachable.
+RESERVED_SLUGS = {
+    "login", "reset-password", "invoice", "tour", "dashboard", "students",
+    "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
+}
 
 class TourStopCreate(BaseModel):
     city: str
@@ -402,6 +413,7 @@ def ser_tour(doc):
         "location": doc.get("location"),
         "notes": doc.get("notes"),
         "share_token": doc.get("share_token"),
+        "custom_slug": doc.get("custom_slug"),
         "created_at": doc.get("created_at"),
     }
 
@@ -1809,6 +1821,20 @@ async def update_tour(tour_id: str, body: TourUpdate, user: dict = Depends(get_c
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "custom_slug" in updates:
+        slug = updates["custom_slug"].strip().lower()
+        if not slug:
+            updates["custom_slug"] = None  # explicit "" clears back to the random share link
+        else:
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,48}[a-z0-9]", slug):
+                raise HTTPException(status_code=400,
+                    detail="Custom link can only contain lowercase letters, numbers, and hyphens (3-50 characters)")
+            if slug in RESERVED_SLUGS:
+                raise HTTPException(status_code=400, detail=f'"{slug}" is reserved and can\'t be used')
+            existing = await db.tours.find_one({"custom_slug": slug, "_id": {"$ne": ObjectId(tour_id)}})
+            if existing:
+                raise HTTPException(status_code=409, detail="That custom link is already taken by another tour")
+            updates["custom_slug"] = slug
     await db.tours.update_one({"_id": ObjectId(tour_id)}, {"$set": updates})
     return ser_tour(await db.tours.find_one({"_id": ObjectId(tour_id)}))
 
@@ -2259,11 +2285,7 @@ async def send_tour_invoice(tour_id: str, invoice_id: str, body: TourInvoiceSend
     return result
 
 # --------------- Public tour schedule page -----------------
-@api_router.get("/tours/share/{share_token}")
-async def get_shared_tour(share_token: str):
-    tour = await db.tours.find_one({"share_token": share_token})
-    if not tour:
-        raise HTTPException(status_code=404, detail="Tour not found")
+async def _ser_shared_tour(tour: dict) -> dict:
     cur = db.tour_stops.find({"tour_id": str(tour["_id"])}).sort("stop_date", 1)
     stops = [ser_tour_stop(d) async for d in cur]
     return {
@@ -2273,6 +2295,22 @@ async def get_shared_tour(share_token: str):
         "location": tour.get("location"),
         "stops": stops,
     }
+
+@api_router.get("/tours/share/{share_token}")
+async def get_shared_tour(share_token: str):
+    tour = await db.tours.find_one({"share_token": share_token})
+    if not tour:
+        raise HTTPException(status_code=404, detail="Tour not found")
+    return await _ser_shared_tour(tour)
+
+@api_router.get("/tours/slug/{slug}")
+async def get_tour_by_slug(slug: str):
+    """Resolves a tour's custom public link (e.g. pravaahacfm.com/tour2026)
+    — same payload as the share-token lookup, just a friendlier URL."""
+    tour = await db.tours.find_one({"custom_slug": slug.lower()})
+    if not tour:
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _ser_shared_tour(tour)
 
 # --------------- Backups -----------------
 @api_router.get("/backup/status")
@@ -2360,6 +2398,7 @@ async def on_startup():
     await db.schedule_blocks.create_index([("owner_id", 1), ("day_of_week", 1)])
     await db.tours.create_index("owner_id")
     await db.tours.create_index("share_token", unique=True)
+    await db.tours.create_index("custom_slug", unique=True, sparse=True)
     await db.tour_stops.create_index([("tour_id", 1), ("stop_date", 1)])
     await db.tour_expenses.create_index([("tour_id", 1), ("expense_date", 1)])
     await db.tour_checkins.create_index("tour_id")

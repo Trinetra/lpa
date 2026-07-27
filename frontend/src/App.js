@@ -61,6 +61,12 @@ function AppRoutes() {
         <Route path="/charts" element={<ChartsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
+      {/* Custom tour public links (e.g. pravaahacfm.com/tour2026) — tried only
+          after every real app route above fails to match, since this is a
+          single dynamic segment that would otherwise shadow nothing but
+          could in principle collide if a tour slug ever matched a route
+          name (blocked server-side via RESERVED_SLUGS). */}
+      <Route path="/:slug" element={<SharedTourPage bySlug />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

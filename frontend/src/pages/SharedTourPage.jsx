@@ -6,17 +6,18 @@ import { MapPin } from "lucide-react";
 
 const fmtDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "");
 
-export default function SharedTourPage() {
-  const { token } = useParams();
+export default function SharedTourPage({ bySlug = false }) {
+  const { token, slug } = useParams();
   const [tour, setTour] = useState(null);
   const [err, setErr] = useState("");
 
   useEffect(() => {
+    const url = bySlug ? `${API}/tours/slug/${slug}` : `${API}/tours/share/${token}`;
     axios
-      .get(`${API}/tours/share/${token}`)
+      .get(url)
       .then((r) => setTour(r.data))
-      .catch(() => setErr("Tour not found."));
-  }, [token]);
+      .catch(() => setErr(bySlug ? "Page not found." : "Tour not found."));
+  }, [bySlug, token, slug]);
 
   if (err)
     return (
