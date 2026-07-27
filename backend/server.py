@@ -1867,6 +1867,13 @@ async def update_tour_stop(tour_id: str, stop_id: str, body: TourStopUpdate,
         geo = await geocoding_service.geocode_venue(venue, city)
         if geo:
             updates.update(geo)
+        else:
+            # The old pin describes the previous venue text, not this one —
+            # leaving it in place would silently mislead (wrong location
+            # shown as if it were confirmed for the new venue).
+            updates["latitude"] = None
+            updates["longitude"] = None
+            updates["formatted_address"] = None
     res = await db.tour_stops.update_one(
         {"_id": ObjectId(stop_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
     )
