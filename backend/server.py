@@ -1240,9 +1240,10 @@ async def dashboard(user: dict = Depends(get_current_user)):
         })
 
     shortcuts = await _top_shortcuts(user["_id"])
+    active_student_count = sum(1 for s in student_map.values() if s.get("is_active", True))
 
     return {
-        "total_students": len(student_map),
+        "total_students": active_student_count,
         "totals_by_currency": totals,
         "students": per_student,
         "recent_classes": recent,
