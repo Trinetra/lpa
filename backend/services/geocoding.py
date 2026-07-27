@@ -16,7 +16,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-USER_AGENT = "LakshmiStudioLedger/1.0 (tour venue geocoding)"
+USER_AGENT = "PravaahaCFM/1.0 (tour venue geocoding)"
 
 
 async def geocode_venue(venue: Optional[str], city: str) -> Optional[dict]:

@@ -14,9 +14,10 @@ Two formats in one ZIP because they serve different purposes:
 import io
 import logging
 import os
+import re
 import subprocess
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import openpyxl
@@ -29,6 +30,10 @@ from services import calendar as calendar_service
 
 logger = logging.getLogger(__name__)
 
+# Deliberately not renamed to match the app's Pravaaha CFM rebrand — this is
+# a lookup key for an existing Drive folder with real backup history.
+# Renaming it would silently start a brand-new folder and orphan everything
+# already backed up.
 BACKUP_FOLDER_NAME = "Lakshmi Studio Ledger — Backups"
 
 # Collections that are actual user records worth backing up. Deliberately
@@ -128,7 +133,7 @@ async def build_backup_zip(owner_id: str) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         manifest_lines = [
-            "Lakshmi Studio Ledger — Backup",
+            "Pravaaha Center for Movement — Backup",
             f"Generated: {datetime.now(timezone.utc).isoformat()}",
             "",
             "Contents:",
@@ -184,10 +189,36 @@ def _find_or_create_backup_folder(drive_service) -> str:
     return folder["id"]
 
 
+BACKUP_RETENTION_DAYS = 4
+
+
+def _prune_old_backups(drive_service, folder_id: str) -> int:
+    """Deletes backup_YYYY-MM-DD.zip files older than the retention window.
+    Parses the date from the filename rather than Drive's own modified-time,
+    so retention is exact regardless of upload delays or timezone quirks.
+    Best-effort per file — one bad delete shouldn't abort the rest."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=BACKUP_RETENTION_DAYS)).strftime("%Y-%m-%d")
+    results = drive_service.files().list(
+        q=f"'{folder_id}' in parents and trashed=false",
+        fields="files(id, name)",
+    ).execute()
+    deleted = 0
+    for f in results.get("files", []):
+        m = re.fullmatch(r"backup_(\d{4}-\d{2}-\d{2})\.zip", f.get("name", ""))
+        if m and m.group(1) < cutoff:
+            try:
+                drive_service.files().delete(fileId=f["id"]).execute()
+                deleted += 1
+            except Exception as e:
+                logger.warning(f"Failed to prune old backup {f['name']}: {e}")
+    return deleted
+
+
 async def run_daily_backup(owner_id: str) -> dict:
-    """Build the backup ZIP and upload it to the teacher's Drive. Returns a
-    status dict; never raises — a failed backup shouldn't crash whatever
-    triggered it (a cron job, a manual button click)."""
+    """Build the backup ZIP, upload it to the teacher's Drive, and prune
+    anything older than BACKUP_RETENTION_DAYS. Returns a status dict; never
+    raises — a failed backup shouldn't crash whatever triggered it (a cron
+    job, a manual button click)."""
     from bson import ObjectId
     user = await db.users.find_one({"_id": ObjectId(owner_id)})
     if not user or not user.get("google_refresh_token"):
@@ -216,7 +247,9 @@ async def run_daily_backup(owner_id: str) -> dict:
             fields="id",
         ).execute()
 
-        return {"ok": True, "filename": filename, "size": len(zip_bytes)}
+        pruned = _prune_old_backups(drive_service, folder_id)
+
+        return {"ok": True, "filename": filename, "size": len(zip_bytes), "pruned": pruned}
     except Exception as e:
         logger.error(f"Daily backup failed: {e}")
         return {"ok": False, "reason": str(e)}

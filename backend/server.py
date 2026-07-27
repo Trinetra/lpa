@@ -43,7 +43,7 @@ APP_NAME = os.environ.get("APP_NAME", "dance-billing")
 # Email-configured flag: true when a Resend key is set. services/email.py
 # picks the right transport at call time.
 EMAIL_KEY = os.environ.get("RESEND_API_KEY")
-EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Lakshmi Studio Ledger")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Pravaaha Center for Movement")
 
 
 # Thin wrappers delegating to services.storage, kept so call sites throughout

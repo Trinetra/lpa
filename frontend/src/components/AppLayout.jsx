@@ -44,7 +44,7 @@ export default function AppLayout() {
     api.get("/profile").then((r) => setProfile(r.data)).catch(() => {});
   }, []);
 
-  const studioName = profile?.studio_name || "Lakshmi Studio Ledger";
+  const studioName = profile?.studio_name || "Pravaaha Center for Movement";
 
   const handleLogout = async () => {
     await logout();

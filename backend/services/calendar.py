@@ -33,7 +33,7 @@ DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 # was granted, so anything using an old token must request only the
 # subset it actually has, not this full list.
 SCOPES = CALENDAR_SCOPES + DRIVE_SCOPES
-DEFAULT_CALENDAR_NAME = "Lakshmi's Dance Classes"
+DEFAULT_CALENDAR_NAME = "Pravaaha CFM — Classes"
 TIMEZONE = "Asia/Kolkata"  # GMT+5:30 — all classes are in India
 
 DAY_RRULE = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]

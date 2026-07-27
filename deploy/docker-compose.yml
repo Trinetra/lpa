@@ -1,6 +1,6 @@
 version: "3.9"
 
-# Lakshmi Studio Ledger — VPS deployment
+# Pravaaha Center for Movement — VPS deployment
 #
 # Runs the FastAPI backend + a private MongoDB instance behind the host's
 # existing nginx. FastAPI binds to 127.0.0.1:8001 on the host loopback only,
@@ -55,7 +55,7 @@ services:
       # Email: direct Resend when RESEND_API_KEY is set.
       RESEND_API_KEY: "${RESEND_API_KEY:-}"
       RESEND_FROM: "${RESEND_FROM:-onboarding@resend.dev}"
-      EMAIL_FROM_NAME: "${EMAIL_FROM_NAME:-Lakshmi Studio Ledger}"
+      EMAIL_FROM_NAME: "${EMAIL_FROM_NAME:-Pravaaha Center for Movement}"
       # Google Calendar sync (optional — schedule works without it)
       GOOGLE_OAUTH_CLIENT_ID: "${GOOGLE_OAUTH_CLIENT_ID:-}"
       GOOGLE_OAUTH_CLIENT_SECRET: "${GOOGLE_OAUTH_CLIENT_SECRET:-}"

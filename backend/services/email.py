@@ -27,7 +27,7 @@ def _from_address() -> str:
 
 
 def _from_name() -> str:
-    return os.environ.get("EMAIL_FROM_NAME", "Studio Ledger")
+    return os.environ.get("EMAIL_FROM_NAME", "Pravaaha Center for Movement")
 
 
 def _backend_url() -> str:
