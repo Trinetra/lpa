@@ -82,43 +82,27 @@ export default function LoginPage() {
           }}
         />
         <div className="relative z-10 h-full flex flex-col justify-between p-12">
-          <div className="font-serif-display text-3xl" style={{ color: "#f5e6d3" }}>
-            Lakshmi
-          </div>
+          <div />
           <div>
-            <div className="uppercase-label mb-3" style={{ color: "#f5e6d3" }}>
-              For dance teachers, made simple
-            </div>
             <h1
               className="font-serif-display text-4xl sm:text-5xl lg:text-6xl leading-[1.05]"
               style={{ color: "#f5e6d3" }}
             >
-              Track classes.
-              <br />
-              Bill students.
-              <br />
-              <span style={{ color: "var(--primary)" }}>Get paid.</span>
+              Pravaaha Center for Movement
             </h1>
-            <p className="mt-6 max-w-md text-sm" style={{ color: "rgba(245,230,211,0.7)" }}>
-              A quiet ledger for your studio—one place for rosters, rates, hours
-              taught, and outstanding dues.
-            </p>
           </div>
         </div>
       </div>
 
       {/* Form */}
       <div className="relative z-10 flex flex-col items-center justify-center px-6 py-16">
-        <div className="md:hidden text-center mb-8 font-serif-display text-3xl" style={{ color: "#f5e6d3" }}>
-          Lakshmi
-        </div>
         <form
           onSubmit={submit}
           data-testid="login-form"
           className="w-full max-w-sm surface p-8"
         >
           <div className="uppercase-label mb-2">Sign in</div>
-          <h2 className="font-serif-display text-3xl mb-8">Welcome back.</h2>
+          <h2 className="font-serif-display text-3xl mb-8">Welcome back, Lakshmi!</h2>
 
           <label className="block mb-4">
             <span className="uppercase-label block mb-2">Email</span>
