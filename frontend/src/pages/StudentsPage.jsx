@@ -5,6 +5,10 @@ import AuthImage from "@/components/AuthImage";
 import { Plus, Trash2, Pencil, Upload, X, UserX, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 
+export const CURRENCIES = ["INR", "EUR", "USD", "GBP"];
+export const CURRENCY_SYMBOLS = { INR: "₹", EUR: "€", USD: "$", GBP: "£" };
+export const fmtCurrency = (n, currency) => `${CURRENCY_SYMBOLS[currency] || (currency ? currency + " " : "₹")}${Number(n || 0).toLocaleString("en-IN")}`;
+
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 function StudentForm({ initial, onClose, onSaved }) {
@@ -15,6 +19,7 @@ function StudentForm({ initial, onClose, onSaved }) {
   const [joinedOn, setJoinedOn] = useState(initial?.joined_on || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [rate, setRate] = useState(initial?.hourly_rate ?? 0);
+  const [currency, setCurrency] = useState(initial?.currency || "INR");
   const [photoPath, setPhotoPath] = useState(initial?.photo_path || null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -50,6 +55,7 @@ function StudentForm({ initial, onClose, onSaved }) {
         joined_on: joinedOn || null,
         description: description || null,
         hourly_rate: Number(rate) || 0,
+        currency,
         photo_path: photoPath || null,
       };
       if (initial?.id) {
@@ -141,11 +147,22 @@ function StudentForm({ initial, onClose, onSaved }) {
               data-testid="student-joined-input"
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2 focus:outline-none focus:border-[color:var(--primary)]" />
           </label>
-          <label className="sm:col-span-2">
-            <span className="uppercase-label block mb-1">Hourly rate (₹) *</span>
+          <label>
+            <span className="uppercase-label block mb-1">Hourly rate *</span>
             <input required type="number" min="0" step="1" value={rate} onChange={(e) => setRate(e.target.value)}
               data-testid="student-rate-input"
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2 focus:outline-none focus:border-[color:var(--primary)]" />
+          </label>
+          <label>
+            <span className="uppercase-label block mb-1">Billing currency</span>
+            <select value={currency} onChange={(e) => setCurrency(e.target.value)}
+              data-testid="student-currency-select"
+              className="w-full bg-transparent border border-white/10 rounded px-3 py-2"
+              style={{ background: "var(--surface)" }}>
+              {CURRENCIES.map((c) => (
+                <option key={c} value={c} style={{ background: "var(--surface)" }}>{c} ({CURRENCY_SYMBOLS[c]})</option>
+              ))}
+            </select>
           </label>
           <label className="sm:col-span-2">
             <span className="uppercase-label block mb-1">Description / notes</span>
@@ -304,7 +321,7 @@ export default function StudentsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="uppercase-label">Rate</div>
-                    <div className="font-serif-display text-lg">{fmt(s.hourly_rate)}/hr</div>
+                    <div className="font-serif-display text-lg">{fmtCurrency(s.hourly_rate, s.currency)}/hr</div>
                   </div>
                   <div className="text-right">
                     <div className="uppercase-label">Due</div>
@@ -312,7 +329,7 @@ export default function StudentsPage() {
                       className="font-serif-display text-lg"
                       style={{ color: due.balance_due > 0 ? "var(--error)" : "var(--success)" }}
                     >
-                      {fmt(due.balance_due || 0)}
+                      {fmtCurrency(due.balance_due || 0, s.currency)}
                     </div>
                   </div>
                 </div>

@@ -17,7 +17,7 @@ const fmtTime = (t) => {
 };
 const fmtDueDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "");
 
-function StatCard({ label, value, icon: Icon, tone, testid }) {
+function StatCard({ label, value, secondary, icon: Icon, tone, testid }) {
   return (
     <div data-testid={testid} className="surface p-6">
       <div className="flex items-center justify-between mb-4">
@@ -30,11 +30,16 @@ function StatCard({ label, value, icon: Icon, tone, testid }) {
       >
         {value}
       </div>
+      {secondary && (
+        <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{secondary}</div>
+      )}
     </div>
   );
 }
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const CURRENCY_SYMBOLS = { INR: "₹", EUR: "€", USD: "$", GBP: "£" };
+const fmtCur = (n, currency) => `${CURRENCY_SYMBOLS[currency] || currency + " "}${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
 export default function DashboardPage() {
   const [data, setData] = useState(null);
@@ -50,6 +55,14 @@ export default function DashboardPage() {
   const studentsOwing = data.students.filter((s) => s.balance_due > 0);
   const jsDay = new Date().getDay(); // 0=Sunday..6=Saturday
   const todayName = DAY_NAMES[jsDay === 0 ? 6 : jsDay - 1]; // convert to 0=Monday..6=Sunday
+
+  const totals = data.totals_by_currency || [];
+  const inrTotals = totals.find((t) => t.currency === "INR") || { total_billed: 0, total_paid: 0, total_due: 0 };
+  const otherTotals = totals.filter((t) => t.currency !== "INR");
+  const secondaryLine = (field) =>
+    otherTotals.length > 0
+      ? otherTotals.map((t) => `+ ${fmtCur(t[field], t.currency)}`).join("  ")
+      : null;
 
   return (
     <div data-testid="dashboard-page" className="space-y-10">
@@ -140,9 +153,12 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Students" value={data.total_students} icon={UsersIcon} testid="stat-students" />
-        <StatCard label="Total billed" value={fmt(data.total_billed)} icon={TrendingUp} testid="stat-billed" />
-        <StatCard label="Total paid" value={fmt(data.total_paid)} icon={IndianRupee} tone="var(--success)" testid="stat-paid" />
-        <StatCard label="Balance due" value={fmt(data.total_due)} icon={TrendingDown} tone={data.total_due > 0 ? "var(--error)" : "var(--text)"} testid="stat-due" />
+        <StatCard label="Total billed" value={fmt(inrTotals.total_billed)} secondary={secondaryLine("total_billed")}
+          icon={TrendingUp} testid="stat-billed" />
+        <StatCard label="Total paid" value={fmt(inrTotals.total_paid)} secondary={secondaryLine("total_paid")}
+          icon={IndianRupee} tone="var(--success)" testid="stat-paid" />
+        <StatCard label="Balance due" value={fmt(inrTotals.total_due)} secondary={secondaryLine("total_due")}
+          icon={TrendingDown} tone={inrTotals.total_due > 0 ? "var(--error)" : "var(--text)"} testid="stat-due" />
       </div>
 
       <section>
@@ -199,7 +215,7 @@ export default function DashboardPage() {
                   className="font-serif-display text-lg"
                   style={{ color: s.balance_due > 0 ? "var(--error)" : "var(--success)" }}
                 >
-                  {fmt(s.balance_due)}
+                  {fmtCur(s.balance_due, s.currency)}
                 </div>
                 <div className="text-[10px] uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
                   {s.balance_due > 0 ? "Due" : "Cleared"}
@@ -238,12 +254,12 @@ export default function DashboardPage() {
                 <div>
                   <div className="text-sm">{c.student_name}</div>
                   <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                    {c.class_date} · {c.hours}h @ ₹{c.rate}/h
+                    {c.class_date} · {c.hours}h @ {fmtCur(c.rate, c.currency)}/h
                   </div>
                 </div>
               </div>
               <div className="font-serif-display" style={{ color: "var(--primary)" }}>
-                {fmt(c.amount)}
+                {fmtCur(c.amount, c.currency)}
               </div>
             </div>
           ))}

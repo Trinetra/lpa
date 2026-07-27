@@ -33,6 +33,7 @@ from services import tours as tours_service
 from services import backup as backup_service
 from services import reminders as reminders_service
 from services import zoom as zoom_service
+from services import fx as fx_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
@@ -147,6 +148,9 @@ class ProfileUpdate(BaseModel):
     bank_ifsc_code: Optional[str] = None
     bank_swift_code: Optional[str] = None
 
+SUPPORTED_CURRENCIES = ["INR", "EUR", "USD", "GBP"]
+CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
+
 class StudentCreate(BaseModel):
     name: str
     email: Optional[str] = None
@@ -155,6 +159,7 @@ class StudentCreate(BaseModel):
     joined_on: Optional[str] = None  # ISO date str
     description: Optional[str] = None
     hourly_rate: float = 0.0
+    currency: str = "INR"
     photo_path: Optional[str] = None
 
 class StudentUpdate(BaseModel):
@@ -165,6 +170,7 @@ class StudentUpdate(BaseModel):
     joined_on: Optional[str] = None
     description: Optional[str] = None
     hourly_rate: Optional[float] = None
+    currency: Optional[str] = None
     photo_path: Optional[str] = None
 
 class ClassLogCreate(BaseModel):
@@ -183,12 +189,22 @@ class ClassLogUpdate(BaseModel):
     student_id: Optional[str] = None
     topics: Optional[List[str]] = None
 
+class PaymentAllocation(BaseModel):
+    class_id: str
+    amount: float
+
 class PaymentCreate(BaseModel):
     student_id: str
-    amount: float
+    amount: float  # in the student's billing currency — what actually clears the debt
     paid_on: str  # ISO
     method: Optional[str] = None
     notes: Optional[str] = None
+    # Foreign-currency reconciliation (all optional — a same-currency INR
+    # payment just leaves these blank):
+    received_amount: Optional[float] = None  # what actually landed in the bank, e.g. INR
+    received_currency: Optional[str] = None
+    fx_rate: Optional[float] = None  # received_currency -> amount's currency, at recording time
+    allocations: List[PaymentAllocation] = Field(default_factory=list)
 
 class InvoiceRequest(BaseModel):
     student_id: str
@@ -295,9 +311,6 @@ class TourTodoUpdate(BaseModel):
     done: Optional[bool] = None
     due_date: Optional[str] = None
 
-TOUR_CURRENCIES = ["INR", "EUR", "USD", "GBP"]
-CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
-
 class TourInvoiceCreate(BaseModel):
     contact_id: Optional[str] = None
     recipient_name: str
@@ -332,6 +345,7 @@ def ser_student(doc):
         "joined_on": doc.get("joined_on"),
         "description": doc.get("description"),
         "hourly_rate": doc.get("hourly_rate", 0.0),
+        "currency": doc.get("currency", "INR"),
         "photo_path": doc.get("photo_path"),
         "is_active": doc.get("is_active", True),
         "created_at": doc.get("created_at"),
@@ -346,6 +360,7 @@ def ser_class(doc):
         "notes": doc.get("notes"),
         "topics": doc.get("topics", []),
         "rate": doc.get("rate"),
+        "currency": doc.get("currency", "INR"),
         "amount": doc.get("amount"),
         "created_at": doc.get("created_at"),
     }
@@ -358,6 +373,10 @@ def ser_payment(doc):
         "paid_on": doc.get("paid_on"),
         "method": doc.get("method"),
         "notes": doc.get("notes"),
+        "received_amount": doc.get("received_amount"),
+        "received_currency": doc.get("received_currency"),
+        "fx_rate": doc.get("fx_rate"),
+        "allocations": doc.get("allocations", []),
         "created_at": doc.get("created_at"),
     }
 
@@ -688,6 +707,8 @@ async def list_students(user: dict = Depends(get_current_user)):
 
 @api_router.post("/students")
 async def create_student(body: StudentCreate, user: dict = Depends(get_current_user)):
+    if body.currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {SUPPORTED_CURRENCIES}")
     doc = body.model_dump()
     doc["phone"] = _normalize_phone(doc.get("phone"))
     doc["owner_id"] = user["_id"]
@@ -708,6 +729,8 @@ async def update_student(sid: str, body: StudentUpdate, user: dict = Depends(get
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "currency" in updates and updates["currency"] not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {SUPPORTED_CURRENCIES}")
     if "phone" in updates:
         updates["phone"] = _normalize_phone(updates["phone"])
     res = await db.students.update_one(
@@ -834,6 +857,10 @@ async def create_class(body: ClassLogCreate, user: dict = Depends(get_current_us
         "notes": body.notes,
         "topics": topics,
         "rate": rate,
+        # Snapshotted from the student at creation time — if her billing
+        # currency changes later, past classes stay denominated in whatever
+        # they were actually billed in.
+        "currency": student.get("currency", "INR"),
         "amount": round(body.hours * rate, 2),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -878,6 +905,8 @@ async def update_class(cid: str, body: ClassLogUpdate, user: dict = Depends(get_
         rate = student.get("hourly_rate", 0.0)
     updates["rate"] = rate
     updates["amount"] = round(float(hours) * float(rate), 2)
+    if updates.get("student_id"):
+        updates["currency"] = student.get("currency", "INR")
 
     if "topics" in updates:
         updates["topics"] = [t.strip() for t in updates["topics"] if t.strip()]
@@ -887,6 +916,99 @@ async def update_class(cid: str, body: ClassLogUpdate, user: dict = Depends(get_
     if updates.get("topics"):
         await _remember_topics(user["_id"], updates["topics"])
     return ser_class(doc)
+
+# --------------- FX / payment reconciliation -----------------
+@api_router.get("/fx-rate")
+async def fx_rate(from_currency: str = Query(..., alias="from"), to_currency: str = Query(..., alias="to"),
+                   user: dict = Depends(get_current_user)):
+    rate = await fx_service.get_rate(from_currency, to_currency)
+    if rate is None:
+        raise HTTPException(status_code=502, detail="Couldn't fetch a live exchange rate — enter the amount manually")
+    return {"from": from_currency, "to": to_currency, "rate": rate}
+
+async def _outstanding_classes(owner_id: str, student_id: str) -> list:
+    """Every class for this student, oldest first, with how much of it is
+    still unpaid — computed by walking prior payments' allocations (or, for
+    payments recorded before allocation tracking existed, treating them as
+    a lump sum applied oldest-first the same way this function itself
+    allocates new payments)."""
+    classes = []
+    async for c in db.classes.find({"owner_id": owner_id, "student_id": student_id}).sort("class_date", 1):
+        classes.append({"id": str(c["_id"]), "class_date": c["class_date"],
+                         "amount": float(c.get("amount", 0)), "paid": 0.0})
+    by_id = {c["id"]: c for c in classes}
+
+    async for p in db.payments.find({"owner_id": owner_id, "student_id": student_id}).sort("paid_on", 1):
+        allocations = p.get("allocations") or []
+        if allocations:
+            for a in allocations:
+                c = by_id.get(a.get("class_id"))
+                if c:
+                    c["paid"] += float(a.get("amount", 0))
+        else:
+            # No allocation recorded (older payment, or a same-currency
+            # lump sum) — apply oldest-first the same way a new payment
+            # would, so the running "outstanding" figure stays consistent.
+            remaining = float(p.get("amount", 0))
+            for c in classes:
+                if remaining <= 0:
+                    break
+                room = c["amount"] - c["paid"]
+                if room <= 0:
+                    continue
+                take = min(room, remaining)
+                c["paid"] += take
+                remaining -= take
+
+    return [
+        {**c, "outstanding": round(c["amount"] - c["paid"], 2)}
+        for c in classes
+    ]
+
+@api_router.get("/students/{sid}/reconcile-preview")
+async def reconcile_preview(sid: str, received_amount: float, received_currency: str = "INR",
+                             user: dict = Depends(get_current_user)):
+    """Given an amount actually received (e.g. INR into the bank), convert
+    it to the student's billing currency at today's rate and suggest an
+    oldest-first allocation across their outstanding classes. Preview only —
+    nothing is saved; the frontend lets her adjust before POSTing to
+    /payments with the final allocations."""
+    student = await db.students.find_one({"_id": ObjectId(sid), "owner_id": user["_id"]})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    student_currency = student.get("currency", "INR")
+
+    if student_currency == received_currency:
+        converted_amount = received_amount
+        rate = 1.0
+    else:
+        rate = await fx_service.get_rate(received_currency, student_currency)
+        if rate is None:
+            raise HTTPException(status_code=502, detail="Couldn't fetch a live exchange rate — enter the converted amount manually")
+        converted_amount = round(received_amount * rate, 2)
+
+    outstanding = [c for c in await _outstanding_classes(user["_id"], sid) if c["outstanding"] > 0]
+
+    remaining = converted_amount
+    allocations = []
+    for c in outstanding:
+        if remaining <= 0.001:  # guard against floating-point residue (e.g. 1e-13 "remaining")
+            break
+        take = round(min(c["outstanding"], remaining), 2)
+        allocations.append({"class_id": c["id"], "class_date": c["class_date"],
+                             "class_amount": c["amount"], "outstanding_before": c["outstanding"],
+                             "amount": take})
+        remaining -= take
+
+    return {
+        "student_currency": student_currency,
+        "received_currency": received_currency,
+        "received_amount": received_amount,
+        "fx_rate": rate,
+        "converted_amount": converted_amount,
+        "allocations": allocations,
+        "unallocated": round(max(remaining, 0), 2),  # overpayment / credit, if any
+    }
 
 # --------------- Payments endpoints -----------------
 @api_router.get("/payments")
@@ -914,6 +1036,10 @@ async def create_payment(body: PaymentCreate, user: dict = Depends(get_current_u
         "paid_on": body.paid_on,
         "method": body.method,
         "notes": body.notes,
+        "received_amount": body.received_amount,
+        "received_currency": body.received_currency,
+        "fx_rate": body.fx_rate,
+        "allocations": [a.model_dump() for a in body.allocations],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     res = await db.payments.insert_one(doc)
@@ -952,7 +1078,9 @@ async def student_summary(sid: str, user: dict = Depends(get_current_user)):
     student = await db.students.find_one({"_id": ObjectId(sid), "owner_id": user["_id"]})
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
-    return await compute_student_summary(user["_id"], sid)
+    summ = await compute_student_summary(user["_id"], sid)
+    summ["currency"] = student.get("currency", "INR")
+    return summ
 
 # --------------- Page visit tracking (for dashboard shortcuts) -----------------
 # Static labels/paths for the top-level pages. Tour pages are dynamic (one
@@ -1014,24 +1142,40 @@ async def _top_shortcuts(owner_id: str, limit: int = 4) -> list:
 
 @api_router.get("/dashboard")
 async def dashboard(user: dict = Depends(get_current_user)):
-    total_billed = 0.0
-    total_paid = 0.0
+    # Totals are grouped by currency, not blended into one number — a
+    # student billing in EUR and one in INR don't sum into anything
+    # meaningful together.
+    totals_by_currency = {}
     student_map = {}
     async for s in db.students.find({"owner_id": user["_id"]}):
         student_map[str(s["_id"])] = s
     per_student = []
     for sid, s in student_map.items():
         summ = await compute_student_summary(user["_id"], sid)
-        total_billed += summ["total_billed"]
-        total_paid += summ["total_paid"]
+        currency = s.get("currency", "INR")
+        bucket = totals_by_currency.setdefault(currency, {"total_billed": 0.0, "total_paid": 0.0})
+        bucket["total_billed"] += summ["total_billed"]
+        bucket["total_paid"] += summ["total_paid"]
         per_student.append({
             "student_id": sid,
             "name": s.get("name"),
             "photo_path": s.get("photo_path"),
             "level": s.get("level"),
+            "currency": currency,
             **summ,
         })
     per_student.sort(key=lambda x: x["balance_due"], reverse=True)
+    totals = [
+        {
+            "currency": cur,
+            "total_billed": round(b["total_billed"], 2),
+            "total_paid": round(b["total_paid"], 2),
+            "total_due": round(b["total_billed"] - b["total_paid"], 2),
+        }
+        for cur, b in totals_by_currency.items()
+    ]
+    # INR first (the common case), then alphabetical for the rest.
+    totals.sort(key=lambda t: (t["currency"] != "INR", t["currency"]))
     # recent classes
     recent = []
     cur = db.classes.find({"owner_id": user["_id"]}).sort("class_date", -1).limit(10)
@@ -1082,9 +1226,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
 
     return {
         "total_students": len(student_map),
-        "total_billed": round(total_billed, 2),
-        "total_paid": round(total_paid, 2),
-        "total_due": round(total_billed - total_paid, 2),
+        "totals_by_currency": totals,
         "students": per_student,
         "recent_classes": recent,
         "today_classes": today_classes,
@@ -1277,6 +1419,7 @@ async def bulk_preview(start_date: Optional[str] = None, end_date: Optional[str]
             "name": s.get("name"),
             "email": s.get("email"),
             "phone": s.get("phone"),
+            "currency": s.get("currency", "INR"),
             "balance_due": summ["balance_due"],       # overall
             "window_billed": round(billed_win, 2) if (start_date or end_date) else summ["total_billed"],
             "window_balance": balance_in_window,
@@ -1729,8 +1872,8 @@ async def list_tour_expenses(tour_id: str, user: dict = Depends(get_current_user
 @api_router.post("/tours/{tour_id}/expenses")
 async def create_tour_expense(tour_id: str, body: TourExpenseCreate, user: dict = Depends(get_current_user)):
     await _get_owned_tour(tour_id, user["_id"])
-    if body.currency not in TOUR_CURRENCIES:
-        raise HTTPException(status_code=400, detail=f"currency must be one of {TOUR_CURRENCIES}")
+    if body.currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {SUPPORTED_CURRENCIES}")
     doc = body.model_dump()
     doc["tour_id"] = tour_id
     doc["owner_id"] = user["_id"]
@@ -1746,8 +1889,8 @@ async def update_tour_expense(tour_id: str, expense_id: str, body: TourExpenseUp
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
-    if "currency" in updates and updates["currency"] not in TOUR_CURRENCIES:
-        raise HTTPException(status_code=400, detail=f"currency must be one of {TOUR_CURRENCIES}")
+    if "currency" in updates and updates["currency"] not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {SUPPORTED_CURRENCIES}")
     res = await db.tour_expenses.update_one(
         {"_id": ObjectId(expense_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
     )
@@ -1952,8 +2095,8 @@ async def list_tour_invoices(tour_id: str, user: dict = Depends(get_current_user
 @api_router.post("/tours/{tour_id}/invoices")
 async def create_tour_invoice(tour_id: str, body: TourInvoiceCreate, user: dict = Depends(get_current_user)):
     await _get_owned_tour(tour_id, user["_id"])
-    if body.currency not in TOUR_CURRENCIES:
-        raise HTTPException(status_code=400, detail=f"currency must be one of {TOUR_CURRENCIES}")
+    if body.currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {SUPPORTED_CURRENCIES}")
     now = datetime.now(timezone.utc)
     doc = body.model_dump()
     doc["tour_id"] = tour_id
@@ -1973,8 +2116,8 @@ async def update_tour_invoice(tour_id: str, invoice_id: str, body: TourInvoiceUp
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
-    if "currency" in updates and updates["currency"] not in TOUR_CURRENCIES:
-        raise HTTPException(status_code=400, detail=f"currency must be one of {TOUR_CURRENCIES}")
+    if "currency" in updates and updates["currency"] not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {SUPPORTED_CURRENCIES}")
     res = await db.tour_invoices.update_one(
         {"_id": ObjectId(invoice_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
     )
