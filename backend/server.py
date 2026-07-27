@@ -34,6 +34,7 @@ from services import backup as backup_service
 from services import reminders as reminders_service
 from services import zoom as zoom_service
 from services import fx as fx_service
+from services import geocoding as geocoding_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
@@ -413,6 +414,9 @@ def ser_tour_stop(doc):
         "stop_date": doc.get("stop_date"),
         "stop_time": doc.get("stop_time"),
         "notes": doc.get("notes"),
+        "latitude": doc.get("latitude"),
+        "longitude": doc.get("longitude"),
+        "formatted_address": doc.get("formatted_address"),
         "created_at": doc.get("created_at"),
     }
 
@@ -1835,6 +1839,11 @@ async def create_tour_stop(tour_id: str, body: TourStopCreate, user: dict = Depe
     doc["tour_id"] = tour_id
     doc["owner_id"] = user["_id"]
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    # Best-effort — a stop always saves even if the venue name doesn't
+    # geocode cleanly; she can retry by editing once it's fixed.
+    geo = await geocoding_service.geocode_venue(body.venue, body.city)
+    if geo:
+        doc.update(geo)
     res = await db.tour_stops.insert_one(doc)
     doc["_id"] = res.inserted_id
     return ser_tour_stop(doc)
@@ -1843,9 +1852,21 @@ async def create_tour_stop(tour_id: str, body: TourStopCreate, user: dict = Depe
 async def update_tour_stop(tour_id: str, stop_id: str, body: TourStopUpdate,
                             user: dict = Depends(get_current_user)):
     await _get_owned_tour(tour_id, user["_id"])
+    existing = await db.tour_stops.find_one({"_id": ObjectId(stop_id), "tour_id": tour_id, "owner_id": user["_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Stop not found")
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    # Only re-geocode if the venue or city actually changed — avoids an
+    # unnecessary Nominatim call (and possibly clobbering a good pin) on
+    # every unrelated edit like notes or time.
+    if "venue" in updates or "city" in updates:
+        venue = updates.get("venue", existing.get("venue"))
+        city = updates.get("city", existing.get("city"))
+        geo = await geocoding_service.geocode_venue(venue, city)
+        if geo:
+            updates.update(geo)
     res = await db.tour_stops.update_one(
         {"_id": ObjectId(stop_id), "tour_id": tour_id, "owner_id": user["_id"]}, {"$set": updates}
     )

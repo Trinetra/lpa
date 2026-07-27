@@ -55,6 +55,14 @@ export default function SharedTourPage() {
                   <MapPin size={12} />
                   {fmtDate(s.stop_date)}{s.stop_time ? ` · ${s.stop_time}` : ""}
                 </div>
+                {s.latitude != null && s.longitude != null && (
+                  <a href={`https://www.google.com/maps?q=${s.latitude},${s.longitude}`} target="_blank" rel="noreferrer"
+                    data-testid={`shared-stop-map-${s.id}`}
+                    className="text-sm mt-1 flex items-center gap-1 hover:text-[color:var(--primary)] transition-colors underline"
+                    style={{ color: "var(--text-muted)" }}>
+                    {s.formatted_address || "View on map"}
+                  </a>
+                )}
                 {s.notes && <div className="text-sm mt-2" style={{ color: "var(--text-muted)" }}>{s.notes}</div>}
               </div>
             ))}

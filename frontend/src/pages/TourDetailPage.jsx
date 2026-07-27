@@ -71,6 +71,14 @@ function ScheduleTab({ tourId }) {
               <div className="text-xs" style={{ color: "var(--text-muted)" }}>
                 {fmtDate(s.stop_date)}{s.stop_time ? ` · ${s.stop_time}` : ""}
               </div>
+              {s.latitude != null && s.longitude != null && (
+                <a href={`https://www.google.com/maps?q=${s.latitude},${s.longitude}`} target="_blank" rel="noreferrer"
+                  data-testid={`stop-map-link-${s.id}`}
+                  className="text-xs mt-1 flex items-center gap-1 hover:text-[color:var(--primary)] transition-colors"
+                  style={{ color: "var(--text-muted)" }}>
+                  <MapPin size={11} /> {s.formatted_address || "View map"}
+                </a>
+              )}
               {s.notes && <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{s.notes}</div>}
             </div>
             <button onClick={() => setEditing(s)} data-testid={`edit-stop-${s.id}`} className="btn-ghost text-xs shrink-0">Edit</button>
