@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { Plus, Trash2, Pencil, X, Video, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
+import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -262,6 +263,10 @@ export default function ClassesPage() {
     topics: [],
   });
   const [saving, setSaving] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
+
+  const visibleStudents = filterActive(students, showInactive);
+  const inactiveCount = inactiveCountOf(students);
 
   const load = () => {
     const params = filterId ? { params: { student_id: filterId } } : {};
@@ -312,9 +317,12 @@ export default function ClassesPage() {
 
   return (
     <div data-testid="classes-page" className="space-y-8">
-      <header>
-        <div className="uppercase-label mb-2">Class ledger</div>
-        <h1 className="font-serif-display text-4xl sm:text-5xl">Log & review classes</h1>
+      <header className="flex items-end justify-between flex-wrap gap-4">
+        <div>
+          <div className="uppercase-label mb-2">Class ledger</div>
+          <h1 className="font-serif-display text-4xl sm:text-5xl">Log & review classes</h1>
+        </div>
+        <ShowInactiveToggle count={inactiveCount} checked={showInactive} onChange={setShowInactive} />
       </header>
 
       {/* Log form */}
@@ -341,7 +349,7 @@ export default function ClassesPage() {
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2"
               style={{ background: "var(--surface)" }}>
               <option value="" style={{ background: "var(--surface)" }}>Select student…</option>
-              {students.map((s) => (
+              {visibleStudents.map((s) => (
                 <option key={s.id} value={s.id} style={{ background: "var(--surface)" }}>
                   {s.name} — ₹{s.hourly_rate}/hr
                 </option>

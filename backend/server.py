@@ -1178,6 +1178,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
             "photo_path": s.get("photo_path"),
             "level": s.get("level"),
             "currency": currency,
+            "is_active": s.get("is_active", True),
             **summ,
         })
     per_student.sort(key=lambda x: x["balance_due"], reverse=True)
@@ -1436,6 +1437,7 @@ async def bulk_preview(start_date: Optional[str] = None, end_date: Optional[str]
             "email": s.get("email"),
             "phone": s.get("phone"),
             "currency": s.get("currency", "INR"),
+            "is_active": s.get("is_active", True),
             "balance_due": summ["balance_due"],       # overall
             "window_billed": round(billed_win, 2) if (start_date or end_date) else summ["total_billed"],
             "window_balance": balance_in_window,

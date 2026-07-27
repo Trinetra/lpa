@@ -4,6 +4,7 @@ import { FileText, Download, Link as LinkIcon, Copy, Mail, MessageCircle, X, Tra
 import { toast } from "sonner";
 import BulkSendModal from "@/components/BulkSendModal";
 import { useAuth } from "@/context/AuthContext";
+import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -86,6 +87,7 @@ export default function InvoicesPage() {
   const [saving, setSaving] = useState(false);
   const [emailing, setEmailing] = useState(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   const load = () => {
     Promise.all([api.get("/students"), api.get("/invoices")]).then(([sRes, iRes]) => {
@@ -96,6 +98,8 @@ export default function InvoicesPage() {
   useEffect(load, []);
 
   const studentMap = students.reduce((m, s) => ({ ...m, [s.id]: s }), {});
+  const visibleStudents = filterActive(students, showInactive);
+  const inactiveCount = inactiveCountOf(students);
 
   const generate = async (e) => {
     e.preventDefault();
@@ -156,11 +160,14 @@ export default function InvoicesPage() {
             <div className="uppercase-label mb-2">Billing</div>
             <h1 className="font-serif-display text-4xl sm:text-5xl">Invoices</h1>
           </div>
-          <button type="button" onClick={() => setBulkOpen(true)}
-            data-testid="bulk-send-open-btn"
-            className="btn-pill flex items-center gap-2">
-            <Send size={14} /> Send outstanding
-          </button>
+          <div className="flex items-center gap-3">
+            <ShowInactiveToggle count={inactiveCount} checked={showInactive} onChange={setShowInactive} />
+            <button type="button" onClick={() => setBulkOpen(true)}
+              data-testid="bulk-send-open-btn"
+              className="btn-pill flex items-center gap-2">
+              <Send size={14} /> Send outstanding
+            </button>
+          </div>
         </div>
         <p className="mt-3 text-sm max-w-xl" style={{ color: "var(--text-muted)" }}>
           Generate a shareable invoice for any student and date range. Send the link
@@ -180,7 +187,7 @@ export default function InvoicesPage() {
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2"
               style={{ background: "var(--surface)" }}>
               <option value="" style={{ background: "var(--surface)" }}>Select student…</option>
-              {students.map((s) => (
+              {visibleStudents.map((s) => (
                 <option key={s.id} value={s.id} style={{ background: "var(--surface)" }}>{s.name}</option>
               ))}
             </select>

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { Plus, Trash2, X, ArrowRight, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
 
 const CURRENCY_SYMBOLS = { INR: "₹", EUR: "€", USD: "$", GBP: "£" };
 const fmtCur = (n, currency) => `${CURRENCY_SYMBOLS[currency] || (currency ? currency + " " : "₹")}${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -216,10 +217,14 @@ export default function PaymentsPage() {
   });
   const [saving, setSaving] = useState(false);
   const [reconciling, setReconciling] = useState(null); // student object, or null
+  const [showInactive, setShowInactive] = useState(false);
 
   const studentMap = students.reduce((m, s) => ({ ...m, [s.id]: s }), {});
   const selectedStudent = studentMap[form.student_id];
   const isForeignCurrency = selectedStudent && selectedStudent.currency && selectedStudent.currency !== "INR";
+  const visibleStudents = filterActive(students, showInactive);
+  const inactiveCount = inactiveCountOf(students);
+  const visibleDueEntries = filterActive(Object.values(dueMap), showInactive);
 
   const load = () => {
     const params = filterId ? { params: { student_id: filterId } } : {};
@@ -270,21 +275,24 @@ export default function PaymentsPage() {
 
   return (
     <div data-testid="payments-page" className="space-y-8">
-      <header>
-        <div className="uppercase-label mb-2">Ledger</div>
-        <h1 className="font-serif-display text-4xl sm:text-5xl">Payments</h1>
+      <header className="flex items-end justify-between flex-wrap gap-4">
+        <div>
+          <div className="uppercase-label mb-2">Ledger</div>
+          <h1 className="font-serif-display text-4xl sm:text-5xl">Payments</h1>
+        </div>
+        <ShowInactiveToggle count={inactiveCount} checked={showInactive} onChange={setShowInactive} />
       </header>
 
       {/* Outstanding grid */}
       <section>
         <div className="uppercase-label mb-3">Outstanding balances</div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {Object.values(dueMap).length === 0 && (
+          {visibleDueEntries.length === 0 && (
             <div className="col-span-full surface p-6" style={{ color: "var(--text-muted)" }}>
               Nothing to show yet.
             </div>
           )}
-          {Object.values(dueMap).map((s) => (
+          {visibleDueEntries.map((s) => (
             <button
               key={s.student_id}
               onClick={() => {
@@ -329,7 +337,7 @@ export default function PaymentsPage() {
               style={{ background: "var(--surface)" }}
             >
               <option value="" style={{ background: "var(--surface)" }}>Select student…</option>
-              {students.map((s) => (
+              {visibleStudents.map((s) => (
                 <option key={s.id} value={s.id} style={{ background: "var(--surface)" }}>
                   {s.name}{s.currency && s.currency !== "INR" ? ` (${s.currency})` : ""}
                 </option>

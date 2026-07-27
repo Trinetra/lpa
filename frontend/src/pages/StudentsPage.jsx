@@ -4,6 +4,7 @@ import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
 import { Plus, Trash2, Pencil, Upload, X, UserX, UserCheck } from "lucide-react";
 import { toast } from "sonner";
+import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
 
 export const CURRENCIES = ["INR", "EUR", "USD", "GBP"];
 export const CURRENCY_SYMBOLS = { INR: "₹", EUR: "€", USD: "$", GBP: "£" };
@@ -235,8 +236,8 @@ export default function StudentsPage() {
     }
   };
 
-  const visibleStudents = students.filter((s) => showInactive || s.is_active !== false);
-  const inactiveCount = students.filter((s) => s.is_active === false).length;
+  const visibleStudents = filterActive(students, showInactive);
+  const inactiveCount = inactiveCountOf(students);
 
   return (
     <div data-testid="students-page" className="space-y-8">
@@ -246,17 +247,7 @@ export default function StudentsPage() {
           <h1 className="font-serif-display text-4xl sm:text-5xl">Students</h1>
         </div>
         <div className="flex items-center gap-3">
-          {inactiveCount > 0 && (
-            <label className="flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
-              <input
-                type="checkbox"
-                checked={showInactive}
-                onChange={(e) => setShowInactive(e.target.checked)}
-                data-testid="show-inactive-toggle"
-              />
-              Show inactive ({inactiveCount})
-            </label>
-          )}
+          <ShowInactiveToggle count={inactiveCount} checked={showInactive} onChange={setShowInactive} />
           <button data-testid="add-student-btn" onClick={() => setEditing("new")} className="btn-pill flex items-center gap-2">
             <Plus size={16} /> Add student
           </button>

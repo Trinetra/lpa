@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { X, Mail, MessageCircle, CheckCircle2, AlertCircle, Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
+import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -22,15 +23,18 @@ export default function BulkSendModal({ onClose, onDone }) {
   const [selected, setSelected] = useState({});
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState(null);
+  const [showInactive, setShowInactive] = useState(false);
 
   const loadPreview = () => {
     setLoading(true);
     const params = { start_date: range.start || undefined, end_date: range.end || undefined };
     api.get("/invoices/bulk-preview", { params }).then((r) => {
       setPreview(r.data);
-      // Default: select students with outstanding balance
+      // Default: select active students with an outstanding balance —
+      // inactive ones aren't pre-checked, though she can still tick one via
+      // "Show inactive" if she genuinely wants to chase a payment from them.
       const sel = {};
-      r.data.forEach((s) => { if (s.balance_due > 0) sel[s.student_id] = true; });
+      r.data.forEach((s) => { if (s.balance_due > 0 && s.is_active !== false) sel[s.student_id] = true; });
       setSelected(sel);
     }).finally(() => setLoading(false));
   };
@@ -171,7 +175,10 @@ export default function BulkSendModal({ onClose, onDone }) {
                 className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
             </label>
 
-            <div className="uppercase-label mb-2">Recipients</div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="uppercase-label">Recipients</div>
+              <ShowInactiveToggle count={inactiveCountOf(preview || [])} checked={showInactive} onChange={setShowInactive} />
+            </div>
             {loading ? (
               <div className="p-6 text-center uppercase-label">Loading…</div>
             ) : (
@@ -182,7 +189,7 @@ export default function BulkSendModal({ onClose, onDone }) {
                     No students yet.
                   </div>
                 )}
-                {preview && preview.map((s) => {
+                {preview && filterActive(preview, showInactive).map((s) => {
                   const disabled = s.balance_due <= 0 && !(selected[s.student_id]);
                   return (
                     <label key={s.student_id}
