@@ -2288,12 +2288,21 @@ async def send_tour_invoice(tour_id: str, invoice_id: str, body: TourInvoiceSend
 async def _ser_shared_tour(tour: dict) -> dict:
     cur = db.tour_stops.find({"tour_id": str(tour["_id"])}).sort("stop_date", 1)
     stops = [ser_tour_stop(d) async for d in cur]
+    owner = await db.users.find_one({"_id": ObjectId(tour["owner_id"])}) if tour.get("owner_id") else None
+    studio = {
+        "studio_name": (owner or {}).get("studio_name"),
+        "teacher_name": (owner or {}).get("teacher_name") or (owner or {}).get("name"),
+        "social_youtube": (owner or {}).get("social_youtube"),
+        "social_instagram": (owner or {}).get("social_instagram"),
+        "social_facebook": (owner or {}).get("social_facebook"),
+    }
     return {
         "name": tour.get("name"),
         "start_date": tour.get("start_date"),
         "end_date": tour.get("end_date"),
         "location": tour.get("location"),
         "stops": stops,
+        "studio": studio,
     }
 
 @api_router.get("/tours/share/{share_token}")
