@@ -8,6 +8,15 @@
   CI = "false"
   NODE_VERSION = "20"
 
+# Old Netlify subdomain -> the real custom domain, so links already sent in
+# invoices/tour shares before the migration keep working instead of just
+# quietly continuing to serve the app from the old URL forever.
+[[redirects]]
+  from = "https://lpfees.netlify.app/*"
+  to = "https://app.pravaahacfm.com/:splat"
+  status = 301
+  force = true
+
 # Client-side routing — every unknown path serves index.html so React Router
 # handles it (login, reset-password, invoice/<token>, etc.).
 [[redirects]]
