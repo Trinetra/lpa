@@ -1,0 +1,1614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Adavu Pose Capture 3</title>
+<style>
+  :root{
+    --ink:#1B1714;
+    --panel:#241E19;
+    --panel-2:#2C251F;
+    --line:#44392F;
+    --line-soft:rgba(255,255,255,0.05);
+    --ivory:#EDE6D8;
+    --muted:#A89C8C;
+    --gold:#C9952C;
+    --danger:#C75C4F;
+    --ok:#5fa66e;
+    --info:#3E7CB1;
+    --font-display:Georgia,'Iowan Old Style','Palatino Linotype',serif;
+    --font-ui:'Segoe UI',system-ui,-apple-system,sans-serif;
+    --font-mono:Consolas,'SF Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--ink);color:var(--ivory);font-family:var(--font-ui);font-size:14px;line-height:1.45;}
+  h1,h2{font-family:var(--font-display);margin:0;font-weight:400;}
+  h2{font-size:1.02rem;letter-spacing:.02em;margin:1.1rem 0 .5rem;border-bottom:1px solid var(--line);padding-bottom:.3rem;}
+  p{margin:0;}
+  button{font-family:var(--font-ui);font-size:.85rem;background:var(--panel-2);color:var(--ivory);border:1px solid var(--line);border-radius:5px;padding:.45rem .8rem;cursor:pointer;}
+  button:hover:not(:disabled){border-color:var(--gold);}
+  button:disabled{opacity:.4;cursor:not-allowed;}
+  button.primary{background:var(--gold);color:var(--ink);border-color:var(--gold);font-weight:600;}
+  button.primary:hover:not(:disabled){filter:brightness(1.08);}
+  button.danger{color:var(--danger);}
+  button.danger:hover:not(:disabled){border-color:var(--danger);}
+  button.big{font-size:.98rem;padding:.6rem 1.2rem;}
+  button.toggle.on{background:var(--gold);color:var(--ink);border-color:var(--gold);font-weight:600;}
+  input,textarea,select{font-family:var(--font-ui);font-size:.9rem;background:var(--panel-2);color:var(--ivory);border:1px solid var(--line);border-radius:5px;padding:.4rem .55rem;width:100%;}
+  input::placeholder{color:var(--muted);}
+  label{display:flex;flex-direction:column;gap:.25rem;font-size:.78rem;color:var(--muted);margin-bottom:.6rem;}
+  :focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
+  .app{max-width:1080px;margin:0 auto;padding:1.1rem 1.4rem 3rem;}
+  .topbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:1rem;padding-bottom:1rem;border-bottom:1px solid var(--line);margin-bottom:1.2rem;}
+  .topbar h1{font-size:1.7rem;letter-spacing:.01em;}
+  .tagline{color:var(--muted);font-size:.82rem;margin-top:.15rem;}
+  .kbd{background:var(--panel-2);border:1px solid var(--line);border-radius:3px;padding:.05rem .35rem;font-family:var(--font-mono);font-size:.75rem;color:var(--ivory);}
+
+  /* Loader */
+  .loader{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1.2rem 1.4rem;}
+  .loader.drop-target{border-color:var(--gold);background:rgba(201,149,44,.06);}
+  .loader h2{margin-top:0;border-bottom:none;padding-bottom:0;}
+  .loader .helper{color:var(--muted);font-size:.85rem;margin-bottom:.7rem;}
+  .loader .path-display{font-family:var(--font-mono);font-size:.8rem;color:var(--gold);margin-left:.6rem;}
+
+  /* Fields */
+  .fields{display:grid;grid-template-columns:1fr 1fr;gap:0 1rem;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem 1.2rem .6rem;margin-top:.9rem;}
+  .field-note{grid-column:1/-1;color:var(--muted);font-size:.75rem;margin-top:-.2rem;}
+
+  /* Video */
+  .video-wrap{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9;border:1px solid var(--line);max-width:960px;margin:1rem auto 0;}
+  .video-wrap video{width:100%;height:100%;object-fit:contain;background:#000;display:block;}
+  .no-video{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.85rem;text-align:center;padding:1rem;}
+  .player-controls{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.7rem auto 0;max-width:960px;}
+  .player-controls select{width:auto;}
+  .time-readout{font-family:var(--font-mono);color:var(--gold);margin-left:auto;font-size:1rem;}
+  .scrubber-row{display:flex;align-items:center;padding:0 .2rem;margin:.3rem auto 0;max-width:960px;}
+  .scrubber-row input[type="range"]{flex:1;width:100%;accent-color:var(--gold);cursor:pointer;height:20px;}
+  .kbd-hint{color:var(--muted);font-size:.78rem;margin:.4rem auto 0;max-width:960px;text-align:center;}
+  .capture-bar{margin:1rem auto 0;max-width:960px;display:flex;justify-content:center;gap:.6rem;align-items:center;}
+  .status{font-size:.82rem;color:var(--muted);}
+  .status.ok{color:var(--ok);}
+  .status.err{color:var(--danger);}
+
+  /* Thumbnail grid */
+  .shelf-head{display:flex;justify-content:space-between;align-items:center;gap:1rem;border-bottom:1px solid var(--line);padding-bottom:.3rem;margin:1.6rem 0 .7rem;}
+  .shelf-head h2{border:none;margin:0;padding:0;}
+  .shelf-actions{display:flex;gap:.5rem;align-items:center;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.8rem;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:7px;overflow:hidden;display:flex;flex-direction:column;}
+  .card.dupe{border-color:var(--danger);}
+  .card .shot{position:relative;aspect-ratio:1;background:#000 repeating-conic-gradient(#2b2b2b 0% 25%, #1e1e1e 0% 50%) 50%/16px 16px;cursor:pointer;}
+  .card .shot img{width:100%;height:100%;object-fit:contain;display:block;}
+  .card .badge{position:absolute;top:.3rem;left:.3rem;background:rgba(0,0,0,.72);border-radius:3px;padding:.05rem .3rem;font-family:var(--font-mono);font-size:.72rem;color:var(--gold);}
+  .card .spin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);font-size:.72rem;color:var(--ivory);text-align:center;padding:.4rem;}
+  .card .foot{display:flex;justify-content:space-between;align-items:center;gap:.3rem;padding:.35rem .45rem;border-top:1px solid var(--line-soft);}
+  .card .cap{font-size:.72rem;color:var(--muted);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .card .foot button{padding:.15rem .4rem;font-size:.72rem;}
+  .empty{color:var(--muted);font-size:.85rem;padding:1.6rem;text-align:center;border:1px dashed var(--line);border-radius:6px;}
+
+  /* Modals */
+  .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;z-index:1000;padding:1rem;}
+  .modal{background:var(--panel);border:1px solid var(--gold);border-radius:10px;max-width:560px;width:100%;padding:1.2rem 1.4rem;max-height:92vh;overflow-y:auto;}
+  .modal.wide{max-width:1000px;}
+  .modal h2{margin-top:0;font-size:1.15rem;border-bottom:1px solid var(--line);padding-bottom:.4rem;}
+  .modal .preview{background:#000;border-radius:6px;overflow:hidden;margin-bottom:.7rem;text-align:center;}
+  .modal .preview img{max-width:100%;max-height:260px;display:block;margin:0 auto;}
+  .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.9rem;}
+
+  /* Editor */
+  .edit-stage{position:relative;border:1px solid var(--line);border-radius:6px;overflow:hidden;min-height:340px;height:56vh;}
+  /* The backdrop sits under the canvas so it can be swapped without repainting
+     pixels — transparency in the cutout shows straight through to it. */
+  .edit-stage.bg-checker{background:#111 repeating-conic-gradient(#2b2b2b 0% 25%, #1e1e1e 0% 50%) 50%/20px 20px;}
+  .edit-stage.bg-white{background:#FFFFFF;}
+  .edit-stage.bg-black{background:#000000;}
+  .edit-stage canvas{position:absolute;top:0;left:0;transform-origin:0 0;display:block;cursor:crosshair;touch-action:none;image-rendering:pixelated;}
+  /* In brush mode the OS arrow is replaced by the ring below, which shows the
+     exact area a stamp will cover. Any other mode keeps a real cursor. */
+  .edit-stage.brush-cursor canvas{cursor:none;}
+  .edit-stage.panning canvas{cursor:grab;}
+  .edit-stage.panning.grabbing canvas{cursor:grabbing;}
+  /* Brush ring: a DOM overlay, never painted into the cutout, so it cannot bake
+     into an export. Sized in screen px from brush*zoom and centred on the
+     pointer via a -50%,-50% translate. */
+  #brushRing{position:absolute;left:0;top:0;border-radius:50%;pointer-events:none;
+    display:none;box-sizing:border-box;
+    border:1px solid rgba(0,0,0,.85);box-shadow:0 0 0 1px rgba(255,255,255,.9) inset;}
+  #brushRing.erase{border-color:rgba(255,90,90,.95);box-shadow:0 0 0 1px rgba(255,255,255,.85) inset;}
+  /* A crosshair dot keeps the centre findable when the brush is large. */
+  #brushRing::after{content:'';position:absolute;left:50%;top:50%;width:3px;height:3px;
+    margin:-1.5px 0 0 -1.5px;border-radius:50%;background:rgba(255,255,255,.9);
+    box-shadow:0 0 0 1px rgba(0,0,0,.8);}
+  .restore-bar{display:flex;align-items:center;gap:.8rem;margin:0 0 1rem;padding:.7rem .9rem;
+    border:1px solid var(--gold);border-radius:6px;background:rgba(198,160,74,.08);}
+  .restore-bar .restore-icon{color:var(--gold);font-size:1.2rem;line-height:1;}
+  .restore-bar .restore-text{display:flex;flex-direction:column;gap:.15rem;flex:1;min-width:0;font-size:.85rem;}
+  .restore-bar .restore-text .muted{font-size:.78rem;}
+  .scale-ctl{display:flex;align-items:center;gap:.4rem;font-size:.8rem;color:var(--muted);margin:0;}
+  .scale-ctl input[type="range"]{width:88px;accent-color:var(--gold);cursor:pointer;}
+  .scale-ctl #fScaleVal{font-family:var(--font-mono);color:var(--gold);min-width:8.5em;}
+  .zoom-readout{font-family:var(--font-mono);font-size:.76rem;color:var(--gold);min-width:3.4em;text-align:center;}
+  .swatches{display:flex;gap:.25rem;}
+  .swatch{width:24px;height:24px;border:1px solid var(--line);border-radius:4px;padding:0;cursor:pointer;}
+  .swatch.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold);}
+  .swatch.sw-checker{background:#111 repeating-conic-gradient(#2b2b2b 0% 25%, #1e1e1e 0% 50%) 50%/8px 8px;}
+  .swatch.sw-white{background:#fff;}
+  .swatch.sw-black{background:#000;}
+  .edit-tools{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-top:.7rem;}
+  .wand-tools{display:flex;gap:.5rem;align-items:center;padding:.25rem .6rem;
+    border:1px solid var(--gold);border-radius:6px;background:rgba(198,160,74,.07);}
+  .edit-tools .sep{width:1px;height:22px;background:var(--line);}
+  .edit-tools label{flex-direction:row;align-items:center;gap:.4rem;margin:0;font-size:.76rem;}
+  .edit-tools input[type=range]{width:110px;accent-color:var(--gold);}
+  .edit-hint{color:var(--muted);font-size:.75rem;margin-top:.5rem;}
+
+  .hidden{display:none !important;}
+  .muted{color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div>
+      <h1>Adavu Pose Capture</h1>
+      <p class="tagline">Capture poses, auto-cut the background, fix by hand, export as a set</p>
+    </div>
+    <div class="muted" style="font-size:.78rem;text-align:right;">
+      <div><span class="kbd">Space</span> play/pause</div>
+      <div><span class="kbd">←</span> <span class="kbd">→</span> step frame</div>
+      <div><span class="kbd">C</span> capture</div>
+    </div>
+  </header>
+
+  <!-- Shown only when a previous session is found in IndexedDB. Nothing loads
+       until she chooses, so a stale session cannot quietly mix into a new one. -->
+  <div id="restoreBar" class="restore-bar hidden">
+    <span class="restore-icon">⟳</span>
+    <div class="restore-text">
+      <strong>Your last session is still here.</strong>
+      <span id="restoreInfo" class="muted"></span>
+    </div>
+    <button id="btnRestore" class="primary">Restore</button>
+    <button id="btnDiscard">Discard</button>
+  </div>
+
+  <section class="loader" id="loader">
+    <h2>Open a video</h2>
+    <p class="helper">Pick any video file, or drag one here.</p>
+    <div>
+      <input type="file" id="videoInput" accept="video/*" style="width:auto;font-size:.82rem;">
+      <span class="path-display" id="videoName"></span>
+    </div>
+  </section>
+
+  <div class="fields">
+    <label>Bani
+      <input id="fBani" list="dlBani" placeholder="e.g. Kalakshetra" autocomplete="off">
+      <datalist id="dlBani"></datalist>
+    </label>
+    <label>Movement
+      <input id="fMovement" list="dlMovement" placeholder="e.g. Natta" autocomplete="off">
+      <datalist id="dlMovement"></datalist>
+    </label>
+    <p class="field-note">Used for filenames: <span class="muted" id="namePreview">bani-movement-tag.png</span></p>
+  </div>
+
+  <div class="video-wrap">
+    <video id="video"></video>
+    <div class="no-video" id="noVideoMsg">Load a video to begin.</div>
+  </div>
+
+  <div class="player-controls">
+    <button id="btnRestart" title="Restart">⟲</button>
+    <button id="btnStepBack" title="Step back one frame (←)">⏮ frame</button>
+    <button id="btnPlayPause" title="Play / pause (Space)">▶</button>
+    <button id="btnStepFwd" title="Step forward one frame (→)">frame ⏭</button>
+    <select id="speedSelect" title="Playback speed">
+      <option value="0.25">0.25×</option>
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+    </select>
+    <span class="time-readout" id="timeReadout">00:00.00</span>
+  </div>
+  <div class="scrubber-row">
+    <input type="range" id="scrubber" min="0" max="1000" value="0" step="1">
+  </div>
+  <p class="kbd-hint"><span class="kbd">Space</span> play/pause · <span class="kbd">←</span>/<span class="kbd">→</span> step frame · <span class="kbd">C</span> capture pose</p>
+
+  <div class="capture-bar">
+    <button id="btnCapture" class="primary big">📷 Capture pose (C)</button>
+    <span class="status" id="status"></span>
+  </div>
+
+  <div class="shelf-head">
+    <h2>Captures <span class="muted" style="font-size:.75rem;" id="shelfCount"></span></h2>
+    <div class="shelf-actions">
+      <span class="status" id="exportStatus"></span>
+      <label class="scale-ctl" title="Scale every image down before it goes into the ZIP. 100% = original capture size.">Size
+        <input type="range" id="fScale" min="10" max="100" step="5" value="100">
+        <span id="fScaleVal">100%</span>
+      </label>
+      <button id="btnExportPng" class="primary" disabled>Export PNGs (ZIP)</button>
+      <button id="btnExportJpg" disabled>Export JPEGs</button>
+    </div>
+  </div>
+  <div id="shelf"><p class="empty">Captured poses appear here. Nothing is saved until you export.</p></div>
+
+</div>
+
+<!-- TAG MODAL -->
+<div id="tagModal" class="hidden">
+  <div class="backdrop">
+    <div class="modal">
+      <h2>Tag this capture</h2>
+      <div class="preview"><img id="tagPreview" alt="captured frame"></div>
+      <label>Tag <span class="muted">— matches this pose back to your document (e.g. 8a, 9b)</span>
+        <input id="fTag" placeholder="8a" autocomplete="off">
+      </label>
+      <p class="status" id="tagWarn"></p>
+      <div class="actions">
+        <button id="btnTagCancel">Cancel</button>
+        <button id="btnTagOk" class="primary">Add capture</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EDITOR MODAL -->
+<div id="editModal" class="hidden">
+  <div class="backdrop">
+    <div class="modal wide">
+      <h2>Refine cutout — <span id="editTitle" style="font-family:var(--font-mono);font-size:.9rem;color:var(--gold);"></span></h2>
+      <div class="edit-stage bg-checker" id="editStage"><canvas id="editCanvas"></canvas><div id="brushRing"></div></div>
+      <div class="edit-tools">
+        <button id="tRestore" class="toggle on">🖌 Restore</button>
+        <button id="tErase" class="toggle">🧽 Erase</button>
+        <button id="tWand" class="toggle" title="Magic wand (W) — click a region to select it">✨ Wand</button>
+        <div class="sep"></div>
+        <label>Size <input type="range" id="tSize" min="4" max="150" value="34"><span id="tSizeVal" class="muted" style="font-family:var(--font-mono);">34</span></label>
+        <div id="wandTools" class="wand-tools hidden">
+          <label>Tolerance <input type="range" id="tWandTol" min="4" max="120" value="28"><span id="tWandTolVal" class="muted" style="font-family:var(--font-mono);">28</span></label>
+          <label style="cursor:pointer;" title="Select matching colour everywhere, not just the clicked patch"><input type="checkbox" id="tWandGlobal" style="width:auto;"> Everywhere</label>
+          <span id="tWandInfo" class="muted" style="font-family:var(--font-mono);font-size:.8rem;"></span>
+          <button id="tWandApply" disabled>Apply</button>
+          <button id="tWandCancel" disabled>Cancel</button>
+        </div>
+        <div class="sep"></div>
+        <label style="margin:0;">Backdrop</label>
+        <div class="swatches">
+          <button class="swatch sw-checker on" data-bg="checker" title="Checkerboard"></button>
+          <button class="swatch sw-white" data-bg="white" title="White backdrop"></button>
+          <button class="swatch sw-black" data-bg="black" title="Black backdrop"></button>
+        </div>
+        <div class="sep"></div>
+        <button id="tZoomOut" title="Zoom out (-)">−</button>
+        <span class="zoom-readout" id="tZoomVal">Fit</span>
+        <button id="tZoomIn" title="Zoom in (+)">+</button>
+        <button id="tZoomFit" title="Fit to window (0)">Fit</button>
+        <div class="sep"></div>
+        <label style="cursor:pointer;"><input type="checkbox" id="tShowOrig" style="width:auto;"> Show original</label>
+        <div class="sep"></div>
+        <button id="tUndo" disabled>↶ Undo</button>
+        <button id="tReset">Reset to AI cutout</button>
+        <button id="tRerun">Re-run AI</button>
+      </div>
+      <p class="edit-hint"><strong>Restore</strong> paints the original photo back in (brings back a cut-off hand). <strong>Erase</strong> makes pixels transparent (removes leftover background). <strong>Wand</strong> clicks a whole region at once — green tint = will come back, red = will be removed; drag Tolerance until the tint fits, then Apply.<br>The circle under the pointer is the brush — it is exactly the area a stroke covers, and it grows with the size slider and the zoom. Hold <span class="kbd">Alt</span> to swap restore/erase · <span class="kbd">W</span> wand · <span class="kbd">B</span> brush · <span class="kbd">Enter</span> apply · <span class="kbd">Esc</span> cancel · <span class="kbd">[</span> <span class="kbd">]</span> brush size · <span class="kbd">Ctrl</span>+<span class="kbd">Z</span> undo · <span class="kbd">scroll</span> or <span class="kbd">+</span>/<span class="kbd">−</span> zoom · <span class="kbd">0</span> fit · hold <span class="kbd">Space</span> or middle-drag to pan</p>
+      <div class="actions">
+        <button id="btnEditClose">Done</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+/* ============================================================
+   Adavu Pose Capture 3
+   Flow: load any video -> play -> C to capture -> tag -> the shot
+   joins the shelf and auto-segments in the background while she
+   keeps capturing. Click a thumb to hand-fix the cutout. Export
+   the set at the end. Nothing touches disk until export.
+   ============================================================ */
+
+/* ---------- config ---------- */
+const IMGLY_VERSION = '1.5.0';
+// The models are served per-version; a mismatch here fetches assets the code
+// can't use. @imgly derives this path from a PACKAGE_VERSION constant that
+// esm.sh's bundling drops, so it must be passed explicitly.
+const IMGLY_PUBLIC_PATH = `https://staticimgly.com/@imgly/background-removal-data/${IMGLY_VERSION}/dist/`;
+const JSZIP_URL = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+const LS_KEY = 'adavu-capture-vocab';
+
+/* ---------- state ---------- */
+const State = {
+  videoName: '',
+  shots: [],      // newest first
+  editing: null,
+};
+let seq = 0;
+let scrubbing = false;
+let imglyPromise = null;
+let jszipPromise = null;
+let refineQueue = Promise.resolve(); // serialised: one inference at a time
+
+const el = id => document.getElementById(id);
+
+/* ---------- session persistence ----------
+   Captures used to live only in memory, so a stray Back press (or a crash, or a
+   closed tab) binned the session — which is exactly what happened. beforeunload
+   does not save her: browsers suppress that prompt for many back navigations,
+   and it cannot run async work anyway.
+
+   IndexedDB, not localStorage: one 1080p capture is megabytes of JPEG + PNG and
+   the ~5MB localStorage quota would blow after a couple of shots. IDB stores
+   Blobs natively with hundreds of MB available.
+
+   What is stored: the source JPEG, the current cutout, and the AI baseline (so
+   Reset still works after a restore), each as a PNG/JPEG Blob rather than raw
+   ImageData — a 1080p ImageData is ~8MB uncompressed, the PNG a fraction of that.
+
+   What is NOT stored: the video. Its object URL dies with the page and the File
+   handle cannot be revived, so restoring it is impossible without copying
+   hundreds of MB into IDB on every load. Captures restore fully and export fine;
+   she only needs to re-pick the clip to capture *more* from it. */
+const IDB_NAME = 'adavu-capture';
+const IDB_STORE = 'session';
+let idbPromise = null;
+let saveChain = Promise.resolve();   // serialise writes; no interleaved sessions
+let restoreOffered = false;          // a discarded banner must not come back
+
+function idb(){
+  if(idbPromise) return idbPromise;
+  idbPromise = new Promise((resolve, reject)=>{
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = ()=>{
+      const db = req.result;
+      if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+  return idbPromise;
+}
+
+function idbPut(key, val){
+  return idb().then(db=>new Promise((resolve, reject)=>{
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(val, key);
+    tx.oncomplete = resolve;
+    tx.onerror = ()=>reject(tx.error);
+  }));
+}
+
+function idbGet(key){
+  return idb().then(db=>new Promise((resolve, reject)=>{
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const r = tx.objectStore(IDB_STORE).get(key);
+    r.onsuccess = ()=>resolve(r.result);
+    r.onerror = ()=>reject(r.error);
+  }));
+}
+
+// A cutout is kept as a PNG Blob on disk; PNG is lossless so alpha survives the
+// round trip exactly, which matters because alpha *is* the hand-edited data.
+async function imageDataToBlob(img){
+  const cv = document.createElement('canvas');
+  cv.width = img.width; cv.height = img.height;
+  cv.getContext('2d').putImageData(img, 0, 0);
+  return canvasToBlob(cv, 'image/png');
+}
+
+async function blobToImageData(blob, w, h){
+  const url = URL.createObjectURL(blob);
+  try{
+    const img = await loadImage(url);
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d', { willReadFrequently:true });
+    ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, w, h);
+  } finally { URL.revokeObjectURL(url); }
+}
+
+// Called after anything that changes the shot set or a cutout. Writes are queued
+// rather than concurrent, and a full snapshot is written each time: sessions are
+// tens of shots, so simplicity beats a diffing scheme here.
+function saveSession(){
+  saveChain = saveChain.then(async ()=>{
+    try{
+      if(!State.shots.length){ await idbPut('current', null); return; }
+      const shots = [];
+      for(const s of State.shots){
+        // A shot mid-refine has no cutout yet; persist what exists so the JPEG
+        // is never lost, and let the restore re-queue the AI pass.
+        shots.push({
+          id: s.id, tag: s.tag, bani: s.bani, movement: s.movement,
+          width: s.width, height: s.height, videoTime: s.videoTime,
+          state: s.state === 'ready' ? 'ready' : 'queued',
+          jpeg: await (await fetch(s.jpegUrl)).blob(),
+          cutout:   s.cutout   ? await imageDataToBlob(s.cutout)   : null,
+          baseline: s.baseline ? await imageDataToBlob(s.baseline) : null,
+        });
+      }
+      await idbPut('current', {
+        savedAt: Date.now(), videoName: State.videoName, seq, shots
+      });
+    }catch(err){
+      // Never let a storage failure break capturing — quota is the likely cause.
+      console.warn('Could not save session:', err);
+      setStatus('Could not save progress to this browser — export before closing.', 'err');
+    }
+  });
+  return saveChain;
+}
+
+async function clearSession(){
+  try{ await idbPut('current', null); }catch{}
+}
+
+/* Offer, rather than auto-load: a silently repopulated shelf after an accidental
+   Back press leaves her unable to tell old shots from new. */
+async function offerRestore(){
+  let saved;
+  try{ saved = await idbGet('current'); }catch{ return; }
+  if(!saved?.shots?.length || restoreOffered) return;
+  restoreOffered = true;
+
+  const when = new Date(saved.savedAt);
+  const n = saved.shots.length;
+  el('restoreInfo').textContent =
+    `${n} capture${n===1?'':'s'} from ${when.toLocaleDateString()} ${when.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`
+    + (saved.videoName ? ` — ${saved.videoName}` : '');
+  el('restoreBar').classList.remove('hidden');
+
+  el('btnRestore').onclick = async ()=>{
+    el('btnRestore').disabled = el('btnDiscard').disabled = true;
+    try{
+      await restoreSession(saved);
+      el('restoreBar').classList.add('hidden');
+    }catch(err){
+      console.error('Restore failed:', err);
+      setStatus('Could not restore that session: ' + err.message, 'err');
+      el('btnRestore').disabled = el('btnDiscard').disabled = false;
+    }
+  };
+  el('btnDiscard').onclick = async ()=>{
+    el('restoreBar').classList.add('hidden');
+    await clearSession();
+  };
+}
+
+async function restoreSession(saved){
+  State.shots = [];
+  for(const r of saved.shots){
+    const shot = {
+      id: r.id, tag: r.tag, bani: r.bani, movement: r.movement,
+      width: r.width, height: r.height, videoTime: r.videoTime,
+      jpegUrl: URL.createObjectURL(r.jpeg),
+      cutout: null, baseline: null, cutoutUrl: null,
+      state: 'queued', error: null,
+    };
+    if(r.cutout){
+      shot.cutout = await blobToImageData(r.cutout, r.width, r.height);
+      shot.baseline = r.baseline
+        ? await blobToImageData(r.baseline, r.width, r.height)
+        : new ImageData(new Uint8ClampedArray(shot.cutout.data), r.width, r.height);
+      await refreshThumb(shot);
+      shot.state = 'ready';
+    }
+    State.shots.push(shot);
+  }
+  // Keep ids climbing past everything restored, or a new capture could collide
+  // with a restored one and the editor would open the wrong shot.
+  seq = Math.max(saved.seq || 0, ...State.shots.map(s=>s.id), 0);
+  State.videoName = saved.videoName || '';
+
+  // Refill Bani/Movement from the newest restored shot, or her next capture
+  // would be tagged with empty metadata and export under "bani-movement-".
+  const newest = State.shots[0];
+  if(newest){
+    if(newest.bani && !el('fBani').value) el('fBani').value = newest.bani;
+    if(newest.movement && !el('fMovement').value) el('fMovement').value = newest.movement;
+    updateNamePreview();
+  }
+
+  // Always explain the missing video, named when we know it: the shelf is full
+  // but the player is empty, which otherwise looks like a bug.
+  if(!video.src){
+    const which = saved.videoName
+      ? `Re-select <strong>${escapeHtml(saved.videoName)}</strong> above`
+      : 'Re-select your video above';
+    el('noVideoMsg').innerHTML =
+      `Captures restored. ${which} to capture more from it — the browser cannot `
+      + `reopen a file on its own. Exporting what you have works without it.`;
+    el('noVideoMsg').classList.remove('hidden');
+  }
+  renderShelf();
+  // Anything that never finished its cutout gets another go now.
+  State.shots.filter(s=>s.state !== 'ready').forEach(queueRefine);
+  setStatus(`Restored ${State.shots.length} capture${State.shots.length===1?'':'s'}.`, 'ok');
+}
+
+/* ---------- helpers ---------- */
+function fmtTime(t){
+  if(t==null || isNaN(t)) return '--';
+  const m = Math.floor(t/60);
+  const s = (t%60).toFixed(2).padStart(5,'0');
+  return String(m).padStart(2,'0')+':'+s;
+}
+function slugify(s){
+  // NFD splits an accented letter into base + combining mark, so stripping the
+  // marks folds Natta/Kalakshetra to ASCII rather than deleting the letters.
+  return (s||'').toString().trim()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^A-Za-z0-9._-]+/g,'-')
+    .replace(/^-+|-+$/g,'')
+    .toLowerCase();
+}
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function setStatus(msg, kind, id){
+  const e = el(id || 'status');
+  e.textContent = msg || '';
+  e.className = 'status' + (kind ? ' '+kind : '');
+  if(msg && kind === 'ok'){
+    setTimeout(()=>{ if(e.textContent === msg){ e.textContent=''; e.className='status'; } }, 3500);
+  }
+}
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+}
+const canvasToBlob = (cv, type, q) => new Promise(res=>cv.toBlob(res, type, q));
+function loadImage(src){
+  return new Promise((res, rej)=>{
+    const i = new Image();
+    i.onload = ()=>res(i);
+    i.onerror = ()=>rej(new Error('Could not decode image.'));
+    i.src = src;
+  });
+}
+
+/* ---------- vocabulary (free text + remembered suggestions) ---------- */
+function loadVocab(){
+  try{ return JSON.parse(localStorage.getItem(LS_KEY)) || { bani:[], movement:[] }; }
+  catch{ return { bani:[], movement:[] }; }
+}
+function rememberVocab(field, value){
+  const v = (value||'').trim();
+  if(!v) return;
+  const vocab = loadVocab();
+  const list = vocab[field] || (vocab[field] = []);
+  // Case-insensitive dedupe: keep the first spelling she used.
+  if(!list.some(x=>x.toLowerCase() === v.toLowerCase())){
+    list.push(v);
+    list.sort((a,b)=>a.localeCompare(b));
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(vocab)); }catch{}
+    renderVocab();
+  }
+}
+function renderVocab(){
+  const vocab = loadVocab();
+  for(const [field, listId] of [['bani','dlBani'], ['movement','dlMovement']]){
+    el(listId).innerHTML = (vocab[field]||[]).map(v=>`<option value="${escapeHtml(v)}">`).join('');
+  }
+}
+
+/* ---------- filenames ---------- */
+function baseName(shot){
+  const parts = [slugify(shot.bani) || 'bani', slugify(shot.movement) || 'movement', slugify(shot.tag) || 'tag'];
+  return parts.join('-');
+}
+// Collisions get -2, -3 rather than silently overwriting. Oldest capture keeps
+// the clean name, so re-exporting a session is stable.
+function resolveNames(shots, ext){
+  const seen = new Map();
+  const out = new Map();
+  for(const shot of [...shots].reverse()){
+    const base = baseName(shot);
+    const n = (seen.get(base) || 0) + 1;
+    seen.set(base, n);
+    out.set(shot.id, `${base}${n > 1 ? '-'+n : ''}.${ext}`);
+  }
+  return out;
+}
+function dupeIds(shots){
+  const counts = new Map();
+  for(const s of shots) counts.set(baseName(s), (counts.get(baseName(s))||0)+1);
+  return new Set(shots.filter(s=>counts.get(baseName(s)) > 1).map(s=>s.id));
+}
+function updateNamePreview(){
+  const b = slugify(el('fBani').value) || 'bani';
+  const m = slugify(el('fMovement').value) || 'movement';
+  el('namePreview').textContent = `${b}-${m}-tag.png`;
+}
+
+/* ---------- video loading ---------- */
+const video = el('video');
+function openVideoFile(file){
+  if(!file) return;
+  if(!file.type.startsWith('video/') && !/\.(mp4|mov|webm|m4v|avi|mkv)$/i.test(file.name)){
+    setStatus('That does not look like a video file.', 'err');
+    return;
+  }
+  if(video.src) URL.revokeObjectURL(video.src);
+  video.src = URL.createObjectURL(file);
+  State.videoName = file.name;
+  el('videoName').textContent = file.name;
+  el('noVideoMsg').classList.add('hidden');
+  setStatus('');
+  // Warm the refine engine now so her first capture isn't the slow one.
+  loadImgly().catch(()=>{});
+}
+el('videoInput').addEventListener('change', e=>openVideoFile(e.target.files?.[0]));
+const loader = el('loader');
+['dragenter','dragover'].forEach(ev=>loader.addEventListener(ev, e=>{ e.preventDefault(); loader.classList.add('drop-target'); }));
+['dragleave','drop'].forEach(ev=>loader.addEventListener(ev, e=>{ e.preventDefault(); loader.classList.remove('drop-target'); }));
+loader.addEventListener('drop', e=>{
+  e.preventDefault();
+  const f = e.dataTransfer.files?.[0];
+  if(f) openVideoFile(f);
+});
+
+/* ---------- player ---------- */
+el('btnPlayPause').addEventListener('click', ()=>{
+  if(!video.src) return;
+  if(video.paused){
+    if(video.duration && video.currentTime >= video.duration - 0.05) video.currentTime = 0;
+    video.play();
+  } else video.pause();
+});
+video.addEventListener('play', ()=>{ el('btnPlayPause').textContent = '⏸'; });
+video.addEventListener('pause', ()=>{ el('btnPlayPause').textContent = '▶'; });
+el('btnStepBack').addEventListener('click', ()=>{ video.pause(); video.currentTime = Math.max(0, video.currentTime - 1/30); });
+el('btnStepFwd').addEventListener('click', ()=>{ video.pause(); video.currentTime = Math.min(video.duration||Infinity, video.currentTime + 1/30); });
+el('btnRestart').addEventListener('click', ()=>{ if(video.src){ video.currentTime = 0; video.play(); } });
+el('speedSelect').addEventListener('change', e=>{ video.playbackRate = parseFloat(e.target.value); });
+const scrubber = el('scrubber');
+scrubber.addEventListener('input', ()=>{
+  if(!video.duration) return;
+  scrubbing = true;
+  video.currentTime = (scrubber.value/1000)*video.duration;
+});
+scrubber.addEventListener('change', ()=>{ scrubbing = false; });
+video.addEventListener('timeupdate', ()=>{
+  el('timeReadout').textContent = fmtTime(video.currentTime);
+  if(!scrubbing && video.duration) scrubber.value = Math.round((video.currentTime/video.duration)*1000);
+});
+
+const modalOpen = () => !el('tagModal').classList.contains('hidden') || !el('editModal').classList.contains('hidden');
+document.addEventListener('keydown', e=>{
+  if(modalOpen()) return; // modals own their keys
+  const tag = (document.activeElement?.tagName||'').toLowerCase();
+  if(tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  if(e.code === 'Space'){ e.preventDefault(); el('btnPlayPause').click(); }
+  else if(e.code === 'ArrowLeft'){ e.preventDefault(); el('btnStepBack').click(); }
+  else if(e.code === 'ArrowRight'){ e.preventDefault(); el('btnStepFwd').click(); }
+  else if(e.code === 'KeyC'){ e.preventDefault(); beginCapture(); }
+});
+
+/* ---------- capture -> tag ---------- */
+let pendingFrame = null;
+
+function beginCapture(){
+  if(!video.src || !video.videoWidth){
+    setStatus('Load a video first.', 'err');
+    return;
+  }
+  video.pause();
+  const cv = document.createElement('canvas');
+  cv.width = video.videoWidth;
+  cv.height = video.videoHeight;
+  cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
+  pendingFrame = { dataUrl: cv.toDataURL('image/jpeg', 0.95), width: cv.width, height: cv.height, videoTime: video.currentTime };
+
+  el('tagPreview').src = pendingFrame.dataUrl;
+  el('fTag').value = '';
+  setStatus('', '', 'tagWarn');
+  el('tagModal').classList.remove('hidden');
+  setTimeout(()=>el('fTag').focus(), 50);
+}
+el('btnCapture').addEventListener('click', beginCapture);
+
+function closeTagModal(){
+  el('tagModal').classList.add('hidden');
+  pendingFrame = null;
+}
+el('btnTagCancel').addEventListener('click', closeTagModal);
+
+function commitTag(){
+  if(!pendingFrame) return;
+  const tag = el('fTag').value.trim();
+  if(!tag){
+    setStatus('Give it a tag so you can find it later.', 'err', 'tagWarn');
+    el('fTag').focus();
+    return;
+  }
+  const bani = el('fBani').value.trim();
+  const movement = el('fMovement').value.trim();
+  rememberVocab('bani', bani);
+  rememberVocab('movement', movement);
+
+  const shot = {
+    id: ++seq,
+    jpegUrl: pendingFrame.dataUrl,
+    width: pendingFrame.width,
+    height: pendingFrame.height,
+    videoTime: pendingFrame.videoTime,
+    bani, movement, tag,
+    state: 'queued',          // queued | working | ready | error
+    cutout: null,             // ImageData of the current (possibly hand-edited) cutout
+    cutoutUrl: null,          // object URL for the thumbnail
+    error: null,
+  };
+  State.shots.unshift(shot);
+  closeTagModal();
+  renderShelf();
+  saveSession(); // persist the JPEG immediately, before the AI pass even starts
+  queueRefine(shot);
+  setStatus(`Captured ${escapeHtml(tag)} — cutting out in the background.`, 'ok');
+}
+el('btnTagOk').addEventListener('click', commitTag);
+el('fTag').addEventListener('keydown', e=>{
+  if(e.code === 'Enter'){ e.preventDefault(); commitTag(); }
+  if(e.code === 'Escape'){ e.preventDefault(); closeTagModal(); }
+});
+
+/* ---------- background refine ---------- */
+function loadImgly(){
+  if(imglyPromise) return imglyPromise;
+  imglyPromise = (async ()=>{
+    const mod = await import(/* @vite-ignore */ `https://esm.sh/@imgly/background-removal@${IMGLY_VERSION}`);
+    const fn = mod.removeBackground || mod.default?.default || mod.default;
+    if(typeof fn !== 'function') throw new Error('Could not find removeBackground in the module.');
+    return fn;
+  })().catch(err=>{ imglyPromise = null; throw err; }); // let a later capture retry
+  return imglyPromise;
+}
+
+// One inference at a time: concurrent runs thrash the GPU and starve the UI
+// while she is still capturing.
+function queueRefine(shot){
+  refineQueue = refineQueue.then(()=>runRefine(shot)).catch(()=>{});
+  return refineQueue;
+}
+
+/* @imgly returns a soft matte: the model emits fractional alpha across the whole
+   subject, not just at its rim, so the dancer comes back visibly washed out
+   rather than solid. Push everything the model was reasonably confident about to
+   fully opaque, and keep only a narrow ramp near the edge so the outline stays
+   smooth instead of turning jagged.
+
+   Two thresholds, on the model's alpha:
+     >= SOLID  -> 255 (inside the subject)
+     <= CLEAR  ->   0 (background; kills the faint haze in "empty" areas)
+     between   -> stretched across 0..255 as the anti-aliased rim
+
+   SOLID_AT is deliberately near the middle of the range, not up at ~200: the
+   washed-out interior this fixes comes back around alpha 170, so a high
+   threshold leaves the whole subject on the rim ramp and it stays translucent
+   (measured: interior 212 instead of 255). Anything the model scored as more
+   subject than background is treated as interior; only genuinely faint pixels
+   get the ramp, which is where real anti-aliasing lives anyway.
+
+   The returned RGB reads as premultiplied against transparent black, so a pixel
+   whose alpha we raise would darken if we kept its colour. Colour is taken from
+   the original JPEG instead — the same reason stamp()'s restore path copies RGB
+   while raising alpha. */
+const SOLID_AT = 128, CLEAR_AT = 24;
+
+async function solidifyCutout(cut, shot){
+  // The original is needed for un-premultiplied colour; it is already decoded
+  // and cached for the editor, but a background refine runs before that.
+  const src = await loadImage(shot.jpegUrl);
+  const ocv = document.createElement('canvas');
+  ocv.width = cut.width; ocv.height = cut.height;
+  const octx = ocv.getContext('2d', { willReadFrequently: true });
+  octx.drawImage(src, 0, 0, cut.width, cut.height);
+  const orig = octx.getImageData(0, 0, cut.width, cut.height).data;
+
+  const d = cut.data;
+  const span = SOLID_AT - CLEAR_AT;
+  for(let i = 0; i < d.length; i += 4){
+    const a = d[i+3];
+    if(a === 0) continue;              // already background, nothing to do
+    let na;
+    if(a >= SOLID_AT)      na = 255;
+    else if(a <= CLEAR_AT) na = 0;
+    else                   na = Math.round(((a - CLEAR_AT) / span) * 255);
+    if(na === 0){ d[i+3] = 0; continue; }
+    // True colour, so raising alpha brightens correctly instead of revealing
+    // the premultiplied (darkened) value.
+    d[i]   = orig[i];
+    d[i+1] = orig[i+1];
+    d[i+2] = orig[i+2];
+    d[i+3] = na;
+  }
+}
+
+async function runRefine(shot){
+  if(!State.shots.includes(shot)) return; // deleted while queued
+  shot.state = 'working';
+  shot.error = null;
+  renderShelf();
+  try{
+    const removeBackground = await loadImgly();
+    const blob = await removeBackground(shot.jpegUrl, { publicPath: IMGLY_PUBLIC_PATH });
+    const img = await loadImage(URL.createObjectURL(blob));
+    const cv = document.createElement('canvas');
+    cv.width = shot.width; cv.height = shot.height;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0, cv.width, cv.height);
+    URL.revokeObjectURL(img.src);
+    const cut = ctx.getImageData(0, 0, cv.width, cv.height);
+    await solidifyCutout(cut, shot);
+    shot.cutout = cut;
+    shot.baseline = new ImageData(new Uint8ClampedArray(shot.cutout.data), cv.width, cv.height); // for Reset
+    await refreshThumb(shot);
+    shot.state = 'ready';
+  }catch(err){
+    console.error('Refine failed for', shot.tag, err);
+    console.error('  publicPath:', IMGLY_PUBLIC_PATH, '| origin:', location.origin, '| crossOriginIsolated:', crossOriginIsolated);
+    shot.state = 'error';
+    shot.error = err.message;
+  }
+  renderShelf();
+  saveSession(); // the finished cutout is the expensive part — don't lose it
+}
+
+async function refreshThumb(shot){
+  const cv = document.createElement('canvas');
+  cv.width = shot.width; cv.height = shot.height;
+  cv.getContext('2d').putImageData(shot.cutout, 0, 0);
+  const blob = await canvasToBlob(cv, 'image/png');
+  if(shot.cutoutUrl) URL.revokeObjectURL(shot.cutoutUrl);
+  shot.cutoutUrl = URL.createObjectURL(blob);
+}
+
+/* ---------- shelf ---------- */
+function renderShelf(){
+  const shelf = el('shelf');
+  const n = State.shots.length;
+  el('shelfCount').textContent = n ? `(${n})` : '';
+  const ready = State.shots.some(s=>s.state === 'ready');
+  el('btnExportPng').disabled = !ready;
+  updateScaleReadout(); // px readout is unknown until the first capture lands
+  el('btnExportJpg').disabled = !n;
+
+  if(n === 0){
+    shelf.innerHTML = '<p class="empty">Captured poses appear here. They are kept in this browser if you close the tab, but only the ZIP export puts files on your Mac.</p>';
+    return;
+  }
+  const dupes = dupeIds(State.shots);
+  const label = { queued:'Queued…', working:'Cutting out…', error:'AI failed — click to fix by hand' };
+  shelf.innerHTML = `<div class="grid">` + State.shots.map(s=>`
+    <div class="card${dupes.has(s.id) ? ' dupe' : ''}">
+      <div class="shot" data-open="${s.id}" title="Click to refine by hand">
+        <img src="${s.cutoutUrl || s.jpegUrl}" alt="capture ${escapeHtml(s.tag)}">
+        <span class="badge">${escapeHtml(s.tag)}</span>
+        ${s.state !== 'ready' ? `<div class="spin">${escapeHtml(label[s.state] || '')}</div>` : ''}
+      </div>
+      <div class="foot">
+        <span class="cap" title="${escapeHtml(baseName(s))}">${escapeHtml(fmtTime(s.videoTime))}${dupes.has(s.id) ? ' ⚠' : ''}</span>
+        <button class="danger" data-del="${s.id}" title="Delete this capture">✕</button>
+      </div>
+    </div>
+  `).join('') + `</div>`;
+
+  shelf.querySelectorAll('[data-open]').forEach(n=>n.addEventListener('click', ()=>openEditor(Number(n.dataset.open))));
+  shelf.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', e=>{ e.stopPropagation(); deleteShot(Number(b.dataset.del)); }));
+}
+
+function deleteShot(id){
+  const i = State.shots.findIndex(s=>s.id === id);
+  if(i < 0) return;
+  const s = State.shots[i];
+  if(!confirm(`Delete capture "${s.tag}"?`)) return;
+  if(s.cutoutUrl) URL.revokeObjectURL(s.cutoutUrl);
+  State.shots.splice(i, 1);
+  renderShelf();
+  saveSession(); // a deletion must stick, or it reappears on the next restore
+}
+
+/* ---------- editor ----------
+   Two layers: the original JPEG underneath, the cutout's alpha on top.
+   Restore paints alpha back to 255 (revealing the JPEG), erase paints it to 0.
+   Only alpha is ever touched, so colour comes from the original pixels and
+   repeated strokes can't degrade the image. */
+const editCanvas = el('editCanvas');
+const editStage = el('editStage');
+let ectx = null, eshot = null, eorig = null;
+let origData = null; // source JPEG pixels, read by Restore
+let mode = 'restore', brush = 34, drawing = false, lastPt = null, altSwap = false;
+// Declared here with the rest of the editor state: paint() reads wandMask, and
+// a `let` further down the file would sit in the temporal dead zone.
+let wandTol = 28, wandFeather = 2, wandSeed = null, wandActive = false, wandMask = null;
+const undoStack = [];
+
+/* ---- view transform (zoom + pan) ----
+   The canvas keeps its natural pixel size and is scaled via CSS transform, so
+   the pixel buffer is never resampled — brush maths stays in image space and
+   only the pointer mapping has to account for the view. */
+let zoom = 1, fitZoom = 1, panX = 0, panY = 0;
+let panning = false, spaceHeld = false, panStart = null;
+
+function applyView(){
+  editCanvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  el('tZoomVal').textContent = Math.abs(zoom - fitZoom) < 0.001 ? 'Fit' : Math.round(zoom * 100) + '%';
+  // Below 1:1 the browser's smoothing reads better; above it, show real pixels.
+  editCanvas.style.imageRendering = zoom >= 1 ? 'pixelated' : 'auto';
+  updateRing(); // ring diameter is brush*zoom, so it has to follow the view
+}
+
+function clampPan(){
+  // Keep the image overlapping the stage so it can't be flung out of view.
+  const r = editStage.getBoundingClientRect();
+  const w = eshot.width * zoom, h = eshot.height * zoom;
+  const margin = 40;
+  panX = w <= r.width  ? (r.width  - w) / 2 : Math.min(margin, Math.max(r.width  - w - margin, panX));
+  panY = h <= r.height ? (r.height - h) / 2 : Math.min(margin, Math.max(r.height - h - margin, panY));
+}
+
+function fitToStage(){
+  const r = editStage.getBoundingClientRect();
+  fitZoom = Math.min(r.width / eshot.width, r.height / eshot.height);
+  zoom = fitZoom;
+  clampPan();
+  applyView();
+}
+
+// Zoom about a fixed screen point so the pixel under the cursor stays put.
+function zoomAt(nextZoom, screenX, screenY){
+  const r = editStage.getBoundingClientRect();
+  const cx = screenX == null ? r.width / 2  : screenX - r.left;
+  const cy = screenY == null ? r.height / 2 : screenY - r.top;
+  const next = Math.min(16, Math.max(fitZoom * 0.9, nextZoom));
+  const k = next / zoom;
+  panX = cx - (cx - panX) * k;
+  panY = cy - (cy - panY) * k;
+  zoom = next;
+  clampPan();
+  applyView();
+}
+
+async function openEditor(id){
+  const shot = State.shots.find(s=>s.id === id);
+  if(!shot) return;
+  if(shot.state === 'working' || shot.state === 'queued'){
+    setStatus('That one is still being cut out — give it a moment.', 'err');
+    return;
+  }
+  eshot = shot;
+  State.editing = shot;
+  el('editTitle').textContent = baseName(shot);
+
+  eorig = await loadImage(shot.jpegUrl);
+  editCanvas.width = shot.width;
+  editCanvas.height = shot.height;
+  ectx = editCanvas.getContext('2d', { willReadFrequently: true });
+
+  // Restore reads the source pixels directly, so cache them once per open
+  // rather than sampling the image on every stamp.
+  const ocv = document.createElement('canvas');
+  ocv.width = shot.width; ocv.height = shot.height;
+  const octx = ocv.getContext('2d', { willReadFrequently: true });
+  octx.drawImage(eorig, 0, 0);
+  origData = octx.getImageData(0, 0, shot.width, shot.height);
+
+  // A failed AI cutout still opens: start from fully transparent so she can
+  // paint the dancer in by hand rather than losing the capture.
+  if(!shot.cutout){
+    shot.cutout = new ImageData(shot.width, shot.height);
+    shot.baseline = new ImageData(shot.width, shot.height);
+  }
+  undoStack.length = 0;
+  el('tUndo').disabled = true;
+  el('tShowOrig').checked = false;
+  // A mask is sized to the shot it came from; carrying one across would index
+  // past the end of a smaller image.
+  wandMask = null; wandSeed = null;
+  setMode(mode); // resets wand UI, keeps her restore/erase choice
+  paint();
+  el('editModal').classList.remove('hidden');
+  // The stage has no size until it is displayed, so fit after unhiding.
+  fitToStage();
+}
+
+// Scratch canvas for compositing: putImageData ignores globalAlpha and clobbers
+// whatever is underneath, so the cutout has to become a drawable image first.
+const ghostCv = document.createElement('canvas');
+
+function paint(){
+  ectx.clearRect(0, 0, editCanvas.width, editCanvas.height);
+  if(el('tShowOrig').checked){
+    ectx.globalAlpha = 0.4;
+    ectx.drawImage(eorig, 0, 0);
+    ectx.globalAlpha = 1;
+    ghostCv.width = eshot.width; ghostCv.height = eshot.height;
+    ghostCv.getContext('2d').putImageData(eshot.cutout, 0, 0);
+    ectx.drawImage(ghostCv, 0, 0); // cutout at full strength over a dimmed original
+  } else {
+    ectx.putImageData(eshot.cutout, 0, 0);
+  }
+  // The pending wand selection is an overlay on this canvas only — every other
+  // paint() call site (undo, reset, backdrop, show-original) would otherwise
+  // wipe it.
+  if(wandMask) paintWandPreview();
+}
+
+function pushUndo(){
+  undoStack.push(new ImageData(new Uint8ClampedArray(eshot.cutout.data), eshot.width, eshot.height));
+  if(undoStack.length > 24) undoStack.shift(); // full frames are heavy; cap the depth
+  el('tUndo').disabled = false;
+}
+
+// Map the pointer into image space by inverting the view transform. Using the
+// canvas rect directly would work too, but reading it on every pointermove is a
+// forced layout; the transform is already known here.
+function ptFromEvent(e){
+  const r = editStage.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left - panX) / zoom,
+    y: (e.clientY - r.top  - panY) / zoom
+  };
+}
+
+/* ---- brush cursor ----
+   The arrow gives no clue where a stamp will land, so in brush mode the real
+   cursor is hidden and this ring stands in for it. It is a DOM element, not
+   canvas pixels: paint() would wipe it, and anything drawn into eshot.cutout
+   could bake into an export.
+
+   Diameter is brush * zoom because `brush` is in image space and stamp() uses
+   it as a full diameter (r = brush/2) — so the ring is exactly the area a click
+   affects, at any zoom. Position is kept in stage coordinates and re-applied on
+   size/zoom changes, which is why the last pointer position is remembered. */
+const brushRing = el('brushRing');
+let ringAt = null; // last pointer position, in stage-relative px
+
+function ringVisible(){
+  // Wand has its own crosshair; panning shows the grab hand; a hidden modal or
+  // no shot means there is nothing to point at.
+  return !!eshot && !wandActive && !spaceHeld && !panning
+    && !el('editModal').classList.contains('hidden');
+}
+
+function updateRing(){
+  const on = ringVisible() && ringAt;
+  editStage.classList.toggle('brush-cursor', !!on);
+  if(!on){ brushRing.style.display = 'none'; return; }
+  const d = Math.max(4, brush * zoom); // keep it visible when zoomed far out
+  brushRing.style.display = 'block';
+  brushRing.style.width = d + 'px';
+  brushRing.style.height = d + 'px';
+  brushRing.style.transform = `translate(${ringAt.x}px, ${ringAt.y}px) translate(-50%, -50%)`;
+  // Erase is destructive, so tint the ring red — including while Alt is held,
+  // which swaps the action without touching the mode buttons.
+  brushRing.classList.toggle('erase', (mode === 'restore') === altSwap);
+}
+
+function ringFromEvent(e){
+  const r = editStage.getBoundingClientRect();
+  ringAt = { x: e.clientX - r.left, y: e.clientY - r.top };
+  updateRing();
+}
+
+// pointermove on the canvas alone stops updating once the pointer crosses onto
+// the stage margin, so track on the stage and hide only when leaving it.
+editStage.addEventListener('pointermove', ringFromEvent);
+editStage.addEventListener('pointerenter', ringFromEvent);
+editStage.addEventListener('pointerleave', ()=>{ ringAt = null; updateRing(); });
+
+// Stamp a soft-edged disc into the alpha channel. Restore copies alpha from the
+// original (opaque everywhere), erase drives it to zero.
+function stamp(cx, cy){
+  const restore = (mode === 'restore') !== altSwap;
+  const r = brush / 2;
+  const soft = Math.max(1, r * 0.25); // feathered rim, avoids hard jagged edges
+  const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(eshot.width - 1, Math.ceil(cx + r));
+  const y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(eshot.height - 1, Math.ceil(cy + r));
+  const data = eshot.cutout.data;
+  const src = origData.data;
+
+  for(let y = y0; y <= y1; y++){
+    for(let x = x0; x <= x1; x++){
+      const d = Math.hypot(x - cx, y - cy);
+      if(d > r) continue;
+      const t = d > r - soft ? (r - d) / soft : 1; // 0..1 falloff at the rim
+      const i = (y * eshot.width + x) * 4;
+      if(restore){
+        // Pull the original colour in as we raise alpha, otherwise erased
+        // pixels would come back as transparent black.
+        data[i]   = src[i];
+        data[i+1] = src[i+1];
+        data[i+2] = src[i+2];
+        data[i+3] = Math.max(data[i+3], Math.round(255 * t));
+      } else {
+        data[i+3] = Math.min(data[i+3], Math.round(255 * (1 - t)));
+      }
+    }
+  }
+}
+
+function strokeTo(pt){
+  if(!lastPt){ stamp(pt.x, pt.y); lastPt = pt; return; }
+  // Interpolate between events so fast drags don't leave gaps.
+  const dist = Math.hypot(pt.x - lastPt.x, pt.y - lastPt.y);
+  const steps = Math.max(1, Math.ceil(dist / Math.max(1, brush / 6)));
+  for(let i = 1; i <= steps; i++){
+    stamp(lastPt.x + (pt.x - lastPt.x) * (i/steps), lastPt.y + (pt.y - lastPt.y) * (i/steps));
+  }
+  lastPt = pt;
+}
+
+editCanvas.addEventListener('pointerdown', e=>{
+  if(!eshot) return;
+  if(spaceHeld || e.button === 1) return; // let the stage pan instead
+  if(wandActive){
+    // A wand click only previews; nothing is committed until Apply, so there is
+    // no undo push here.
+    wandSeed = ptFromEvent(e);
+    runWand(wandSeed);
+    return;
+  }
+  editCanvas.setPointerCapture(e.pointerId);
+  pushUndo();
+  drawing = true;
+  lastPt = null;
+  strokeTo(ptFromEvent(e));
+  paint();
+});
+editCanvas.addEventListener('pointermove', e=>{
+  if(!drawing) return;
+  strokeTo(ptFromEvent(e));
+  paint();
+});
+['pointerup','pointercancel','pointerleave'].forEach(ev=>editCanvas.addEventListener(ev, async ()=>{
+  if(!drawing) return;
+  drawing = false;
+  lastPt = null;
+  await refreshThumb(eshot);
+  renderShelf();
+  saveSession(); // on stroke end, not per stamp — a full snapshot per pixel is far too much
+}));
+
+function setMode(m){
+  // Restore/erase is the *action*; wand vs brush is how the region is chosen.
+  // Switching between brush and wand must not silently flip which one is armed,
+  // so the wand remembers the last restore/erase choice.
+  if(m === 'wand'){
+    wandActive = true;
+  } else {
+    wandActive = false;
+    mode = m;
+    clearWand();
+  }
+  el('tRestore').classList.toggle('on', mode === 'restore');
+  el('tErase').classList.toggle('on', mode === 'erase');
+  el('tWand').classList.toggle('on', wandActive);
+  el('wandTools').classList.toggle('hidden', !wandActive);
+  updateRing(); // brush mode hides the real cursor; wand needs it back
+  // A live preview is tinted by mode, so re-run it if the mode changed under it.
+  if(wandActive && wandSeed) runWand(wandSeed);
+}
+el('tRestore').addEventListener('click', ()=>setMode('restore'));
+el('tErase').addEventListener('click', ()=>setMode('erase'));
+el('tSize').addEventListener('input', e=>{ brush = Number(e.target.value); el('tSizeVal').textContent = brush; updateRing(); });
+
+/* ---- magic wand ----
+   Click a region, flood-fill outward from that pixel while the colour stays
+   within tolerance OF THE SEED. Comparing against the seed rather than each
+   neighbour is what makes it stop at an edge: neighbour-comparison lets a
+   smooth gradient (a lit backdrop, a shadow falloff) walk the fill across the
+   whole frame one tiny step at a time. */
+
+// Returns a Uint8Array mask, 1 = selected. Scanline flood fill: walk each row
+// as far as it will go, then push only the rows above/below. Roughly an order
+// of magnitude fewer stack pushes than per-pixel 4-way at 1080p.
+function wandSelect(img, seedX, seedY, tol, global){
+  const { data, width: w, height: h } = img;
+  const mask = new Uint8Array(w * h);
+  seedX = Math.round(seedX); seedY = Math.round(seedY);
+  if(seedX < 0 || seedY < 0 || seedX >= w || seedY >= h) return mask;
+
+  const si = (seedY * w + seedX) * 4;
+  const sr = data[si], sg = data[si+1], sb = data[si+2];
+  // Compare in squared distance to avoid a sqrt per pixel.
+  const tol2 = tol * tol * 3;
+
+  const near = i => {
+    const dr = data[i] - sr, dg = data[i+1] - sg, db = data[i+2] - sb;
+    return dr*dr + dg*dg + db*db <= tol2;
+  };
+
+  if(global){
+    // Ignore contiguity: every pixel matching the seed colour, anywhere.
+    for(let p = 0; p < w * h; p++) if(near(p * 4)) mask[p] = 1;
+    return mask;
+  }
+
+  const stack = [seedX, seedY];
+  while(stack.length){
+    const y = stack.pop(), x = stack.pop();
+    let p = y * w + x;
+    if(mask[p] || !near(p * 4)) continue;
+
+    let xl = x;
+    while(xl > 0 && !mask[p-1] && near((p-1) * 4)){ xl--; p--; }
+    let xr = x;
+    let pr = y * w + x;
+    while(xr < w - 1 && !mask[pr+1] && near((pr+1) * 4)){ xr++; pr++; }
+
+    for(let i = xl; i <= xr; i++) mask[y * w + i] = 1;
+
+    // Only seed the neighbouring rows where they are actually unfilled.
+    for(const ny of [y - 1, y + 1]){
+      if(ny < 0 || ny >= h) continue;
+      let run = false;
+      for(let i = xl; i <= xr; i++){
+        const np = ny * w + i;
+        const ok = !mask[np] && near(np * 4);
+        if(ok && !run){ stack.push(i, ny); run = true; }
+        else if(!ok) run = false;
+      }
+    }
+  }
+  return mask;
+}
+
+// Soften the mask edge so wand strokes blend like the brush does. Box-blurs the
+// binary mask; interior stays solid, the boundary becomes a short ramp.
+function featherMask(mask, w, h, radius){
+  if(radius < 1) return Uint8Array.from(mask, v => v ? 255 : 0);
+  const out = new Uint8Array(w * h);
+  const tmp = new Float32Array(w * h);
+  const span = radius * 2 + 1;
+  // Horizontal pass.
+  for(let y = 0; y < h; y++){
+    let sum = 0;
+    for(let x = -radius; x <= radius; x++) sum += mask[y * w + Math.min(w-1, Math.max(0, x))];
+    for(let x = 0; x < w; x++){
+      tmp[y * w + x] = sum / span;
+      sum -= mask[y * w + Math.min(w-1, Math.max(0, x - radius))];
+      sum += mask[y * w + Math.min(w-1, Math.max(0, x + radius + 1))];
+    }
+  }
+  // Vertical pass.
+  for(let x = 0; x < w; x++){
+    let sum = 0;
+    for(let y = -radius; y <= radius; y++) sum += tmp[Math.min(h-1, Math.max(0, y)) * w + x];
+    for(let y = 0; y < h; y++){
+      out[y * w + x] = Math.round(Math.min(1, sum / span) * 255);
+      sum -= tmp[Math.min(h-1, Math.max(0, y - radius)) * w + x];
+      sum += tmp[Math.min(h-1, Math.max(0, y + radius + 1)) * w + x];
+    }
+  }
+  return out;
+}
+
+// Apply a wand mask to the cutout's alpha, same rules as the brush: restore
+// pulls the original colour in with the alpha, erase drives alpha down.
+function applyWand(mask){
+  const data = eshot.cutout.data;
+  const src = origData.data;
+  const restore = (mode === 'restore') !== altSwap;
+  for(let p = 0; p < mask.length; p++){
+    const a = mask[p];
+    if(!a) continue;
+    const i = p * 4;
+    if(restore){
+      data[i]   = src[i];
+      data[i+1] = src[i+1];
+      data[i+2] = src[i+2];
+      data[i+3] = Math.max(data[i+3], a);
+    } else {
+      data[i+3] = Math.min(data[i+3], 255 - a);
+    }
+  }
+}
+
+// Preview the pending selection as a tinted overlay so she can judge the
+// tolerance before committing. Drawn on top of paint()'s output; never touches
+// eshot.cutout, so nothing here can reach the export.
+function paintWandPreview(){
+  if(!wandMask) return;
+  const ov = ectx.createImageData(eshot.width, eshot.height);
+  const od = ov.data;
+  const restore = (mode === 'restore') !== altSwap;
+  for(let p = 0; p < wandMask.length; p++){
+    const a = wandMask[p];
+    if(!a) continue;
+    const i = p * 4;
+    // Green = will be brought back, red = will be removed.
+    od[i]   = restore ? 60 : 255;
+    od[i+1] = restore ? 220 : 60;
+    od[i+2] = 90;
+    od[i+3] = Math.round(a * 0.5);
+  }
+  wandCv.width = eshot.width; wandCv.height = eshot.height;
+  wandCv.getContext('2d').putImageData(ov, 0, 0);
+  ectx.drawImage(wandCv, 0, 0);
+}
+const wandCv = document.createElement('canvas');
+
+function clearWand(){
+  wandMask = null;
+  el('tWandApply').disabled = true;
+  el('tWandCancel').disabled = true;
+  if(eshot) paint();
+}
+
+function runWand(pt){
+  wandMask = featherMask(
+    wandSelect(origData, pt.x, pt.y, wandTol, el('tWandGlobal').checked),
+    eshot.width, eshot.height, wandFeather
+  );
+  let n = 0;
+  for(let i = 0; i < wandMask.length; i++) if(wandMask[i] > 127) n++;
+  el('tWandInfo').textContent = n ? Math.round(n / 1000) + 'k px' : 'nothing';
+  el('tWandApply').disabled = !n;
+  el('tWandCancel').disabled = false;
+  paint(); // paint() draws the overlay itself once wandMask is set
+}
+
+el('tWand').addEventListener('click', ()=>setMode('wand'));
+el('tWandTol').addEventListener('input', e=>{
+  wandTol = Number(e.target.value);
+  el('tWandTolVal').textContent = wandTol;
+  // Live re-run at the last seed so the slider is a dial, not a guess.
+  if(wandSeed) runWand(wandSeed);
+});
+el('tWandGlobal').addEventListener('change', ()=>{ if(wandSeed) runWand(wandSeed); });
+el('tWandApply').addEventListener('click', async ()=>{
+  if(!wandMask) return;
+  pushUndo();
+  applyWand(wandMask);
+  clearWand();
+  await refreshThumb(eshot);
+  renderShelf();
+  saveSession();
+});
+el('tWandCancel').addEventListener('click', clearWand);
+
+/* ---- backdrop ---- */
+// Swapping the stage background only; the cutout's own pixels are never touched,
+// so the white backdrop is a viewing aid and never bakes into the export.
+document.querySelectorAll('[data-bg]').forEach(b=>b.addEventListener('click', ()=>{
+  editStage.classList.remove('bg-checker','bg-white','bg-black');
+  editStage.classList.add('bg-' + b.dataset.bg);
+  document.querySelectorAll('[data-bg]').forEach(x=>x.classList.toggle('on', x === b));
+}));
+
+/* ---- zoom + pan ---- */
+el('tZoomIn').addEventListener('click', ()=>zoomAt(zoom * 1.4, null, null));
+el('tZoomOut').addEventListener('click', ()=>zoomAt(zoom / 1.4, null, null));
+el('tZoomFit').addEventListener('click', ()=>fitToStage());
+
+editStage.addEventListener('wheel', e=>{
+  if(!eshot) return;
+  e.preventDefault();
+  zoomAt(zoom * (e.deltaY < 0 ? 1.15 : 1/1.15), e.clientX, e.clientY);
+}, { passive:false });
+
+// Middle-drag, or Space+drag, pans. Both leave the left button free to paint.
+editStage.addEventListener('pointerdown', e=>{
+  if(!eshot) return;
+  if(e.button === 1 || spaceHeld){
+    e.preventDefault();
+    panning = true;
+    panStart = { x:e.clientX - panX, y:e.clientY - panY };
+    editStage.classList.add('grabbing');
+    editStage.setPointerCapture(e.pointerId);
+    updateRing(); // hide the brush ring while the grab hand is showing
+  }
+});
+editStage.addEventListener('pointermove', e=>{
+  if(!panning) return;
+  panX = e.clientX - panStart.x;
+  panY = e.clientY - panStart.y;
+  clampPan();
+  applyView();
+});
+['pointerup','pointercancel'].forEach(ev=>editStage.addEventListener(ev, ()=>{
+  panning = false;
+  editStage.classList.remove('grabbing');
+  updateRing();
+}));
+el('tShowOrig').addEventListener('change', paint);
+el('tUndo').addEventListener('click', async ()=>{
+  if(!undoStack.length) return;
+  eshot.cutout = undoStack.pop();
+  el('tUndo').disabled = !undoStack.length;
+  paint();
+  await refreshThumb(eshot);
+  renderShelf();
+  saveSession();
+});
+el('tReset').addEventListener('click', async ()=>{
+  if(!eshot?.baseline) return;
+  pushUndo();
+  eshot.cutout = new ImageData(new Uint8ClampedArray(eshot.baseline.data), eshot.width, eshot.height);
+  paint();
+  await refreshThumb(eshot);
+  renderShelf();
+  saveSession();
+});
+el('tRerun').addEventListener('click', async ()=>{
+  if(!eshot) return;
+  const shot = eshot;
+  closeEditor();
+  queueRefine(shot);
+});
+function closeEditor(){
+  el('editModal').classList.add('hidden');
+  wandMask = null; wandSeed = null;
+  el('tWandApply').disabled = true;
+  el('tWandCancel').disabled = true;
+  eshot = null; eorig = null; origData = null;
+  State.editing = null;
+  undoStack.length = 0;
+  ringAt = null; updateRing(); // else `brush-cursor` (cursor:none) sticks on the stage
+}
+el('btnEditClose').addEventListener('click', closeEditor);
+
+document.addEventListener('keydown', e=>{
+  if(el('editModal').classList.contains('hidden')) return;
+  // Escape backs out of the pending selection first; only a second press,
+  // with nothing pending, closes the editor.
+  if(e.code === 'Escape'){ e.preventDefault(); if(wandMask) clearWand(); else closeEditor(); }
+  else if(e.code === 'BracketLeft'){ e.preventDefault(); el('tSize').value = brush = Math.max(4, brush - 6); el('tSizeVal').textContent = brush; updateRing(); }
+  else if(e.code === 'BracketRight'){ e.preventDefault(); el('tSize').value = brush = Math.min(150, brush + 6); el('tSizeVal').textContent = brush; updateRing(); }
+  else if((e.ctrlKey||e.metaKey) && e.code === 'KeyZ'){ e.preventDefault(); el('tUndo').click(); }
+  else if(e.code === 'KeyW'){ e.preventDefault(); setMode('wand'); }
+  else if(e.code === 'KeyB'){ e.preventDefault(); setMode(mode); } // back to the brush, same action
+  else if(e.code === 'Enter' && wandMask){ e.preventDefault(); el('tWandApply').click(); }
+  else if(e.code === 'Equal' || e.code === 'NumpadAdd'){ e.preventDefault(); zoomAt(zoom * 1.4, null, null); }
+  else if(e.code === 'Minus' || e.code === 'NumpadSubtract'){ e.preventDefault(); zoomAt(zoom / 1.4, null, null); }
+  else if(e.code === 'Digit0' || e.code === 'Numpad0'){ e.preventDefault(); fitToStage(); }
+  else if(e.code === 'Space'){ e.preventDefault(); spaceHeld = true; editStage.classList.add('panning'); updateRing(); }
+  else if(e.key === 'Alt'){ altSwap = true; updateRing(); } // ring re-tints for the swapped action
+});
+document.addEventListener('keyup', e=>{
+  if(e.key === 'Alt'){ altSwap = false; updateRing(); }
+  if(e.code === 'Space'){ spaceHeld = false; editStage.classList.remove('panning'); updateRing(); }
+});
+
+/* ---------- export ---------- */
+function loadJSZip(){
+  if(jszipPromise) return jszipPromise;
+  jszipPromise = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = JSZIP_URL;
+    s.onload = ()=>resolve(window.JSZip);
+    s.onerror = ()=>reject(new Error('Could not load JSZip from the CDN — check the connection.'));
+    document.head.appendChild(s);
+  }).catch(err=>{ jszipPromise = null; throw err; });
+  return jszipPromise;
+}
+
+// Export scale, as a fraction. Read at export time so changing the slider
+// mid-session has no effect on anything already captured.
+function exportScale(){
+  return Math.min(1, Math.max(0.1, Number(el('fScale').value) / 100));
+}
+
+// Output dimensions at the current scale, floored to at least 1px so a tiny
+// capture at 10% can't collapse to a zero-sized canvas.
+function scaledSize(shot, k){
+  return {
+    w: Math.max(1, Math.round(shot.width  * k)),
+    h: Math.max(1, Math.round(shot.height * k))
+  };
+}
+
+async function shotToBlob(shot, kind, k = 1){
+  const { w, h } = scaledSize(shot, k);
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  if(kind === 'png'){
+    if(w === shot.width && h === shot.height){
+      ctx.putImageData(shot.cutout, 0, 0);
+    } else {
+      // putImageData ignores the canvas size and never resamples, so the cutout
+      // has to become a drawable image before it can be scaled. Alpha survives
+      // because both canvases are RGBA.
+      const full = document.createElement('canvas');
+      full.width = shot.width; full.height = shot.height;
+      full.getContext('2d').putImageData(shot.cutout, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(full, 0, 0, w, h);
+    }
+    return canvasToBlob(cv, 'image/png');
+  }
+  const img = await loadImage(shot.jpegUrl);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvasToBlob(cv, 'image/jpeg', 0.95);
+}
+
+async function exportAll(kind){
+  const shots = kind === 'png' ? State.shots.filter(s=>s.cutout) : State.shots.slice();
+  if(!shots.length){ setStatus('Nothing ready to export yet.', 'err', 'exportStatus'); return; }
+
+  const skipped = kind === 'png' ? State.shots.length - shots.length : 0;
+  el('btnExportPng').disabled = true;
+  el('btnExportJpg').disabled = true;
+  try{
+    setStatus('Bundling…', 'ok', 'exportStatus');
+    const JSZip = await loadJSZip();
+    const zip = new JSZip();
+    const names = resolveNames(shots, kind);
+    // Scale does not enter the filename: re-exporting a session at a different
+    // size must still overwrite cleanly rather than accumulate variants.
+    const k = exportScale();
+    for(const shot of shots){
+      zip.file(names.get(shot.id), await shotToBlob(shot, kind, k));
+    }
+    const stamp = new Date().toISOString().slice(0,10);
+    const blob = await zip.generateAsync({ type:'blob' }, meta=>{
+      setStatus(`Bundling… ${Math.round(meta.percent)}%`, 'ok', 'exportStatus');
+    });
+    downloadBlob(blob, `adavu-captures-${stamp}.zip`);
+    const at = k < 1 ? ` at ${Math.round(k*100)}%` : '';
+    setStatus(`Exported ${shots.length} ${kind.toUpperCase()}${shots.length===1?'':'s'}${at}${skipped ? ` (${skipped} skipped, no cutout yet)` : ''}`, 'ok', 'exportStatus');
+  }catch(err){
+    console.error('Export failed:', err);
+    setStatus('Export failed: ' + err.message, 'err', 'exportStatus');
+  }finally{
+    renderShelf();
+  }
+}
+// Show the resulting pixel size, not just the percentage — "50%" means little
+// without knowing the capture resolution. Sampled from the first shot; all
+// captures in a session come from the same video, so they share dimensions.
+function updateScaleReadout(){
+  const pct = Number(el('fScale').value);
+  const shot = State.shots[0];
+  let txt = pct + '%';
+  if(shot){
+    const { w, h } = scaledSize(shot, pct / 100);
+    txt += ` · ${w}×${h}`;
+  }
+  el('fScaleVal').textContent = txt;
+}
+el('fScale').addEventListener('input', updateScaleReadout);
+
+el('btnExportPng').addEventListener('click', ()=>exportAll('png'));
+el('btnExportJpg').addEventListener('click', ()=>exportAll('jpg'));
+
+/* ---------- init ---------- */
+['fBani','fMovement'].forEach(id=>el(id).addEventListener('input', ()=>{ updateNamePreview(); renderShelf(); }));
+window.addEventListener('beforeunload', e=>{
+  // Belt and braces: the session is saved to IndexedDB, so leaving no longer
+  // loses work — but nothing is on disk until she exports, so still ask.
+  // This prompt is unreliable for Back navigations (browsers suppress it),
+  // which is exactly why the IDB save above exists rather than instead of it.
+  if(State.shots.length){ e.preventDefault(); e.returnValue = ''; }
+});
+
+/* A Back press often restores the page from the bfcache: the document is
+   resurrected with State intact and module code does NOT re-run, so neither the
+   initial offerRestore() nor a fresh render happens. Re-render, and offer a
+   restore only if the live session is actually empty — if State survived, her
+   work is already on screen and a banner would be noise. */
+window.addEventListener('pageshow', e=>{
+  if(!e.persisted) return;
+  renderShelf();
+  if(!State.shots.length){ restoreOffered = false; offerRestore(); }
+});
+
+renderVocab();
+updateNamePreview();
+renderShelf();
+offerRestore(); // async; the banner appears once IDB answers
+</script>
+</body>
+</html>
