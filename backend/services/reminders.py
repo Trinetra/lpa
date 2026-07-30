@@ -9,6 +9,7 @@ import logging
 import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from db import db
@@ -24,11 +25,18 @@ REMINDER_MINUTES_BEFORE = 30
 WINDOW_MINUTES = 7
 
 
-def _zoom_link(zoom_meeting_id: Optional[str]) -> Optional[str]:
+def _zoom_link(zoom_meeting_id: Optional[str], zoom_passcode: Optional[str] = None) -> Optional[str]:
     if not zoom_meeting_id:
         return None
     digits = "".join(ch for ch in zoom_meeting_id if ch.isdigit())
-    return f"https://zoom.us/j/{digits}" if digits else None
+    if not digits:
+        return None
+    link = f"https://zoom.us/j/{digits}"
+    # Bundled so students don't need the passcode shared separately — her
+    # Zoom account doesn't allow disabling it, so the link has to carry it.
+    if zoom_passcode:
+        link += f"?pwd={quote(zoom_passcode)}"
+    return link
 
 
 def _fmt_time_12h(t: str) -> str:
@@ -86,7 +94,7 @@ def _reminder_email_html(student_name: str, teacher_name: str, studio_name: Opti
 
 async def _send_block_reminders(owner_id: str, block: dict, teacher_name: str,
                                  studio_name: Optional[str], zoom_link: Optional[str],
-                                 today_str: str) -> dict:
+                                 today_str: str, teacher_email: Optional[str] = None) -> dict:
     sent, skipped = 0, 0
     for sid in block.get("student_ids", []):
         student = await db.students.find_one({"_id": _oid(sid), "owner_id": owner_id})
@@ -112,11 +120,14 @@ async def _send_block_reminders(owner_id: str, block: dict, teacher_name: str,
             block["start_time"], block["end_time"], zoom_link,
         )
         try:
-            await email_service.dispatch_email({
+            payload = {
                 "to": [student["email"]],
                 "subject": f"Class reminder — starts at {block['start_time']} IST",
                 "html": html,
-            })
+            }
+            if teacher_email:
+                payload["bcc"] = [teacher_email]
+            await email_service.dispatch_email(payload)
             sent += 1
         except Exception as e:
             logger.error(f"Reminder email failed for student {sid}: {e}")
@@ -146,9 +157,10 @@ async def send_due_reminders(owner_id: str) -> dict:
     today_str = today_ist.isoformat()
     weekday = today_ist.weekday()  # 0=Monday, matches schedule_blocks.day_of_week
 
-    zoom_link = _zoom_link(user.get("zoom_meeting_id"))
+    zoom_link = _zoom_link(user.get("zoom_meeting_id"), user.get("zoom_passcode"))
     teacher_name = user.get("teacher_name") or user.get("name") or "Your teacher"
     studio_name = user.get("studio_name")
+    teacher_email = user.get("contact_email") or user.get("email")
 
     results = []
     async for block in db.schedule_blocks.find({"owner_id": owner_id, "day_of_week": weekday}):
@@ -160,7 +172,7 @@ async def send_due_reminders(owner_id: str) -> dict:
         if abs(minutes_until - REMINDER_MINUTES_BEFORE) > WINDOW_MINUTES / 2:
             continue
 
-        outcome = await _send_block_reminders(owner_id, block, teacher_name, studio_name, zoom_link, today_str)
+        outcome = await _send_block_reminders(owner_id, block, teacher_name, studio_name, zoom_link, today_str, teacher_email)
         results.append({"block_id": str(block["_id"]), "start_time": block["start_time"], **outcome})
 
     return {"ok": True, "blocks_processed": len(results), "results": results}

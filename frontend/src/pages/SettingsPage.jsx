@@ -291,6 +291,7 @@ function StudioProfileCard({ profile, onSaved }) {
     contact_email: profile?.contact_email || profile?.email || "",
     logo_path: profile?.logo_path || null,
     zoom_meeting_id: profile?.zoom_meeting_id || "",
+    zoom_passcode: profile?.zoom_passcode || "",
     social_youtube: profile?.social_youtube || "",
     social_instagram: profile?.social_instagram || "",
     social_facebook: profile?.social_facebook || "",
@@ -334,6 +335,7 @@ function StudioProfileCard({ profile, onSaved }) {
         contact_email: form.contact_email,
         logo_path: form.logo_path === null ? "" : form.logo_path,
         zoom_meeting_id: form.zoom_meeting_id,
+        zoom_passcode: form.zoom_passcode,
         social_youtube: form.social_youtube,
         social_instagram: form.social_instagram,
         social_facebook: form.social_facebook,
@@ -428,8 +430,15 @@ function StudioProfileCard({ profile, onSaved }) {
             data-testid="studio-zoom-input"
             placeholder="e.g. 123 456 7890"
             className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+        </label>
+        <label className="sm:col-span-2">
+          <span className="uppercase-label block mb-1">Zoom passcode (optional)</span>
+          <input value={form.zoom_passcode} onChange={(e) => setForm({ ...form, zoom_passcode: e.target.value })}
+            data-testid="studio-zoom-passcode-input"
+            placeholder="e.g. 482910"
+            className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
           <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-            Added as a join link on every class synced to Google Calendar. Passcode isn't included — share that separately if your room needs one.
+            Bundled into the join link on every class synced to Google Calendar and every class reminder email, so students don't need it shared separately.
           </div>
         </label>
         <label className="sm:col-span-2">

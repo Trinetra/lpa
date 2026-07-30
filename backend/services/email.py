@@ -143,6 +143,9 @@ async def dispatch_email(payload: dict) -> dict:
     reply_to = payload.get("contact_email")
     if reply_to:
         rs_body["reply_to"] = reply_to
+    bcc = payload.get("bcc")
+    if bcc:
+        rs_body["bcc"] = bcc
     async with httpx.AsyncClient(timeout=30) as c:
         resp = await c.post(
             RESEND_URL,

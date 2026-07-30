@@ -142,6 +142,7 @@ class ProfileUpdate(BaseModel):
     contact_email: Optional[EmailStr] = None
     logo_path: Optional[str] = None
     zoom_meeting_id: Optional[str] = None
+    zoom_passcode: Optional[str] = None
     social_youtube: Optional[str] = None
     social_instagram: Optional[str] = None
     social_facebook: Optional[str] = None
@@ -630,6 +631,7 @@ def _ser_profile(user_doc: dict) -> dict:
         "contact_email": user_doc.get("contact_email") or user_doc.get("email"),
         "logo_path": user_doc.get("logo_path"),
         "zoom_meeting_id": user_doc.get("zoom_meeting_id"),
+        "zoom_passcode": user_doc.get("zoom_passcode"),
         "social_youtube": user_doc.get("social_youtube"),
         "social_instagram": user_doc.get("social_instagram"),
         "social_facebook": user_doc.get("social_facebook"),

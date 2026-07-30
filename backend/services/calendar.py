@@ -12,6 +12,7 @@ without it if these are unset or the teacher never connects.
 import logging
 import os
 from typing import Optional
+from urllib.parse import quote
 
 from bson import ObjectId
 from google.oauth2.credentials import Credentials
@@ -139,7 +140,8 @@ async def _get_service(owner_id: str):
     return service, user["google_calendar_id"]
 
 
-def _event_body(block: dict, student_names: list, zoom_meeting_id: Optional[str] = None) -> dict:
+def _event_body(block: dict, student_names: list, zoom_meeting_id: Optional[str] = None,
+                 zoom_passcode: Optional[str] = None) -> dict:
     # Anchor the first occurrence on the next upcoming instance of that
     # weekday so the RRULE's UNTIL-less weekly recurrence starts "now".
     from datetime import date, timedelta
@@ -156,6 +158,11 @@ def _event_body(block: dict, student_names: list, zoom_meeting_id: Optional[str]
         zoom_id_clean = "".join(ch for ch in zoom_meeting_id if ch.isdigit())
         if zoom_id_clean:
             zoom_link = f"https://zoom.us/j/{zoom_id_clean}"
+            # Bundling the passcode into the join link means she doesn't
+            # need to disable it in Zoom (which her account doesn't allow
+            # anyway) or share it separately — the link alone gets students in.
+            if zoom_passcode:
+                zoom_link += f"?pwd={quote(zoom_passcode)}"
 
     summary = "Class: " + (", ".join(student_names) if student_names else "Class")
     description_parts = []
@@ -188,7 +195,8 @@ async def sync_block_upsert(owner_id: str, block: dict, student_names: list) -> 
         return None
     user = await db.users.find_one({"_id": ObjectId(owner_id)})
     zoom_meeting_id = (user or {}).get("zoom_meeting_id")
-    body = _event_body(block, student_names, zoom_meeting_id)
+    zoom_passcode = (user or {}).get("zoom_passcode")
+    body = _event_body(block, student_names, zoom_meeting_id, zoom_passcode)
     try:
         if block.get("google_event_id"):
             event = service.events().update(
