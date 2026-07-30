@@ -169,9 +169,12 @@ def _event_body(block: dict, student_names: list, zoom_meeting_id: Optional[str]
         "description": "\n\n".join(description_parts),
         "start": {"dateTime": start_dt, "timeZone": TIMEZONE},
         "end": {"dateTime": end_dt, "timeZone": TIMEZONE},
-        "recurrence": [f"RRULE:FREQ=WEEKLY;BYDAY={DAY_RRULE[block['day_of_week']]}"],
         "reminders": {"useDefault": False, "overrides": [{"method": "email", "minutes": 30}]},
     }
+    # One-off sessions don't repeat — no RRULE, just a single event on the
+    # anchor date (which is its only occurrence).
+    if not block.get("is_one_off"):
+        body["recurrence"] = [f"RRULE:FREQ=WEEKLY;BYDAY={DAY_RRULE[block['day_of_week']]}"]
     if zoom_link:
         body["location"] = zoom_link
     return body

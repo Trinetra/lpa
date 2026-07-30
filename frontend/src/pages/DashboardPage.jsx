@@ -110,7 +110,12 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 {data.today_classes.map((c) => (
                   <div key={c.id} data-testid={`today-class-${c.id}`} className="flex items-center justify-between gap-3">
-                    <span className="text-sm truncate">{c.student_names.join(", ") || "Class"}</span>
+                    <span className="text-sm truncate flex items-center gap-2">
+                      {c.is_one_off && (
+                        <span title="One-off (doesn't repeat)" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--success)", display: "inline-block" }} />
+                      )}
+                      {c.student_names.join(", ") || "Class"}
+                    </span>
                     <span className="text-xs shrink-0" style={{ color: "var(--text-muted)" }}>
                       {fmtTime(c.start_time)} – {fmtTime(c.end_time)}
                     </span>

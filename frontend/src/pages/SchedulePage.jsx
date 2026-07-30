@@ -77,7 +77,7 @@ function BlockCard({ block, studentMap, onOpen, onResizeStart }) {
     height,
     transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
     zIndex: isDragging ? 30 : 1,
-    background: "var(--primary)",
+    background: block.is_one_off ? "var(--success)" : "var(--primary)",
     opacity: isDragging ? 0.85 : 1,
   };
 
@@ -121,6 +121,7 @@ function BlockModal({ block, students, onClose, onSaved, onDeleted }) {
   const [endTime, setEndTime] = useState(block?.end_time || "10:00");
   const [studentIds, setStudentIds] = useState(block?.student_ids || []);
   const [notes, setNotes] = useState(block?.notes || "");
+  const [isOneOff, setIsOneOff] = useState(block?.is_one_off || false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -144,6 +145,7 @@ function BlockModal({ block, students, onClose, onSaved, onDeleted }) {
         end_time: endTime,
         student_ids: studentIds,
         notes: notes || null,
+        is_one_off: isOneOff,
       };
       if (isNew) {
         await api.post("/schedule", body);
@@ -243,7 +245,7 @@ function BlockModal({ block, students, onClose, onSaved, onDeleted }) {
           </div>
         </div>
 
-        <label className="block mb-6">
+        <label className="block mb-3">
           <span className="uppercase-label block mb-1">Notes (optional)</span>
           <input
             type="text"
@@ -252,6 +254,16 @@ function BlockModal({ block, students, onClose, onSaved, onDeleted }) {
             data-testid="schedule-notes-input"
             className="w-full bg-transparent border border-white/10 rounded px-3 py-2"
           />
+        </label>
+
+        <label className="flex items-center gap-2 mb-6 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isOneOff}
+            onChange={(e) => setIsOneOff(e.target.checked)}
+            data-testid="schedule-one-off-checkbox"
+          />
+          This is a one-off (doesn't repeat)
         </label>
 
         <div className="flex justify-between gap-3">

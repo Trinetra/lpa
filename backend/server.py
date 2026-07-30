@@ -220,6 +220,7 @@ class ScheduleBlockCreate(BaseModel):
     end_time: str    # "HH:MM", 24h
     student_ids: List[str]
     notes: Optional[str] = None
+    is_one_off: bool = False  # doesn't repeat — shown once, then auto-removed
 
 class ScheduleBlockUpdate(BaseModel):
     day_of_week: Optional[int] = None
@@ -227,6 +228,7 @@ class ScheduleBlockUpdate(BaseModel):
     end_time: Optional[str] = None
     student_ids: Optional[List[str]] = None
     notes: Optional[str] = None
+    is_one_off: Optional[bool] = None
 
 class CalendarNameUpdate(BaseModel):
     calendar_name: str
@@ -400,6 +402,7 @@ def ser_schedule_block(doc):
         "end_time": doc.get("end_time"),
         "student_ids": doc.get("student_ids", []),
         "notes": doc.get("notes"),
+        "is_one_off": doc.get("is_one_off", False),
         "created_at": doc.get("created_at"),
         "synced_to_calendar": bool(doc.get("google_event_id")),
     }
@@ -1204,6 +1207,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
 
     # Today's scheduled classes, from the recurring weekly schedule (not the
     # classes log, which records classes already given).
+    await _prune_expired_one_offs(user["_id"])
     today = date.today()
     today_classes = []
     cur = db.schedule_blocks.find({"owner_id": user["_id"], "day_of_week": today.weekday()}).sort("start_time", 1)
@@ -1214,6 +1218,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
             "start_time": b.get("start_time"),
             "end_time": b.get("end_time"),
             "student_names": names,
+            "is_one_off": b.get("is_one_off", False),
         })
 
     # Tour to-dos due today or overdue, still open — across every tour, so
@@ -1680,8 +1685,30 @@ async def _assert_no_overlap(owner_id: str, day_of_week: int, start_time: str,
         if _blocks_overlap(start_m, end_m, _time_to_minutes(b["start_time"]), _time_to_minutes(b["end_time"])):
             raise HTTPException(status_code=409, detail="This overlaps an existing schedule block")
 
+def _next_occurrence(day_of_week: int) -> str:
+    """Next upcoming date (including today) for the given weekday, as an ISO
+    date string — same anchoring logic Calendar sync uses for the first
+    occurrence of a recurring block, reused here for one-offs since a
+    one-off's only occurrence IS that anchor date."""
+    today = date.today()
+    days_ahead = (day_of_week - today.weekday()) % 7
+    return (today + timedelta(days=days_ahead)).isoformat()
+
+async def _prune_expired_one_offs(owner_id: str):
+    """One-off blocks disappear on their own after their single occurrence
+    has passed — no manual cleanup needed. Deleted lazily on schedule reads
+    rather than via a separate cron, since there's no other reason to poll
+    this collection on a timer."""
+    today_str = date.today().isoformat()
+    async for b in db.schedule_blocks.find({
+        "owner_id": owner_id, "is_one_off": True, "occurs_on": {"$lt": today_str},
+    }):
+        await calendar_service.sync_block_delete(owner_id, b.get("google_event_id"))
+        await db.schedule_blocks.delete_one({"_id": b["_id"]})
+
 @api_router.get("/schedule")
 async def list_schedule(user: dict = Depends(get_current_user)):
+    await _prune_expired_one_offs(user["_id"])
     cur = db.schedule_blocks.find({"owner_id": user["_id"]}).sort("start_time", 1)
     out = []
     async for d in cur:
@@ -1706,6 +1733,8 @@ async def create_schedule_block(body: ScheduleBlockCreate, user: dict = Depends(
     doc = body.model_dump()
     doc["owner_id"] = user["_id"]
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    if doc.get("is_one_off"):
+        doc["occurs_on"] = _next_occurrence(body.day_of_week)
     res = await db.schedule_blocks.insert_one(doc)
     doc["_id"] = res.inserted_id
 
@@ -1731,6 +1760,12 @@ async def update_schedule_block(block_id: str, body: ScheduleBlockUpdate, user: 
     start_time = updates.get("start_time", existing["start_time"])
     end_time = updates.get("end_time", existing["end_time"])
     await _assert_no_overlap(user["_id"], day_of_week, start_time, end_time, exclude_id=block_id)
+
+    is_one_off = updates.get("is_one_off", existing.get("is_one_off", False))
+    if is_one_off and ("day_of_week" in updates or "is_one_off" in updates):
+        updates["occurs_on"] = _next_occurrence(day_of_week)
+    elif not is_one_off and "is_one_off" in updates:
+        updates["occurs_on"] = None  # turned back into a recurring block
 
     await db.schedule_blocks.update_one({"_id": ObjectId(block_id)}, {"$set": updates})
     doc = await db.schedule_blocks.find_one({"_id": ObjectId(block_id)})
@@ -2408,6 +2443,7 @@ async def on_startup():
     await db.password_reset_tokens.create_index("token", unique=True)
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
     await db.schedule_blocks.create_index([("owner_id", 1), ("day_of_week", 1)])
+    await db.schedule_blocks.create_index([("owner_id", 1), ("is_one_off", 1), ("occurs_on", 1)])
     await db.tours.create_index("owner_id")
     await db.tours.create_index("share_token", unique=True)
     await db.tours.create_index("custom_slug", unique=True, sparse=True)
