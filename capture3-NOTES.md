@@ -1,4 +1,4 @@
-# Adavu Pose Capture (capture3.html) — working notes
+# Adavu Pose Capture (index.html) — working notes
 
 Single-file, no-build browser tool. Load a video, capture poses, refine the
 cutouts by hand, bulk-export PNGs. Last updated 2026-07-30.
@@ -12,13 +12,15 @@ decisions were made, what broke before, and what has never actually been tested.
 
 | | |
 |---|---|
-| Working copy | `capture3.html` (this folder) |
-| Live copy | Netlify (URL held by RP) — **the one the dancer uses** |
+| Working copy | `index.html` (this folder, deployed at adavu.netlify.app) |
+| Live copy | https://adavu.netlify.app — **the one the dancer uses** |
 | Predecessor | `capture2.html` — still working, left untouched |
 
-**The live copy does not update itself.** Edits here are invisible to her until
-the file is re-dragged onto Netlify. Easy to forget when she reports a bug that
-"works on my machine."
+**The live copy deploys from git.** Netlify builds `adavu.netlify.app` from the
+`Adavu` branch of https://github.com/Trinetra/lpa, serving `index.html` at the
+root. Pushing to that branch is the deploy — there is no manual upload step any
+more. Until you push, edits here are invisible to her, which is easy to forget
+when she reports a bug that "works on my machine."
 
 ### Why it must be hosted at all
 
@@ -29,7 +31,7 @@ hit during development — the config was correct all along, the origin was wron
 Serving over `http://` fixes it permanently.
 
 Local alternative if ever needed (macOS ships Python 3):
-`python3 -m http.server` in this folder → `localhost:8000/capture3.html`.
+`python3 -m http.server` in this folder → `localhost:8000/`.
 
 ### Privacy
 
@@ -313,9 +315,9 @@ Reported so far: "works pretty well" (zoom + backdrop), before the wand shipped.
 
 ## If picking this up cold
 
-1. Read the editor section of `capture3.html` — it's the heart of the app.
+1. Read the editor section of `index.html` — it's the heart of the app.
 2. Don't trust a fix you haven't run in a browser.
-3. Re-drag to Netlify, or she won't see it.
+3. Push to the `Adavu` branch, or she won't see it — that push is the deploy.
 4. Sessions now live in IndexedDB per origin. A **different Netlify URL is a
    different origin**, so moving the app to a new URL orphans any saved session —
    the work is not deleted, but the new URL cannot see it.
