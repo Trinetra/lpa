@@ -1,0 +1,13 @@
+{
+  "short_name": "Pravaaha CFM",
+  "name": "Pravaaha Center for Movement",
+  "icons": [
+    { "src": "favicon.ico", "sizes": "16x16 32x32 48x48 64x64", "type": "image/x-icon" },
+    { "src": "icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ],
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "theme_color": "#7A1F2B",
+  "background_color": "#7A1F2B"
+}
