@@ -31,7 +31,7 @@ const snap = (mins) => Math.round(mins / SLOT_MINUTES) * SLOT_MINUTES;
 const minutesFromTop = (px) => snap((px / HOUR_HEIGHT) * 60) + START_HOUR * 60;
 const topFromMinutes = (mins) => ((mins - START_HOUR * 60) / 60) * HOUR_HEIGHT;
 
-function DayColumn({ dayIndex, children }) {
+function DayColumn({ dayIndex, isToday, children }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-${dayIndex}` });
   return (
     <div
@@ -41,7 +41,7 @@ function DayColumn({ dayIndex, children }) {
       style={{
         borderColor: "var(--border)",
         height: (END_HOUR - START_HOUR) * HOUR_HEIGHT,
-        background: isOver ? "rgba(212,132,100,0.06)" : "transparent",
+        background: isOver ? "rgba(212,132,100,0.06)" : isToday ? "rgba(212,132,100,0.04)" : "transparent",
       }}
     >
       {Array.from({ length: END_HOUR - START_HOUR }).map((_, i) => (
@@ -56,7 +56,7 @@ function DayColumn({ dayIndex, children }) {
   );
 }
 
-function BlockCard({ block, studentMap, onOpen, onResizeStart }) {
+function BlockCard({ block, studentMap, onOpen, onResizeStart, isUpcomingToday }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: block.id,
     data: { block },
@@ -76,9 +76,10 @@ function BlockCard({ block, studentMap, onOpen, onResizeStart }) {
     top,
     height,
     transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
-    zIndex: isDragging ? 30 : 1,
+    zIndex: isDragging ? 30 : isUpcomingToday ? 2 : 1,
     background: block.is_one_off ? "var(--success)" : "var(--primary)",
     opacity: isDragging ? 0.85 : 1,
+    boxShadow: isUpcomingToday ? "0 0 0 2px var(--accent, #d48464)" : undefined,
   };
 
   return (
@@ -95,6 +96,14 @@ function BlockCard({ block, studentMap, onOpen, onResizeStart }) {
       className="absolute left-1 right-1 rounded-md px-2 py-1 text-xs cursor-grab active:cursor-grabbing overflow-hidden select-none"
       style={style}
     >
+      {isUpcomingToday && (
+        <span
+          data-testid={`schedule-block-upcoming-${block.id}`}
+          className="absolute top-1 right-1 rounded-full"
+          style={{ width: 6, height: 6, background: "#2c2926" }}
+          title="Upcoming today"
+        />
+      )}
       <div className="font-medium truncate" style={{ color: "#2c2926" }}>
         {fmt12h(block.start_time)}–{fmt12h(block.end_time)}
       </div>
@@ -296,7 +305,17 @@ export default function SchedulePage() {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null); // block being edited, or {} for new
+  const [now, setNow] = useState(new Date());
   const resizeState = useRef(null);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // DAYS is Monday-first (index 0), while Date#getDay() is Sunday-first (0).
+  const todayIndex = (now.getDay() + 6) % 7;
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
   const studentMap = useMemo(() => {
     const m = {};
@@ -403,6 +422,7 @@ export default function SchedulePage() {
 
       <p className="text-sm" style={{ color: "var(--text-muted)" }}>
         Drag a class to move it, drag its bottom edge to resize. Click a class to edit students or notes.
+        Classes still upcoming today are outlined and marked with a dot.
       </p>
 
       <div className="surface overflow-x-auto">
@@ -411,8 +431,14 @@ export default function SchedulePage() {
           <div className="grid" style={{ gridTemplateColumns: "48px repeat(7, 1fr)" }}>
             <div />
             {DAY_SHORT.map((d, i) => (
-              <div key={i} className="text-center py-3 uppercase-label" data-testid={`schedule-day-header-${i}`}>
+              <div
+                key={i}
+                className="text-center py-3 uppercase-label"
+                data-testid={`schedule-day-header-${i}`}
+                style={i === todayIndex ? { color: "var(--primary)", fontWeight: 700 } : undefined}
+              >
                 {d}
+                {i === todayIndex && <span className="block text-[9px] normal-case tracking-normal">Today</span>}
               </div>
             ))}
           </div>
@@ -433,7 +459,7 @@ export default function SchedulePage() {
               </div>
 
               {DAYS.map((_, dayIndex) => (
-                <DayColumn key={dayIndex} dayIndex={dayIndex}>
+                <DayColumn key={dayIndex} dayIndex={dayIndex} isToday={dayIndex === todayIndex}>
                   {blocks
                     .filter((b) => b.day_of_week === dayIndex)
                     .map((b) => (
@@ -443,6 +469,7 @@ export default function SchedulePage() {
                         studentMap={studentMap}
                         onOpen={setEditing}
                         onResizeStart={handleResizeStart}
+                        isUpcomingToday={dayIndex === todayIndex && toMinutes(b.start_time) >= nowMinutes}
                       />
                     ))}
                   <button
