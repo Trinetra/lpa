@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { api } from "@/lib/api";
+import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
-import { ArrowLeft, Phone, Mail, Calendar } from "lucide-react";
+import { toast } from "sonner";
+import { ArrowLeft, Phone, Mail, Calendar, Send } from "lucide-react";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -13,6 +14,7 @@ export default function StudentDetailPage() {
   const [summary, setSummary] = useState(null);
   const [classes, setClasses] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -36,6 +38,30 @@ export default function StudentDetailPage() {
   // the API) — a quick "where did we leave off" glance without needing a
   // full curriculum/syllabus model.
   const recentTopics = [...new Set(classes.slice(0, 5).flatMap((c) => c.topics || []))];
+
+  const sendPortalInvite = async () => {
+    const channels = [student.email && "email", student.phone && "whatsapp"].filter(Boolean);
+    if (channels.length === 0) {
+      toast.error("Add an email or phone number for this student first");
+      return;
+    }
+    setInviting(true);
+    try {
+      const { data } = await api.post(`/students/${id}/send-portal-invite`, { channels });
+      const email = data.channels?.email;
+      const whatsapp = data.channels?.whatsapp;
+      if (email?.status === "sent") toast.success(`Invite emailed to ${email.to}`);
+      else if (email?.status === "error") toast.error("Couldn't send the invite email");
+      if (whatsapp?.status === "ready") {
+        window.open(whatsapp.url, "_blank", "noreferrer");
+      }
+      if (!email && !whatsapp) toast.error("Nothing to send");
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't send the invite");
+    } finally {
+      setInviting(false);
+    }
+  };
 
   return (
     <div data-testid="student-detail-page" className="space-y-8">
@@ -66,6 +92,15 @@ export default function StudentDetailPage() {
           {student.description && (
             <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>{student.description}</p>
           )}
+          <button
+            type="button"
+            onClick={sendPortalInvite}
+            disabled={inviting}
+            data-testid="send-portal-invite-btn"
+            className="btn-ghost mt-3 flex items-center gap-2 text-xs"
+          >
+            <Send size={12} /> {inviting ? "Sending…" : "Send portal invite"}
+          </button>
         </div>
         <div className="text-right shrink-0 hidden md:block">
           <div className="uppercase-label">Rate</div>

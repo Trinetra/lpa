@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { useStudentAuth } from "@/context/StudentAuthContext";
 import { formatApiErrorDetail } from "@/lib/api";
 import { Loader2, Mail } from "lucide-react";
@@ -8,7 +8,8 @@ const HERO_IMG = "/hero-photos/hero1.jpg";
 
 export default function StudentLoginPage() {
   const { student, requestLink } = useStudentAuth();
-  const [email, setEmail] = useState("");
+  const [params] = useSearchParams();
+  const [email, setEmail] = useState(() => params.get("email") || "");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [sent, setSent] = useState(false);

@@ -274,6 +274,43 @@ async def send_change_request_email(to_email: str, student_name: str, req: dict,
         logger.error(f"Change request notification email failed: {e}")
 
 
+async def send_student_portal_invite_email(to_email: str, name: str, teacher_name: str, login_link: str):
+    key = _email_key()
+    if not key:
+        logger.warning(f"Student portal invite requested but no email key set. Link: {login_link}")
+        return
+    from_name = _from_name()
+    html = f"""
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
+  <tr><td align="center">
+    <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
+      <tr><td>
+        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">You're invited</div>
+        <div style="font-size:22px;color:#d48464;font-weight:700;margin-bottom:20px">{teacher_name or from_name} student portal</div>
+        <div style="font-size:15px;color:#2c2926;line-height:1.5">
+          Hi {name or "there"},<br><br>
+          {teacher_name or from_name} has set up a student portal where you can check your class schedule,
+          see your dues, track your progress, keep your own notes, and request a change to a class
+          (at least 24 hours ahead). No password needed — just enter your email and we'll send you a sign-in link.
+        </div>
+        <div style="margin:24px 0"><a href="{login_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px">Open student portal</a></div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+""".strip()
+    payload = {
+        "to": [to_email],
+        "subject": f"You're invited to the {teacher_name or from_name} student portal",
+        "html": html,
+        "from_name": from_name,
+    }
+    try:
+        await dispatch_email(payload)
+    except Exception as e:
+        logger.error(f"Student portal invite email failed: {e}")
+
+
 async def send_password_reset_email(to_email: str, name: str, reset_link: str):
     key = _email_key()
     if not key:

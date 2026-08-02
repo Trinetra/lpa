@@ -11,6 +11,7 @@ import uuid
 import logging
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import bcrypt
@@ -166,6 +167,9 @@ class StudentCreate(BaseModel):
     hourly_rate: float = 0.0
     currency: str = "INR"
     photo_path: Optional[str] = None
+
+class StudentInviteRequest(BaseModel):
+    channels: List[str] = Field(default_factory=lambda: ["email"])  # 'email' and/or 'whatsapp'
 
 class StudentUpdate(BaseModel):
     name: Optional[str] = None
@@ -808,6 +812,50 @@ async def reactivate_student(sid: str, user: dict = Depends(get_current_user)):
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Student not found")
     return ser_student(await db.students.find_one({"_id": ObjectId(sid)}))
+
+@api_router.post("/students/{sid}/send-portal-invite")
+async def send_student_portal_invite(sid: str, body: StudentInviteRequest, user: dict = Depends(get_current_user)):
+    student = await db.students.find_one({"_id": ObjectId(sid), "owner_id": user["_id"]})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    if not body.channels:
+        raise HTTPException(status_code=400, detail="At least one channel is required")
+    channels = set(body.channels)
+    if not channels.issubset({"email", "whatsapp"}):
+        raise HTTPException(status_code=400, detail="Unknown channel")
+
+    app_url = (os.environ.get("APP_URL") or "").rstrip("/")
+    login_link = f"{app_url}/portal/login"
+    if student.get("email"):
+        login_link += f"?email={quote(student['email'])}"
+    teacher_name = user.get("teacher_name") or user.get("name") or "your teacher"
+
+    result = {}
+
+    if "email" in channels:
+        if not student.get("email"):
+            result["email"] = {"status": "skipped", "reason": "no email on file"}
+        elif not EMAIL_KEY:
+            result["email"] = {"status": "skipped", "reason": "email not configured"}
+        else:
+            try:
+                await email_service.send_student_portal_invite_email(
+                    student["email"], student.get("name") or "", teacher_name, login_link,
+                )
+                result["email"] = {"status": "sent", "to": student["email"]}
+            except Exception as e:
+                logger.error(f"Portal invite email failed for {sid}: {e}")
+                result["email"] = {"status": "error", "detail": "email dispatch failed"}
+
+    if "whatsapp" in channels:
+        if not student.get("phone"):
+            result["whatsapp"] = {"status": "skipped", "reason": "no phone on file"}
+        else:
+            msg = (f"Hi {student.get('name') or ''}, {teacher_name} has set up a student portal where you can "
+                   f"check your schedule, dues and more:\n{login_link}")
+            result["whatsapp"] = {"status": "ready", "url": _wa_link(student["phone"], msg)}
+
+    return {"channels": result}
 
 # --------------- Classes endpoints -----------------
 @api_router.get("/classes")
