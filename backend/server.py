@@ -11,6 +11,7 @@ import uuid
 import logging
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 import bcrypt
 import httpx
@@ -19,7 +20,7 @@ import requests
 import secrets
 from collections import defaultdict
 from bson import ObjectId
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Depends, Query, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, UploadFile, File, Form, Depends, Query, Header
 from fastapi.responses import StreamingResponse, RedirectResponse
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from starlette.middleware.cors import CORSMiddleware
@@ -44,6 +45,7 @@ APP_NAME = os.environ.get("APP_NAME", "dance-billing")
 # picks the right transport at call time.
 EMAIL_KEY = os.environ.get("RESEND_API_KEY")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Pravaaha Center for Movement")
+IST = ZoneInfo("Asia/Kolkata")  # schedule_blocks times are entered in IST — all classes are in India.
 
 
 # Thin wrappers delegating to services.storage, kept so call sites throughout
@@ -259,6 +261,7 @@ class TourUpdate(BaseModel):
 RESERVED_SLUGS = {
     "login", "reset-password", "invoice", "tour", "dashboard", "students",
     "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
+    "portal", "requests",
 }
 
 class TourStopCreate(BaseModel):
@@ -1788,6 +1791,620 @@ async def delete_schedule_block(block_id: str, user: dict = Depends(get_current_
     await db.schedule_blocks.delete_one({"_id": ObjectId(block_id), "owner_id": user["_id"]})
     return {"ok": True}
 
+# --------------- Student portal -----------------
+# Students get their own login (magic-link email, no password) to view their
+# own schedule/dues/progress, request a cancellation or reschedule (with 24h
+# notice), keep private notes, and upload proof of payment. Kept as one
+# section (models + helpers + routes together) since it's a single cohesive
+# feature layered on top of the teacher-owned data above.
+
+class StudentMagicLinkRequest(BaseModel):
+    email: EmailStr
+
+class StudentMagicLinkVerify(BaseModel):
+    token: str
+
+class StudentNoteCreate(BaseModel):
+    text: str
+
+class StudentNoteUpdate(BaseModel):
+    text: str
+
+class ChangeRequestCreate(BaseModel):
+    block_id: str
+    type: str  # "cancel" | "reschedule"
+    scope: str  # "one_time" | "permanent"
+    requested_day_of_week: Optional[int] = None
+    requested_start_time: Optional[str] = None
+    requested_end_time: Optional[str] = None
+    reason: Optional[str] = None
+
+class ChangeRequestDeny(BaseModel):
+    reason: Optional[str] = None
+
+CHANGE_REQUEST_TYPES = {"cancel", "reschedule"}
+CHANGE_REQUEST_SCOPES = {"one_time", "permanent"}
+PAYMENT_PROOF_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
+PAYMENT_PROOF_MAX_BYTES = 10 * 1024 * 1024
+
+def ser_schedule_block_for_student(doc, next_occurrence=None, next_occurrence_start=None):
+    # Deliberately omits student_ids — a student must never learn who else is
+    # on a shared block.
+    return {
+        "id": str(doc["_id"]),
+        "day_of_week": doc.get("day_of_week"),
+        "start_time": doc.get("start_time"),
+        "end_time": doc.get("end_time"),
+        "notes": doc.get("notes"),
+        "is_one_off": doc.get("is_one_off", False),
+        "next_occurrence": next_occurrence,
+        "next_occurrence_start": next_occurrence_start,
+    }
+
+def ser_student_note(doc):
+    return {
+        "id": str(doc["_id"]),
+        "text": doc.get("text"),
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
+    }
+
+def ser_change_request(doc):
+    return {
+        "id": str(doc["_id"]),
+        "student_id": doc.get("student_id"),
+        "block_id": doc.get("block_id"),
+        "occurs_on": doc.get("occurs_on"),
+        "type": doc.get("type"),
+        "scope": doc.get("scope"),
+        "requested_day_of_week": doc.get("requested_day_of_week"),
+        "requested_start_time": doc.get("requested_start_time"),
+        "requested_end_time": doc.get("requested_end_time"),
+        "reason": doc.get("reason"),
+        "status": doc.get("status"),
+        "denial_reason": doc.get("denial_reason"),
+        "auto_denied": doc.get("auto_denied", False),
+        "created_at": doc.get("created_at"),
+        "decided_at": doc.get("decided_at"),
+    }
+
+def ser_payment_proof(doc):
+    return {
+        "id": str(doc["_id"]),
+        "student_id": doc.get("student_id"),
+        "content_type": doc.get("content_type"),
+        "amount_claimed": doc.get("amount_claimed"),
+        "note": doc.get("note"),
+        "status": doc.get("status"),
+        "uploaded_at": doc.get("uploaded_at"),
+    }
+
+# --------------- Student auth helpers -----------------
+def create_student_access_token(student_id: str, owner_id: str) -> str:
+    payload = {"sub": student_id, "owner_id": owner_id,
+               "exp": datetime.now(timezone.utc) + timedelta(hours=8),
+               "type": "student_access"}
+    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
+
+def create_student_refresh_token(student_id: str, owner_id: str) -> str:
+    payload = {"sub": student_id, "owner_id": owner_id,
+               "exp": datetime.now(timezone.utc) + timedelta(days=30),
+               "type": "student_refresh"}
+    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
+
+def set_student_auth_cookies(response: Response, access: str, refresh: str):
+    # Separate cookie names from the teacher's access_token/refresh_token so
+    # a teacher previewing the portal in the same browser can't collide
+    # sessions with their own login.
+    response.set_cookie("student_access_token", access, httponly=True, secure=True,
+                        samesite="none", max_age=8 * 3600, path="/")
+    response.set_cookie("student_refresh_token", refresh, httponly=True, secure=True,
+                        samesite="none", max_age=30 * 24 * 3600, path="/")
+
+async def get_current_student(request: Request) -> dict:
+    token = request.cookies.get("student_access_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "student_access":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        student = await db.students.find_one({
+            "_id": ObjectId(payload["sub"]), "owner_id": payload["owner_id"],
+        })
+        if not student or student.get("is_active") is False:
+            raise HTTPException(status_code=401, detail="Student not found")
+        student["_id"] = str(student["_id"])
+        return student
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+@api_router.post("/student/auth/request-link")
+async def student_request_link(body: StudentMagicLinkRequest):
+    email = body.email.lower().strip()
+    # Light rate-limit: one link per email per 60s, so a mis-click doesn't
+    # spam the inbox. Always return the same generic response either way —
+    # this endpoint never reveals whether the email is on file.
+    recent = await db.student_magic_links.find_one({
+        "email": email, "created_at": {"$gt": datetime.now(timezone.utc) - timedelta(seconds=60)},
+    })
+    if not recent:
+        async for student in db.students.find({"email": email, "is_active": {"$ne": False}}):
+            owner = await db.users.find_one({"_id": ObjectId(student["owner_id"])})
+            if not owner:
+                continue
+            token = secrets.token_urlsafe(32)
+            await db.student_magic_links.insert_one({
+                "token": token,
+                "student_id": str(student["_id"]),
+                "owner_id": student["owner_id"],
+                "email": email,
+                "used": False,
+                "created_at": datetime.now(timezone.utc),
+                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=15),
+            })
+            app_url = (os.environ.get("APP_URL") or "").rstrip("/")
+            magic_link = f"{app_url}/portal/verify?token={token}"
+            logger.info(f"Student magic link for {email}: {magic_link}")
+            await email_service.send_student_magic_link_email(
+                email, student.get("name") or "",
+                owner.get("teacher_name") or owner.get("name") or "", magic_link,
+            )
+    return {"ok": True, "message": "If that email is on file, we've sent a sign-in link."}
+
+@api_router.post("/student/auth/verify")
+async def student_verify_link(body: StudentMagicLinkVerify, response: Response):
+    rec = await db.student_magic_links.find_one({"token": body.token})
+    if not rec:
+        raise HTTPException(status_code=400, detail="Invalid or expired link")
+    if rec.get("used"):
+        raise HTTPException(status_code=400, detail="This link has already been used")
+    expires_at = rec.get("expires_at")
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if not expires_at or expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="This link has expired")
+    student = await db.students.find_one({
+        "_id": ObjectId(rec["student_id"]), "owner_id": rec["owner_id"],
+    })
+    if not student or student.get("is_active") is False:
+        raise HTTPException(status_code=400, detail="Student account not found")
+    await db.student_magic_links.update_one(
+        {"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}}
+    )
+    sid = str(student["_id"])
+    access = create_student_access_token(sid, rec["owner_id"])
+    refresh = create_student_refresh_token(sid, rec["owner_id"])
+    set_student_auth_cookies(response, access, refresh)
+    return {"id": sid, "name": student.get("name"), "token": access}
+
+@api_router.post("/student/auth/refresh")
+async def student_refresh(request: Request, response: Response):
+    token = request.cookies.get("student_refresh_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="No refresh token")
+    try:
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "student_refresh":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        student = await db.students.find_one({
+            "_id": ObjectId(payload["sub"]), "owner_id": payload["owner_id"],
+        })
+        if not student or student.get("is_active") is False:
+            raise HTTPException(status_code=401, detail="Student not found")
+        access = create_student_access_token(str(student["_id"]), payload["owner_id"])
+        response.set_cookie("student_access_token", access, httponly=True, secure=True,
+                            samesite="none", max_age=8 * 3600, path="/")
+        return {"ok": True}
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+@api_router.post("/student/auth/logout")
+async def student_logout(response: Response, student: dict = Depends(get_current_student)):
+    response.delete_cookie("student_access_token", path="/", secure=True, samesite="none")
+    response.delete_cookie("student_refresh_token", path="/", secure=True, samesite="none")
+    return {"ok": True}
+
+# --------------- Student-facing data -----------------
+@api_router.get("/student/me")
+async def student_me(student: dict = Depends(get_current_student)):
+    owner = await db.users.find_one({"_id": ObjectId(student["owner_id"])})
+    return {
+        "id": student["_id"],
+        "name": student.get("name"),
+        "email": student.get("email"),
+        "level": student.get("level"),
+        "studio_name": (owner or {}).get("studio_name"),
+        "teacher_name": (owner or {}).get("teacher_name") or (owner or {}).get("name"),
+        "contact_email": (owner or {}).get("contact_email") or (owner or {}).get("email"),
+        "contact_phone": (owner or {}).get("contact_phone"),
+    }
+
+def _next_occurrence_datetime(day_of_week: int, start_time: str, now_ist: datetime) -> datetime:
+    """Next strictly-future occurrence of a weekly day/time, as an IST-aware
+    datetime — unlike _next_occurrence() (date-only), this rolls over to next
+    week when today's own slot has already started/passed."""
+    today = now_ist.date()
+    days_ahead = (day_of_week - today.weekday()) % 7
+    candidate_date = today + timedelta(days=days_ahead)
+    h, m = start_time.split(":")
+    candidate_dt = datetime.combine(candidate_date, datetime.min.time(), tzinfo=IST).replace(
+        hour=int(h), minute=int(m),
+    )
+    if candidate_dt <= now_ist:
+        candidate_dt += timedelta(days=7)
+    return candidate_dt
+
+@api_router.get("/student/schedule")
+async def student_schedule(student: dict = Depends(get_current_student)):
+    await _prune_expired_one_offs(student["owner_id"])
+    now_ist = datetime.now(IST)
+    out = []
+    cur = db.schedule_blocks.find({
+        "owner_id": student["owner_id"], "student_ids": student["_id"],
+    }).sort("start_time", 1)
+    async for b in cur:
+        occ_dt = _next_occurrence_datetime(b["day_of_week"], b["start_time"], now_ist)
+        occurs_on = occ_dt.date().isoformat()
+        skipped = await db.schedule_skips.find_one({
+            "block_id": str(b["_id"]), "occurs_on": occurs_on, "student_id": student["_id"],
+        })
+        if skipped:
+            continue
+        out.append(ser_schedule_block_for_student(b, occurs_on, occ_dt.isoformat()))
+    return out
+
+@api_router.get("/student/dues")
+async def student_dues(student: dict = Depends(get_current_student)):
+    summary = await compute_student_summary(student["owner_id"], student["_id"])
+    outstanding = await _outstanding_classes(student["owner_id"], student["_id"])
+    return {"summary": summary, "outstanding_classes": [c for c in outstanding if c["outstanding"] > 0]}
+
+@api_router.get("/student/progress")
+async def student_progress(student: dict = Depends(get_current_student)):
+    # Only date/hours/topics — the teacher's `notes` on a class log are
+    # private commentary, never exposed here.
+    cur = db.classes.find({
+        "owner_id": student["owner_id"], "student_id": student["_id"],
+    }).sort("class_date", -1)
+    out = []
+    async for c in cur:
+        out.append({
+            "id": str(c["_id"]),
+            "class_date": c.get("class_date"),
+            "hours": c.get("hours"),
+            "topics": c.get("topics", []),
+        })
+    return out
+
+# --------------- Student notes (private — never exposed to the teacher) -----------------
+@api_router.get("/student/notes")
+async def list_student_notes(student: dict = Depends(get_current_student)):
+    cur = db.student_notes.find({"student_id": student["_id"]}).sort("created_at", -1)
+    out = []
+    async for d in cur:
+        out.append(ser_student_note(d))
+    return out
+
+@api_router.post("/student/notes")
+async def create_student_note(body: StudentNoteCreate, student: dict = Depends(get_current_student)):
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="Note can't be empty")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "owner_id": student["owner_id"], "student_id": student["_id"],
+        "text": body.text, "created_at": now, "updated_at": now,
+    }
+    res = await db.student_notes.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_student_note(doc)
+
+@api_router.patch("/student/notes/{note_id}")
+async def update_student_note(note_id: str, body: StudentNoteUpdate, student: dict = Depends(get_current_student)):
+    existing = await db.student_notes.find_one({"_id": ObjectId(note_id), "student_id": student["_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="Note can't be empty")
+    await db.student_notes.update_one(
+        {"_id": existing["_id"]},
+        {"$set": {"text": body.text, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    doc = await db.student_notes.find_one({"_id": existing["_id"]})
+    return ser_student_note(doc)
+
+@api_router.delete("/student/notes/{note_id}")
+async def delete_student_note(note_id: str, student: dict = Depends(get_current_student)):
+    res = await db.student_notes.delete_one({"_id": ObjectId(note_id), "student_id": student["_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"ok": True}
+
+# --------------- Change requests (cancel / reschedule) -----------------
+async def _has_overlap(owner_id: str, day_of_week: int, start_time: str, end_time: str,
+                        exclude_block_id: Optional[str] = None) -> bool:
+    start_m = _time_to_minutes(start_time)
+    end_m = _time_to_minutes(end_time)
+    async for b in db.schedule_blocks.find({"owner_id": owner_id, "day_of_week": day_of_week}):
+        if exclude_block_id and str(b["_id"]) == exclude_block_id:
+            continue
+        if _blocks_overlap(start_m, end_m, _time_to_minutes(b["start_time"]), _time_to_minutes(b["end_time"])):
+            return True
+    return False
+
+@api_router.post("/student/change-requests")
+async def create_change_request(body: ChangeRequestCreate, student: dict = Depends(get_current_student)):
+    if body.type not in CHANGE_REQUEST_TYPES:
+        raise HTTPException(status_code=400, detail="type must be 'cancel' or 'reschedule'")
+    if body.scope not in CHANGE_REQUEST_SCOPES:
+        raise HTTPException(status_code=400, detail="scope must be 'one_time' or 'permanent'")
+    block = await db.schedule_blocks.find_one({
+        "_id": ObjectId(body.block_id), "owner_id": student["owner_id"], "student_ids": student["_id"],
+    })
+    if not block:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    now_ist = datetime.now(IST)
+    occ_dt = _next_occurrence_datetime(block["day_of_week"], block["start_time"], now_ist)
+    if occ_dt - now_ist < timedelta(hours=24):
+        raise HTTPException(status_code=422, detail="Changes must be requested at least 24 hours before the class")
+
+    doc = {
+        "owner_id": student["owner_id"],
+        "student_id": student["_id"],
+        "block_id": body.block_id,
+        "occurs_on": occ_dt.date().isoformat(),
+        "type": body.type,
+        "scope": body.scope,
+        "requested_day_of_week": body.requested_day_of_week,
+        "requested_start_time": body.requested_start_time,
+        "requested_end_time": body.requested_end_time,
+        "reason": body.reason,
+        "status": "pending",
+        "auto_denied": False,
+        "denial_reason": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "decided_at": None,
+    }
+
+    if body.type == "reschedule":
+        if body.requested_day_of_week is None or not body.requested_start_time or not body.requested_end_time:
+            raise HTTPException(status_code=400, detail="A reschedule needs a requested day, start time and end time")
+        if not (0 <= body.requested_day_of_week <= 6):
+            raise HTTPException(status_code=400, detail="requested_day_of_week must be 0-6")
+        if _time_to_minutes(body.requested_end_time) <= _time_to_minutes(body.requested_start_time):
+            raise HTTPException(status_code=400, detail="requested end time must be after the start time")
+        clash = await _has_overlap(
+            student["owner_id"], body.requested_day_of_week, body.requested_start_time, body.requested_end_time,
+            exclude_block_id=body.block_id,
+        )
+        if clash:
+            # Auto-deny — a time that's already taken never reaches the
+            # teacher for a decision.
+            doc["status"] = "denied"
+            doc["auto_denied"] = True
+            doc["denial_reason"] = "That time overlaps an existing class on your teacher's schedule."
+            doc["decided_at"] = datetime.now(timezone.utc).isoformat()
+
+    res = await db.schedule_change_requests.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_change_request(doc)
+
+@api_router.get("/student/change-requests")
+async def list_own_change_requests(student: dict = Depends(get_current_student)):
+    cur = db.schedule_change_requests.find({"student_id": student["_id"]}).sort("created_at", -1)
+    out = []
+    async for d in cur:
+        out.append(ser_change_request(d))
+    return out
+
+# --------------- Payment proof uploads -----------------
+@api_router.post("/student/payment-proofs")
+async def upload_payment_proof(file: UploadFile = File(...), amount_claimed: Optional[float] = Form(None),
+                                note: Optional[str] = Form(None), student: dict = Depends(get_current_student)):
+    if not file.content_type or file.content_type not in PAYMENT_PROOF_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPG, PNG, WEBP or PDF files are allowed")
+    data = await file.read()
+    if len(data) > PAYMENT_PROOF_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File is too large (max 10MB)")
+    ext = "jpg"
+    if file.filename and "." in file.filename:
+        ext = file.filename.rsplit(".", 1)[-1].lower()
+    path = f"{APP_NAME}/payment-proofs/{student['owner_id']}/{student['_id']}/{uuid.uuid4()}.{ext}"
+    result = put_object(path, data, file.content_type)
+    doc = {
+        "owner_id": student["owner_id"],
+        "student_id": student["_id"],
+        "storage_path": result["path"],
+        "content_type": file.content_type,
+        "amount_claimed": amount_claimed,
+        "note": note,
+        "status": "pending",
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    res = await db.payment_proofs.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_payment_proof(doc)
+
+@api_router.get("/student/payment-proofs")
+async def list_own_payment_proofs(student: dict = Depends(get_current_student)):
+    cur = db.payment_proofs.find({"student_id": student["_id"]}).sort("uploaded_at", -1)
+    out = []
+    async for d in cur:
+        out.append(ser_payment_proof(d))
+    return out
+
+@api_router.get("/student/payment-proofs/{proof_id}/file")
+async def get_own_payment_proof_file(proof_id: str, student: dict = Depends(get_current_student)):
+    rec = await db.payment_proofs.find_one({"_id": ObjectId(proof_id), "student_id": student["_id"]})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not found")
+    data, ct = get_object(rec["storage_path"])
+    return Response(content=data, media_type=rec.get("content_type", ct))
+
+# --------------- Teacher-facing review queues -----------------
+async def _remove_student_from_block(owner_id: str, block: dict, student_id: str):
+    remaining = [sid for sid in block.get("student_ids", []) if sid != student_id]
+    if remaining:
+        await db.schedule_blocks.update_one({"_id": block["_id"]}, {"$set": {"student_ids": remaining}})
+        updated = await db.schedule_blocks.find_one({"_id": block["_id"]})
+        names = await _student_names(owner_id, remaining)
+        event_id = await calendar_service.sync_block_upsert(owner_id, updated, names)
+        if event_id and event_id != updated.get("google_event_id"):
+            await db.schedule_blocks.update_one({"_id": block["_id"]}, {"$set": {"google_event_id": event_id}})
+    else:
+        await calendar_service.sync_block_delete(owner_id, block.get("google_event_id"))
+        await db.schedule_blocks.delete_one({"_id": block["_id"]})
+
+@api_router.get("/change-requests")
+async def list_change_requests(status: Optional[str] = None, user: dict = Depends(get_current_user)):
+    q = {"owner_id": user["_id"]}
+    if status:
+        q["status"] = status
+    cur = db.schedule_change_requests.find(q).sort("created_at", -1)
+    out = []
+    async for d in cur:
+        item = ser_change_request(d)
+        s = await db.students.find_one({"_id": ObjectId(d["student_id"])})
+        item["student_name"] = (s or {}).get("name")
+        out.append(item)
+    return out
+
+@api_router.post("/change-requests/{request_id}/approve")
+async def approve_change_request(request_id: str, user: dict = Depends(get_current_user)):
+    req = await db.schedule_change_requests.find_one({"_id": ObjectId(request_id), "owner_id": user["_id"]})
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req["status"] != "pending":
+        raise HTTPException(status_code=400, detail="This request has already been decided")
+    block = await db.schedule_blocks.find_one({"_id": ObjectId(req["block_id"]), "owner_id": user["_id"]})
+    if not block:
+        raise HTTPException(status_code=404, detail="The original class no longer exists")
+
+    if req["type"] == "reschedule":
+        clash = await _has_overlap(
+            user["_id"], req["requested_day_of_week"], req["requested_start_time"], req["requested_end_time"],
+            exclude_block_id=req["block_id"],
+        )
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail="That time now overlaps another class — deny this request or ask the student for a different time",
+            )
+
+    if req["type"] == "cancel" and req["scope"] == "one_time":
+        await db.schedule_skips.update_one(
+            {"block_id": req["block_id"], "occurs_on": req["occurs_on"], "student_id": req["student_id"]},
+            {"$set": {"owner_id": user["_id"], "source_request_id": str(req["_id"]),
+                      "created_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+    elif req["type"] == "cancel" and req["scope"] == "permanent":
+        await _remove_student_from_block(user["_id"], block, req["student_id"])
+    elif req["type"] == "reschedule" and req["scope"] == "one_time":
+        await db.schedule_skips.update_one(
+            {"block_id": req["block_id"], "occurs_on": req["occurs_on"], "student_id": req["student_id"]},
+            {"$set": {"owner_id": user["_id"], "source_request_id": str(req["_id"]),
+                      "created_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+        one_off_doc = {
+            "owner_id": user["_id"],
+            "day_of_week": req["requested_day_of_week"],
+            "start_time": req["requested_start_time"],
+            "end_time": req["requested_end_time"],
+            "student_ids": [req["student_id"]],
+            "notes": f"Rescheduled from {req['occurs_on']} (student request)",
+            "is_one_off": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        one_off_doc["occurs_on"] = _next_occurrence(req["requested_day_of_week"])
+        res = await db.schedule_blocks.insert_one(one_off_doc)
+        one_off_doc["_id"] = res.inserted_id
+        names = await _student_names(user["_id"], one_off_doc["student_ids"])
+        event_id = await calendar_service.sync_block_upsert(user["_id"], one_off_doc, names)
+        if event_id:
+            await db.schedule_blocks.update_one({"_id": one_off_doc["_id"]}, {"$set": {"google_event_id": event_id}})
+    elif req["type"] == "reschedule" and req["scope"] == "permanent":
+        await _remove_student_from_block(user["_id"], block, req["student_id"])
+        new_block = {
+            "owner_id": user["_id"],
+            "day_of_week": req["requested_day_of_week"],
+            "start_time": req["requested_start_time"],
+            "end_time": req["requested_end_time"],
+            "student_ids": [req["student_id"]],
+            "notes": None,
+            "is_one_off": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        res = await db.schedule_blocks.insert_one(new_block)
+        new_block["_id"] = res.inserted_id
+        names = await _student_names(user["_id"], new_block["student_ids"])
+        event_id = await calendar_service.sync_block_upsert(user["_id"], new_block, names)
+        if event_id:
+            await db.schedule_blocks.update_one({"_id": new_block["_id"]}, {"$set": {"google_event_id": event_id}})
+
+    await db.schedule_change_requests.update_one(
+        {"_id": req["_id"]},
+        {"$set": {"status": "approved", "decided_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    updated = await db.schedule_change_requests.find_one({"_id": req["_id"]})
+    return ser_change_request(updated)
+
+@api_router.post("/change-requests/{request_id}/deny")
+async def deny_change_request(request_id: str, body: ChangeRequestDeny, user: dict = Depends(get_current_user)):
+    req = await db.schedule_change_requests.find_one({"_id": ObjectId(request_id), "owner_id": user["_id"]})
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req["status"] != "pending":
+        raise HTTPException(status_code=400, detail="This request has already been decided")
+    await db.schedule_change_requests.update_one(
+        {"_id": req["_id"]},
+        {"$set": {"status": "denied", "denial_reason": body.reason,
+                  "decided_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    updated = await db.schedule_change_requests.find_one({"_id": req["_id"]})
+    return ser_change_request(updated)
+
+@api_router.get("/payment-proofs")
+async def list_payment_proofs(status: Optional[str] = None, user: dict = Depends(get_current_user)):
+    q = {"owner_id": user["_id"]}
+    if status:
+        q["status"] = status
+    cur = db.payment_proofs.find(q).sort("uploaded_at", -1)
+    out = []
+    async for d in cur:
+        item = ser_payment_proof(d)
+        s = await db.students.find_one({"_id": ObjectId(d["student_id"])})
+        item["student_name"] = (s or {}).get("name")
+        out.append(item)
+    return out
+
+@api_router.post("/payment-proofs/{proof_id}/mark-reviewed")
+async def mark_payment_proof_reviewed(proof_id: str, user: dict = Depends(get_current_user)):
+    res = await db.payment_proofs.update_one(
+        {"_id": ObjectId(proof_id), "owner_id": user["_id"]},
+        {"$set": {"status": "reviewed", "reviewed_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    doc = await db.payment_proofs.find_one({"_id": ObjectId(proof_id)})
+    return ser_payment_proof(doc)
+
+@api_router.get("/payment-proofs/{proof_id}/file")
+async def get_payment_proof_file(proof_id: str, user: dict = Depends(get_current_user)):
+    rec = await db.payment_proofs.find_one({"_id": ObjectId(proof_id), "owner_id": user["_id"]})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not found")
+    data, ct = get_object(rec["storage_path"])
+    return Response(content=data, media_type=rec.get("content_type", ct))
+
 # --------------- Google Calendar OAuth -----------------
 @api_router.get("/calendar/status")
 async def calendar_status(user: dict = Depends(get_current_user)):
@@ -2460,6 +3077,17 @@ async def on_startup():
     await db.reminders_sent.create_index([("block_id", 1), ("date", 1), ("student_id", 1)], unique=True)
     await db.class_topics.create_index([("owner_id", 1), ("name", 1)], unique=True)
     await db.tour_files.create_index("tour_id")
+
+    # Student portal
+    await db.student_magic_links.create_index("token", unique=True)
+    await db.student_magic_links.create_index("expires_at", expireAfterSeconds=0)
+    await db.student_magic_links.create_index([("email", 1), ("created_at", -1)])
+    await db.schedule_change_requests.create_index([("owner_id", 1), ("status", 1)])
+    await db.schedule_change_requests.create_index([("student_id", 1), ("created_at", -1)])
+    await db.schedule_skips.create_index([("block_id", 1), ("occurs_on", 1), ("student_id", 1)], unique=True)
+    await db.student_notes.create_index([("student_id", 1), ("created_at", -1)])
+    await db.payment_proofs.create_index([("owner_id", 1), ("status", 1)])
+    await db.payment_proofs.create_index([("student_id", 1), ("uploaded_at", -1)])
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

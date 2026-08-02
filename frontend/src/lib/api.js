@@ -36,6 +36,41 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// A separate axios instance + token for the student portal, so a teacher
+// previewing /portal in the same browser tab can't clobber (or be clobbered
+// by) their own session — the backend also uses distinct cookie names for
+// the two, but this keeps the bearer-token belt-and-suspenders layer apart too.
+const STUDENT_TOKEN_KEY = "kalpana_student_access_token";
+
+export function setStoredStudentToken(token) {
+  if (token) sessionStorage.setItem(STUDENT_TOKEN_KEY, token);
+  else sessionStorage.removeItem(STUDENT_TOKEN_KEY);
+}
+
+export function getStoredStudentToken() {
+  try {
+    return sessionStorage.getItem(STUDENT_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export const studentApi = axios.create({
+  baseURL: API,
+  withCredentials: true,
+});
+
+studentApi.interceptors.request.use((config) => {
+  const token = getStoredStudentToken();
+  if (token) {
+    config.headers = config.headers || {};
+    if (!config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
 export function formatApiErrorDetail(detail) {
   if (detail == null) return "Something went wrong. Please try again.";
   if (typeof detail === "string") return detail;

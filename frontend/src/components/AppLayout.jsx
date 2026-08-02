@@ -18,6 +18,7 @@ import {
   CalendarClock,
   Plane,
   MoreHorizontal,
+  Inbox,
   X,
 } from "lucide-react";
 
@@ -60,6 +61,7 @@ export default function AppLayout() {
     { to: "/invoices", label: "Invoices", icon: FileText, tid: "nav-invoices" },
     { to: "/tours", label: "Tours", icon: Plane, tid: "nav-tours" },
     { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
+    { to: "/requests", label: "Requests", icon: Inbox, tid: "nav-requests" },
     { to: "/settings", label: "Settings", icon: Settings, tid: "nav-settings" },
   ];
 

@@ -102,6 +102,15 @@ async def _send_block_reminders(owner_id: str, block: dict, teacher_name: str,
             skipped += 1
             continue
 
+        # A student who got an approved cancellation for today's occurrence
+        # shouldn't be reminded about a class they're not coming to.
+        skip = await db.schedule_skips.find_one({
+            "block_id": str(block["_id"]), "occurs_on": today_str, "student_id": sid,
+        })
+        if skip:
+            skipped += 1
+            continue
+
         # Reserve the dedupe slot *before* sending — the unique index makes
         # this atomic, so two overlapping cron runs can't both pass this
         # check and double-send. If the send then fails, the reservation is

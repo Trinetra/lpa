@@ -3,8 +3,10 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { StudentAuthProvider, useStudentAuth } from "@/context/StudentAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import AppLayout from "@/components/AppLayout";
+import StudentPortalLayout from "@/components/StudentPortalLayout";
 import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
 import StudentsPage from "@/pages/StudentsPage";
@@ -20,6 +22,14 @@ import SharedInvoicePage from "@/pages/SharedInvoicePage";
 import ToursPage from "@/pages/ToursPage";
 import TourDetailPage from "@/pages/TourDetailPage";
 import SharedTourPage from "@/pages/SharedTourPage";
+import PortalActivityPage from "@/pages/PortalActivityPage";
+import StudentLoginPage from "@/pages/student/StudentLoginPage";
+import StudentVerifyPage from "@/pages/student/StudentVerifyPage";
+import StudentSchedulePage from "@/pages/student/StudentSchedulePage";
+import StudentDuesPage from "@/pages/student/StudentDuesPage";
+import StudentProgressPage from "@/pages/student/StudentProgressPage";
+import StudentNotesPage from "@/pages/student/StudentNotesPage";
+import StudentPaymentProofPage from "@/pages/student/StudentPaymentProofPage";
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -34,6 +44,47 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+function StudentProtectedRoute({ children }) {
+  const { student } = useStudentAuth();
+  if (student === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center uppercase-label" style={{ background: "var(--bg)" }}>
+        Checking session…
+      </div>
+    );
+  }
+  if (student === false) return <Navigate to="/portal/login" replace />;
+  return children;
+}
+
+// Mounted as its own provider scope so the student's session token/context
+// never mixes with the teacher's, even if both are open in one browser.
+function StudentPortalRoutes() {
+  return (
+    <StudentAuthProvider>
+      <Routes>
+        <Route path="login" element={<StudentLoginPage />} />
+        <Route path="verify" element={<StudentVerifyPage />} />
+        <Route
+          element={
+            <StudentProtectedRoute>
+              <StudentPortalLayout />
+            </StudentProtectedRoute>
+          }
+        >
+          <Route index element={<Navigate to="schedule" replace />} />
+          <Route path="schedule" element={<StudentSchedulePage />} />
+          <Route path="dues" element={<StudentDuesPage />} />
+          <Route path="progress" element={<StudentProgressPage />} />
+          <Route path="notes" element={<StudentNotesPage />} />
+          <Route path="payment-proof" element={<StudentPaymentProofPage />} />
+        </Route>
+        <Route path="*" element={<Navigate to="login" replace />} />
+      </Routes>
+    </StudentAuthProvider>
+  );
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -41,6 +92,7 @@ function AppRoutes() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/invoice/:token" element={<SharedInvoicePage />} />
       <Route path="/tour/:token" element={<SharedTourPage />} />
+      <Route path="/portal/*" element={<StudentPortalRoutes />} />
       <Route
         element={
           <ProtectedRoute>
@@ -59,6 +111,7 @@ function AppRoutes() {
         <Route path="/tours" element={<ToursPage />} />
         <Route path="/tours/:id" element={<TourDetailPage />} />
         <Route path="/charts" element={<ChartsPage />} />
+        <Route path="/requests" element={<PortalActivityPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       {/* Custom tour public links (e.g. pravaahacfm.com/tour2026) — tried only
