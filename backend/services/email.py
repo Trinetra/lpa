@@ -205,6 +205,75 @@ async def send_student_magic_link_email(to_email: str, name: str, teacher_name: 
         logger.error(f"Student magic-link email failed: {e}")
 
 
+_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def build_change_request_notification_html(student_name: str, req: dict, review_link: str) -> str:
+    from_name = _from_name()
+    kind = "cancel" if req.get("type") == "cancel" else "reschedule"
+    scope = "just this class" if req.get("scope") == "one_time" else "permanently, going forward"
+
+    detail_html = ""
+    if req.get("type") == "reschedule" and req.get("requested_day_of_week") is not None:
+        day = _DAY_NAMES[req["requested_day_of_week"]]
+        detail_html = (
+            f'<div style="margin-top:10px;font-size:15px;color:#2c2926">'
+            f'Requested: <b>{day} {req.get("requested_start_time")}–{req.get("requested_end_time")}</b></div>'
+        )
+
+    reason_html = ""
+    if req.get("reason"):
+        safe = req["reason"].replace("<", "&lt;").replace(">", "&gt;")
+        reason_html = f'<div style="margin-top:10px;font-size:14px;color:#2c2926;font-style:italic">"{safe}"</div>'
+
+    link_html = ""
+    if review_link:
+        link_html = (
+            f'<div style="margin:24px 0"><a href="{review_link}" style="display:inline-block;'
+            f'background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;'
+            f'border-radius:999px;font-weight:600;font-size:14px">Review request</a></div>'
+        )
+
+    return f"""
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
+  <tr><td align="center">
+    <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
+      <tr><td>
+        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">Student portal</div>
+        <div style="font-size:22px;color:#d48464;font-weight:700;margin-bottom:16px">New {kind} request</div>
+        <div style="font-size:15px;color:#2c2926;line-height:1.5">
+          <b>{student_name}</b> is asking to {kind} a class — {scope}.
+        </div>
+        {detail_html}
+        {reason_html}
+        {link_html}
+        <div style="font-size:12px;color:#a89886;margin-top:8px">This needs your approval before anything changes.</div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+""".strip()
+
+
+async def send_change_request_email(to_email: str, student_name: str, req: dict, review_link: str):
+    key = _email_key()
+    if not key:
+        logger.warning(f"Change request notification skipped (no email key). Student={student_name}, link={review_link}")
+        return
+    html = build_change_request_notification_html(student_name, req, review_link)
+    kind = "Cancellation" if req.get("type") == "cancel" else "Reschedule"
+    payload = {
+        "to": [to_email],
+        "subject": f"{kind} request from {student_name}",
+        "html": html,
+        "from_name": _from_name(),
+    }
+    try:
+        await dispatch_email(payload)
+    except Exception as e:
+        logger.error(f"Change request notification email failed: {e}")
+
+
 async def send_password_reset_email(to_email: str, name: str, reset_link: str):
     key = _email_key()
     if not key:

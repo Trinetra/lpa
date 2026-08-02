@@ -29,8 +29,20 @@ export default function AppLayout() {
   const location = useLocation();
   const [profile, setProfile] = useState(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => { setMoreOpen(false); }, [location.pathname]);
+
+  // Refreshed on every navigation — cheap (two small "pending" queries) and
+  // keeps the Requests badge from going stale while the teacher works.
+  useEffect(() => {
+    Promise.all([
+      api.get("/change-requests", { params: { status: "pending" } }),
+      api.get("/payment-proofs", { params: { status: "pending" } }),
+    ])
+      .then(([cr, pp]) => setPendingCount(cr.data.length + pp.data.length))
+      .catch(() => {});
+  }, [location.pathname]);
 
   // Record top-level page visits for dashboard shortcuts. Tour tab visits are
   // tracked separately inside TourDetailPage (it knows which tab is active).
@@ -108,7 +120,10 @@ export default function AppLayout() {
               className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
             >
               <l.icon size={18} strokeWidth={1.5} />
-              <span>{l.label}</span>
+              <span className="flex-1">{l.label}</span>
+              {l.to === "/requests" && pendingCount > 0 && (
+                <RequestsBadge count={pendingCount} testid="requests-badge" />
+              )}
             </NavLink>
           ))}
         </nav>
@@ -188,7 +203,10 @@ export default function AppLayout() {
                   className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
                 >
                   <l.icon size={18} strokeWidth={1.5} />
-                  <span>{l.label}</span>
+                  <span className="flex-1">{l.label}</span>
+                  {l.to === "/requests" && pendingCount > 0 && (
+                    <RequestsBadge count={pendingCount} testid="m-requests-badge" />
+                  )}
                 </NavLink>
               ))}
               <button
@@ -224,15 +242,34 @@ export default function AppLayout() {
             type="button"
             onClick={() => setMoreOpen(true)}
             data-testid="mobile-more-btn"
-            className="flex flex-col items-center gap-1 px-2 py-1 text-[10px]"
+            className="relative flex flex-col items-center gap-1 px-2 py-1 text-[10px]"
             style={{ color: overflowHasActive ? "var(--primary)" : "var(--text-muted)" }}
           >
             <MoreHorizontal size={18} strokeWidth={1.5} />
             <span>More</span>
+            {pendingCount > 0 && (
+              <span
+                data-testid="m-more-badge"
+                className="absolute top-0 right-1 rounded-full"
+                style={{ width: 8, height: 8, background: "var(--primary)" }}
+              />
+            )}
           </button>
         </div>
         <Outlet />
       </main>
     </div>
+  );
+}
+
+function RequestsBadge({ count, testid }) {
+  return (
+    <span
+      data-testid={testid}
+      className="flex items-center justify-center text-[10px] font-semibold rounded-full shrink-0"
+      style={{ minWidth: 18, height: 18, padding: "0 5px", background: "var(--primary)", color: "#1a1816" }}
+    >
+      {count > 9 ? "9+" : count}
+    </span>
   );
 }

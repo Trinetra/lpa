@@ -2194,6 +2194,17 @@ async def create_change_request(body: ChangeRequestCreate, student: dict = Depen
 
     res = await db.schedule_change_requests.insert_one(doc)
     doc["_id"] = res.inserted_id
+
+    if doc["status"] == "pending":
+        owner = await db.users.find_one({"_id": ObjectId(student["owner_id"])})
+        teacher_email = (owner or {}).get("contact_email") or (owner or {}).get("email")
+        if teacher_email:
+            app_url = (os.environ.get("APP_URL") or "").rstrip("/")
+            review_link = f"{app_url}/requests" if app_url else ""
+            await email_service.send_change_request_email(
+                teacher_email, student.get("name") or "A student", doc, review_link,
+            )
+
     return ser_change_request(doc)
 
 @api_router.get("/student/change-requests")
