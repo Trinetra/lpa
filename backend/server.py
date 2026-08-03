@@ -2417,6 +2417,25 @@ async def _remove_student_from_block(owner_id: str, block: dict, student_id: str
         await calendar_service.sync_block_delete(owner_id, block.get("google_event_id"))
         await db.schedule_blocks.delete_one({"_id": block["_id"]})
 
+async def _retire_one_time_occurrence(owner_id: str, req: dict, block: dict):
+    """Called when approving a one_time cancel/reschedule. A recurring block
+    just gets this one date skipped (the series itself must survive). But if
+    `block` is already a one-off — itself the product of an earlier one_time
+    reschedule — there's no series to preserve, so delete it outright instead
+    of leaving a stale calendar event behind (a skip would hide it from the
+    student's own view, but the teacher's schedule/calendar still shows it,
+    forever, since nothing ever prunes a skipped-but-not-expired one-off)."""
+    if block.get("is_one_off"):
+        await calendar_service.sync_block_delete(owner_id, block.get("google_event_id"))
+        await db.schedule_blocks.delete_one({"_id": block["_id"]})
+    else:
+        await db.schedule_skips.update_one(
+            {"block_id": req["block_id"], "occurs_on": req["occurs_on"], "student_id": req["student_id"]},
+            {"$set": {"owner_id": owner_id, "source_request_id": str(req["_id"]),
+                      "created_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+
 @api_router.get("/change-requests")
 async def list_change_requests(status: Optional[str] = None, user: dict = Depends(get_current_user)):
     q = {"owner_id": user["_id"]}
@@ -2454,21 +2473,11 @@ async def approve_change_request(request_id: str, user: dict = Depends(get_curre
             )
 
     if req["type"] == "cancel" and req["scope"] == "one_time":
-        await db.schedule_skips.update_one(
-            {"block_id": req["block_id"], "occurs_on": req["occurs_on"], "student_id": req["student_id"]},
-            {"$set": {"owner_id": user["_id"], "source_request_id": str(req["_id"]),
-                      "created_at": datetime.now(timezone.utc).isoformat()}},
-            upsert=True,
-        )
+        await _retire_one_time_occurrence(user["_id"], req, block)
     elif req["type"] == "cancel" and req["scope"] == "permanent":
         await _remove_student_from_block(user["_id"], block, req["student_id"])
     elif req["type"] == "reschedule" and req["scope"] == "one_time":
-        await db.schedule_skips.update_one(
-            {"block_id": req["block_id"], "occurs_on": req["occurs_on"], "student_id": req["student_id"]},
-            {"$set": {"owner_id": user["_id"], "source_request_id": str(req["_id"]),
-                      "created_at": datetime.now(timezone.utc).isoformat()}},
-            upsert=True,
-        )
+        await _retire_one_time_occurrence(user["_id"], req, block)
         one_off_doc = {
             "owner_id": user["_id"],
             "day_of_week": req["requested_day_of_week"],

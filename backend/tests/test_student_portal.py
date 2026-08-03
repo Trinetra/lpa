@@ -343,6 +343,49 @@ class TestChangeRequests:
         sched = student_session.get(f"{API}/student/schedule", timeout=10).json()
         assert any(b["day_of_week"] == 2 and b["start_time"] == "08:00" for b in sched)
 
+    def test_rescheduling_a_reschedule_deletes_the_stale_one_off(self, session, student, student_session):
+        # `student_session` isn't used directly — it just guarantees `student`
+        # is already onboarded before we log in again below.
+        b = _far_future_block(session, [student["id"]], day_of_week=6, start_time="20:00", end_time="21:00")
+        s = _login_as_student(student["email"])
+
+        # First reschedule creates one-off #1 and should leave the original
+        # recurring block otherwise intact (just skipped for this date).
+        r1 = s.post(f"{API}/student/change-requests", json={
+            "block_id": b["id"], "type": "reschedule", "scope": "one_time",
+            "requested_day_of_week": 6, "requested_start_time": "21:00", "requested_end_time": "22:00",
+            "reason": "first move",
+        }, timeout=10)
+        assert r1.status_code == 200, r1.text
+        approve1 = session.post(f"{API}/change-requests/{r1.json()['id']}/approve", timeout=10)
+        assert approve1.status_code == 200, approve1.text
+
+        sched = session.get(f"{API}/schedule", timeout=10).json()
+        one_off_1 = next((x for x in sched if x["id"] != b["id"] and x["start_time"] == "21:00"), None)
+        assert one_off_1, "first one-off not found on the teacher's schedule"
+        assert one_off_1["is_one_off"] is True
+
+        # Second reschedule targets the one-off itself (not the original
+        # recurring block) — this used to leave one_off_1 dangling forever.
+        r2 = s.post(f"{API}/student/change-requests", json={
+            "block_id": one_off_1["id"], "type": "reschedule", "scope": "one_time",
+            "requested_day_of_week": 6, "requested_start_time": "22:00", "requested_end_time": "23:00",
+            "reason": "second move",
+        }, timeout=10)
+        assert r2.status_code == 200, r2.text
+        approve2 = session.post(f"{API}/change-requests/{r2.json()['id']}/approve", timeout=10)
+        assert approve2.status_code == 200, approve2.text
+
+        sched_after = session.get(f"{API}/schedule", timeout=10).json()
+        ids_after = [x["id"] for x in sched_after]
+        assert one_off_1["id"] not in ids_after, "the stale one-off should have been deleted, not left dangling"
+        assert any(x["start_time"] == "22:00" for x in sched_after)
+
+        session.delete(f"{API}/schedule/{b['id']}", timeout=10)
+        for x in sched_after:
+            if x["id"] != b["id"] and x["start_time"] == "22:00":
+                session.delete(f"{API}/schedule/{x['id']}", timeout=10)
+
     def test_permanent_cancel_removes_from_recurring_block(self, session, student, student_session):
         # `student_session` isn't used directly here but ensures `student` has
         # already been onboarded (has a password) before we log in again below.
