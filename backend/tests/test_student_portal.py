@@ -322,6 +322,36 @@ class TestChangeRequests:
         pending = session.get(f"{API}/change-requests", params={"status": "pending"}, timeout=10).json()
         assert not any(req["id"] == body["id"] for req in pending)
 
+    def test_cannot_submit_duplicate_pending_request(self, session, student, student_session):
+        # A student re-clicking "Send request" (or opening the form again
+        # before hearing back) shouldn't be able to stack a second pending
+        # request for the same class.
+        b = _far_future_block(session, [student["id"]], day_of_week=6, start_time="18:00", end_time="19:00")
+        s = _login_as_student(student["email"])
+        try:
+            r1 = s.post(f"{API}/student/change-requests", json={
+                "block_id": b["id"], "type": "cancel", "scope": "one_time",
+            }, timeout=10)
+            assert r1.status_code == 200, r1.text
+            assert r1.json()["status"] == "pending"
+
+            r2 = s.post(f"{API}/student/change-requests", json={
+                "block_id": b["id"], "type": "reschedule", "scope": "one_time",
+                "requested_day_of_week": 6, "requested_start_time": "19:00", "requested_end_time": "20:00",
+            }, timeout=10)
+            assert r2.status_code == 409, r2.text
+
+            # Once the first request is decided, a new one is allowed again.
+            deny = session.post(f"{API}/change-requests/{r1.json()['id']}/deny",
+                                 json={"reason": "test cleanup"}, timeout=10)
+            assert deny.status_code == 200, deny.text
+            r3 = s.post(f"{API}/student/change-requests", json={
+                "block_id": b["id"], "type": "cancel", "scope": "one_time",
+            }, timeout=10)
+            assert r3.status_code == 200, r3.text
+        finally:
+            session.delete(f"{API}/schedule/{b['id']}", timeout=10)
+
     def test_non_clashing_reschedule_is_pending_then_approvable(self, student_session, session, block):
         r = student_session.post(f"{API}/student/change-requests", json={
             "block_id": block["id"], "type": "reschedule", "scope": "one_time",

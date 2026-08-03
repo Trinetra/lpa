@@ -40,6 +40,8 @@ export default function StudentSchedulePage() {
 
   if (loading) return <div data-testid="portal-schedule-loading" className="uppercase-label">Loading…</div>;
 
+  const pendingBlockIds = new Set(requests.filter((r) => r.status === "pending").map((r) => r.block_id));
+
   return (
     <div data-testid="portal-schedule-page" className="space-y-8">
       <header>
@@ -65,10 +67,17 @@ export default function StudentSchedulePage() {
               </div>
               {b.notes && <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{b.notes}</div>}
             </div>
-            <button type="button" className="btn-ghost" onClick={() => setRequesting(b)}
-              data-testid={`portal-schedule-request-change-${b.id}`}>
-              Request change
-            </button>
+            {pendingBlockIds.has(b.id) ? (
+              <span className="text-xs uppercase-label" style={{ color: "var(--text-muted)" }}
+                data-testid={`portal-schedule-request-pending-${b.id}`}>
+                Request pending
+              </span>
+            ) : (
+              <button type="button" className="btn-ghost" onClick={() => setRequesting(b)}
+                data-testid={`portal-schedule-request-change-${b.id}`}>
+                Request change
+              </button>
+            )}
           </div>
         ))}
       </div>

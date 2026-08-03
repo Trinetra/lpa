@@ -2280,6 +2280,15 @@ async def create_change_request(body: ChangeRequestCreate, student: dict = Depen
     if not block:
         raise HTTPException(status_code=404, detail="Class not found")
 
+    existing_pending = await db.schedule_change_requests.find_one({
+        "student_id": student["_id"], "block_id": body.block_id, "status": "pending",
+    })
+    if existing_pending:
+        raise HTTPException(
+            status_code=409,
+            detail="You already have a pending request for this class — wait for your teacher to respond before sending another.",
+        )
+
     now_ist = datetime.now(IST)
     occ_dt = _next_occurrence_datetime(block["day_of_week"], block["start_time"], now_ist)
     if occ_dt - now_ist < timedelta(hours=24):
@@ -3302,6 +3311,7 @@ async def on_startup():
     await db.password_reset_tokens.create_index([("student_id", 1)], sparse=True)
     await db.schedule_change_requests.create_index([("owner_id", 1), ("status", 1)])
     await db.schedule_change_requests.create_index([("student_id", 1), ("created_at", -1)])
+    await db.schedule_change_requests.create_index([("student_id", 1), ("block_id", 1), ("status", 1)])
     await db.schedule_skips.create_index([("block_id", 1), ("occurs_on", 1), ("student_id", 1)], unique=True)
     await db.student_notes.create_index([("student_id", 1), ("created_at", -1)])
     await db.payment_proofs.create_index([("owner_id", 1), ("status", 1)])

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { studentApi, formatApiErrorDetail } from "@/lib/api";
+import { toast } from "sonner";
 import { X } from "lucide-react";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -13,7 +14,6 @@ export default function ChangeRequestModal({ block, onClose, onDone }) {
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState("");
-  const [result, setResult] = useState(null);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -27,11 +27,15 @@ export default function ChangeRequestModal({ block, onClose, onDone }) {
         body.requested_end_time = requestedEnd;
       }
       const { data } = await studentApi.post("/student/change-requests", body);
-      setResult(data);
+      if (data.status === "denied") {
+        toast.error(data.denial_reason || "That change isn't available");
+      } else {
+        toast.success("Request sent to your teacher for approval");
+      }
       onDone?.(data);
+      onClose();
     } catch (e2) {
       setErr(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't submit that request");
-    } finally {
       setSubmitting(false);
     }
   };
@@ -46,27 +50,7 @@ export default function ChangeRequestModal({ block, onClose, onDone }) {
           </button>
         </div>
 
-        {result ? (
-          <div data-testid="portal-change-request-result" className="space-y-4">
-            {result.status === "denied" ? (
-              <>
-                <div className="uppercase-label" style={{ color: "var(--error)" }}>Not available</div>
-                <p className="text-sm" style={{ color: "var(--text)" }}>{result.denial_reason}</p>
-              </>
-            ) : (
-              <>
-                <div className="uppercase-label" style={{ color: "var(--success)" }}>Sent</div>
-                <p className="text-sm" style={{ color: "var(--text)" }}>
-                  Your request has been sent to your teacher for approval.
-                </p>
-              </>
-            )}
-            <button type="button" onClick={onClose} className="btn-pill w-full" data-testid="portal-change-request-done">
-              Done
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={submit} className="space-y-4">
+        <form onSubmit={submit} className="space-y-4">
             <div>
               <span className="uppercase-label block mb-2">What do you need?</span>
               <div className="flex gap-2">
@@ -149,8 +133,7 @@ export default function ChangeRequestModal({ block, onClose, onDone }) {
                 {submitting ? "Sending…" : "Send request"}
               </button>
             </div>
-          </form>
-        )}
+        </form>
       </div>
     </div>
   );
