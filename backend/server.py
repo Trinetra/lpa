@@ -583,23 +583,43 @@ async def _send_password_reset_email(to_email: str, name: str, reset_link: str):
 
 @api_router.post("/auth/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest):
+    """Shared by both the teacher login and the student portal login — looks
+    up a teacher account first, then falls back to student accounts (a
+    student's email may not be unique across studios, so every match gets its
+    own token/email). Always returns the same generic response either way."""
     email = body.email.lower().strip()
+    app_url = os.environ.get("APP_URL", "").rstrip("/")
     user = await db.users.find_one({"email": email})
-    # Always return success (don't leak whether email exists)
     if user:
         token = secrets.token_urlsafe(32)
         await db.password_reset_tokens.insert_one({
             "token": token,
+            "account_type": "user",
             "user_id": str(user["_id"]),
             "email": email,
             "used": False,
             "created_at": datetime.now(timezone.utc),
             "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
         })
-        app_url = os.environ.get("APP_URL", "").rstrip("/")
         reset_link = f"{app_url}/reset-password?token={token}"
         logger.info(f"Password reset link for {email}: {reset_link}")
         await _send_password_reset_email(email, user.get("name") or "", reset_link)
+    else:
+        async for student in db.students.find({"email": email, "is_active": {"$ne": False}}):
+            token = secrets.token_urlsafe(32)
+            await db.password_reset_tokens.insert_one({
+                "token": token,
+                "account_type": "student",
+                "student_id": str(student["_id"]),
+                "owner_id": student["owner_id"],
+                "email": email,
+                "used": False,
+                "created_at": datetime.now(timezone.utc),
+                "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
+            })
+            reset_link = f"{app_url}/reset-password?token={token}"
+            logger.info(f"Student password reset link for {email}: {reset_link}")
+            await _send_password_reset_email(email, student.get("name") or "", reset_link)
     return {"ok": True, "message": "If an account exists for that email, a reset link has been sent."}
 
 @api_router.post("/auth/reset-password")
@@ -616,14 +636,22 @@ async def reset_password(body: ResetPasswordRequest):
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if not expires_at or expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Reset link has expired")
-    await db.users.update_one(
-        {"_id": ObjectId(rec["user_id"])},
-        {"$set": {"password_hash": hash_password(body.new_password)}}
-    )
+
+    account_type = rec.get("account_type", "user")
+    if account_type == "student":
+        await db.students.update_one(
+            {"_id": ObjectId(rec["student_id"])},
+            {"$set": {"password_hash": hash_password(body.new_password)}}
+        )
+    else:
+        await db.users.update_one(
+            {"_id": ObjectId(rec["user_id"])},
+            {"$set": {"password_hash": hash_password(body.new_password)}}
+        )
     await db.password_reset_tokens.update_one(
         {"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}}
     )
-    return {"ok": True}
+    return {"ok": True, "account_type": account_type}
 
 # --------------- Profile endpoints -----------------
 def _ser_profile(user_doc: dict) -> dict:
@@ -824,10 +852,24 @@ async def send_student_portal_invite(sid: str, body: StudentInviteRequest, user:
     if not channels.issubset({"email", "whatsapp"}):
         raise HTTPException(status_code=400, detail="Unknown channel")
 
+    # A fresh invite supersedes any earlier unused one for this student, so
+    # there's never more than one live invite link floating around.
+    await db.student_invites.update_many(
+        {"student_id": sid, "used": False},
+        {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}},
+    )
+    token = secrets.token_urlsafe(32)
+    await db.student_invites.insert_one({
+        "token": token,
+        "student_id": sid,
+        "owner_id": user["_id"],
+        "used": False,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
+    })
+
     app_url = (os.environ.get("APP_URL") or "").rstrip("/")
-    login_link = f"{app_url}/portal/login"
-    if student.get("email"):
-        login_link += f"?email={quote(student['email'])}"
+    invite_link = f"{app_url}/portal/accept-invite?token={token}"
     teacher_name = user.get("teacher_name") or user.get("name") or "your teacher"
 
     result = {}
@@ -839,8 +881,8 @@ async def send_student_portal_invite(sid: str, body: StudentInviteRequest, user:
             result["email"] = {"status": "skipped", "reason": "email not configured"}
         else:
             try:
-                await email_service.send_student_portal_invite_email(
-                    student["email"], student.get("name") or "", teacher_name, login_link,
+                await email_service.send_student_invite_email(
+                    student["email"], student.get("name") or "", teacher_name, invite_link,
                 )
                 result["email"] = {"status": "sent", "to": student["email"]}
             except Exception as e:
@@ -851,8 +893,8 @@ async def send_student_portal_invite(sid: str, body: StudentInviteRequest, user:
         if not student.get("phone"):
             result["whatsapp"] = {"status": "skipped", "reason": "no phone on file"}
         else:
-            msg = (f"Hi {student.get('name') or ''}, {teacher_name} has set up a student portal where you can "
-                   f"check your schedule, dues and more:\n{login_link}")
+            msg = (f"Hi {student.get('name') or ''}, {teacher_name} has set up a student portal for you. "
+                   f"Tap this link to sign in and set your password:\n{invite_link}")
             result["whatsapp"] = {"status": "ready", "url": _wa_link(student["phone"], msg)}
 
     return {"channels": result}
@@ -1840,17 +1882,25 @@ async def delete_schedule_block(block_id: str, user: dict = Depends(get_current_
     return {"ok": True}
 
 # --------------- Student portal -----------------
-# Students get their own login (magic-link email, no password) to view their
-# own schedule/dues/progress, request a cancellation or reschedule (with 24h
-# notice), keep private notes, and upload proof of payment. Kept as one
-# section (models + helpers + routes together) since it's a single cohesive
-# feature layered on top of the teacher-owned data above.
+# Students get their own login to view their own schedule/dues/progress,
+# request a cancellation or reschedule (with 24h notice), keep private notes,
+# and upload proof of payment. Onboarding is invite-only: the teacher sends an
+# invite link (see /students/{sid}/send-portal-invite below) that logs the
+# student in immediately and forces them to set a password; every login after
+# that is plain email + password, with the same forgot/reset-password flow
+# the teacher uses. Kept as one section (models + helpers + routes together)
+# since it's a single cohesive feature layered on top of the teacher-owned
+# data above.
 
-class StudentMagicLinkRequest(BaseModel):
-    email: EmailStr
-
-class StudentMagicLinkVerify(BaseModel):
+class StudentAcceptInviteRequest(BaseModel):
     token: str
+
+class StudentSetPasswordRequest(BaseModel):
+    password: str
+
+class StudentLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
 
 class StudentNoteCreate(BaseModel):
     text: str
@@ -1967,70 +2017,68 @@ async def get_current_student(request: Request) -> dict:
         if not student or student.get("is_active") is False:
             raise HTTPException(status_code=401, detail="Student not found")
         student["_id"] = str(student["_id"])
+        student["_has_password"] = bool(student.get("password_hash"))
+        student.pop("password_hash", None)
         return student
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-@api_router.post("/student/auth/request-link")
-async def student_request_link(body: StudentMagicLinkRequest):
-    email = body.email.lower().strip()
-    # Light rate-limit: one link per email per 60s, so a mis-click doesn't
-    # spam the inbox. Always return the same generic response either way —
-    # this endpoint never reveals whether the email is on file.
-    recent = await db.student_magic_links.find_one({
-        "email": email, "created_at": {"$gt": datetime.now(timezone.utc) - timedelta(seconds=60)},
-    })
-    if not recent:
-        async for student in db.students.find({"email": email, "is_active": {"$ne": False}}):
-            owner = await db.users.find_one({"_id": ObjectId(student["owner_id"])})
-            if not owner:
-                continue
-            token = secrets.token_urlsafe(32)
-            await db.student_magic_links.insert_one({
-                "token": token,
-                "student_id": str(student["_id"]),
-                "owner_id": student["owner_id"],
-                "email": email,
-                "used": False,
-                "created_at": datetime.now(timezone.utc),
-                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=15),
-            })
-            app_url = (os.environ.get("APP_URL") or "").rstrip("/")
-            magic_link = f"{app_url}/portal/verify?token={token}"
-            logger.info(f"Student magic link for {email}: {magic_link}")
-            await email_service.send_student_magic_link_email(
-                email, student.get("name") or "",
-                owner.get("teacher_name") or owner.get("name") or "", magic_link,
-            )
-    return {"ok": True, "message": "If that email is on file, we've sent a sign-in link."}
-
-@api_router.post("/student/auth/verify")
-async def student_verify_link(body: StudentMagicLinkVerify, response: Response):
-    rec = await db.student_magic_links.find_one({"token": body.token})
+@api_router.post("/student/auth/accept-invite")
+async def student_accept_invite(body: StudentAcceptInviteRequest, response: Response):
+    """Redeems a one-time invite link sent via /students/{sid}/send-portal-invite.
+    Logs the student in immediately (same as clicking through any other
+    single-use auth link) and tells the frontend whether they still need to
+    set a password — true the first time, false on a re-sent invite after
+    they already have one."""
+    rec = await db.student_invites.find_one({"token": body.token})
     if not rec:
-        raise HTTPException(status_code=400, detail="Invalid or expired link")
+        raise HTTPException(status_code=400, detail="Invalid or expired invite link")
     if rec.get("used"):
-        raise HTTPException(status_code=400, detail="This link has already been used")
+        raise HTTPException(status_code=400, detail="This invite link has already been used")
     expires_at = rec.get("expires_at")
     if expires_at and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if not expires_at or expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=400, detail="This link has expired")
+        raise HTTPException(status_code=400, detail="This invite link has expired — ask your teacher to resend it")
     student = await db.students.find_one({
         "_id": ObjectId(rec["student_id"]), "owner_id": rec["owner_id"],
     })
     if not student or student.get("is_active") is False:
         raise HTTPException(status_code=400, detail="Student account not found")
-    await db.student_magic_links.update_one(
+    await db.student_invites.update_one(
         {"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}}
     )
     sid = str(student["_id"])
     access = create_student_access_token(sid, rec["owner_id"])
     refresh = create_student_refresh_token(sid, rec["owner_id"])
     set_student_auth_cookies(response, access, refresh)
-    return {"id": sid, "name": student.get("name"), "token": access}
+    return {
+        "id": sid, "name": student.get("name"), "token": access,
+        "must_set_password": not bool(student.get("password_hash")),
+    }
+
+@api_router.post("/student/auth/set-password")
+async def student_set_password(body: StudentSetPasswordRequest, student: dict = Depends(get_current_student)):
+    if len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    await db.students.update_one(
+        {"_id": ObjectId(student["_id"])}, {"$set": {"password_hash": hash_password(body.password)}}
+    )
+    return {"ok": True}
+
+@api_router.post("/student/auth/login")
+async def student_login(body: StudentLoginRequest, response: Response):
+    email = body.email.lower().strip()
+    async for s in db.students.find({"email": email, "is_active": {"$ne": False}}):
+        if s.get("password_hash") and verify_password(body.password, s["password_hash"]):
+            sid = str(s["_id"])
+            access = create_student_access_token(sid, s["owner_id"])
+            refresh = create_student_refresh_token(sid, s["owner_id"])
+            set_student_auth_cookies(response, access, refresh)
+            return {"id": sid, "name": s.get("name"), "token": access}
+    raise HTTPException(status_code=401, detail="Invalid email or password")
 
 @api_router.post("/student/auth/refresh")
 async def student_refresh(request: Request, response: Response):
@@ -2068,6 +2116,7 @@ async def student_me(student: dict = Depends(get_current_student)):
         "name": student.get("name"),
         "email": student.get("email"),
         "level": student.get("level"),
+        "has_password": student.get("_has_password", False),
         "studio_name": (owner or {}).get("studio_name"),
         "teacher_name": (owner or {}).get("teacher_name") or (owner or {}).get("name"),
         "contact_email": (owner or {}).get("contact_email") or (owner or {}).get("email"),
@@ -3138,9 +3187,10 @@ async def on_startup():
     await db.tour_files.create_index("tour_id")
 
     # Student portal
-    await db.student_magic_links.create_index("token", unique=True)
-    await db.student_magic_links.create_index("expires_at", expireAfterSeconds=0)
-    await db.student_magic_links.create_index([("email", 1), ("created_at", -1)])
+    await db.student_invites.create_index("token", unique=True)
+    await db.student_invites.create_index("expires_at", expireAfterSeconds=0)
+    await db.student_invites.create_index([("student_id", 1), ("used", 1)])
+    await db.password_reset_tokens.create_index([("student_id", 1)], sparse=True)
     await db.schedule_change_requests.create_index([("owner_id", 1), ("status", 1)])
     await db.schedule_change_requests.create_index([("student_id", 1), ("created_at", -1)])
     await db.schedule_skips.create_index([("block_id", 1), ("occurs_on", 1), ("student_id", 1)], unique=True)

@@ -1,6 +1,10 @@
 """
 Backend tests for the student portal:
-  - Magic-link request/verify auth, and that it's isolated from teacher auth
+  - Invite-based onboarding (teacher sends invite -> auto-login -> forced
+    password set) and password login on return visits, isolated from teacher
+    auth
+  - Forgot/reset-password shared with the teacher flow, generalized to
+    students
   - /api/student/schedule never reveals another student's block
   - 24h notice cutoff on change requests
   - Reschedule requests that clash with an existing class auto-deny without
@@ -9,7 +13,6 @@ Backend tests for the student portal:
   - Payment proof upload + teacher review flow
 """
 import os
-import time
 import requests
 import pytest
 from pymongo import MongoClient
@@ -90,53 +93,100 @@ def other_block(session, other_student):
     session.delete(f"{API}/schedule/{b['id']}", timeout=10)
 
 
-def _login_as_student(db, student_email):
-    """Request + consume a magic link, reading the token straight from Mongo
-    since no email transport is configured in the test environment."""
-    r = requests.post(f"{API}/student/auth/request-link", json={"email": student_email}, timeout=15)
+STUDENT_PASSWORD = "TestStudent123"
+
+
+def _latest_invite_token(db, student_id):
+    rec = db.student_invites.find_one({"student_id": student_id}, sort=[("created_at", -1)])
+    assert rec, "invite record not found"
+    return rec["token"]
+
+
+def _onboard_student(session, db, student, password=STUDENT_PASSWORD):
+    """Full first-time flow: teacher sends an invite, the student accepts it
+    (auto-login) and is forced to set a password. Returns an authenticated
+    requests.Session plus the accept-invite response body."""
+    r = session.post(f"{API}/students/{student['id']}/send-portal-invite", json={"channels": ["email"]}, timeout=15)
     assert r.status_code == 200, r.text
-    rec = db.student_magic_links.find_one({"email": student_email}, sort=[("created_at", -1)])
-    assert rec, "magic link record not found"
+    token = _latest_invite_token(db, student["id"])
+
     s = requests.Session()
-    r = s.post(f"{API}/student/auth/verify", json={"token": rec["token"]}, timeout=15)
+    r = s.post(f"{API}/student/auth/accept-invite", json={"token": token}, timeout=15)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    s.headers.update({"Authorization": f"Bearer {body['token']}"})
+
+    assert body["must_set_password"] is True
+    r2 = s.post(f"{API}/student/auth/set-password", json={"password": password}, timeout=15)
+    assert r2.status_code == 200, r2.text
+    return s, body
+
+
+def _login_as_student(email, password=STUDENT_PASSWORD):
+    s = requests.Session()
+    r = s.post(f"{API}/student/auth/login", json={"email": email, "password": password}, timeout=15)
     assert r.status_code == 200, r.text
     s.headers.update({"Authorization": f"Bearer {r.json()['token']}"})
     return s
 
 
 @pytest.fixture(scope="module")
-def student_session(db, student, block):
-    return _login_as_student(db, student["email"])
+def student_session(session, db, student, block):
+    s, _ = _onboard_student(session, db, student)
+    return s
 
 
 @pytest.fixture(scope="module")
-def other_student_session(db, other_student, other_block):
-    return _login_as_student(db, other_student["email"])
+def other_student_session(session, db, other_student, other_block):
+    s, _ = _onboard_student(session, db, other_student)
+    return s
 
 
 class TestStudentAuth:
-    def test_request_link_always_generic(self, student):
-        r = requests.post(f"{API}/student/auth/request-link", json={"email": "nobody-abcxyz@example.com"}, timeout=15)
-        assert r.status_code == 200
-        assert "sign-in link" in r.json().get("message", "")
-
-    def test_verify_rejects_bad_token(self):
-        r = requests.post(f"{API}/student/auth/verify", json={"token": "not-a-real-token"}, timeout=15)
+    def test_accept_invite_rejects_bad_token(self):
+        r = requests.post(f"{API}/student/auth/accept-invite", json={"token": "not-a-real-token"}, timeout=15)
         assert r.status_code == 400
 
-    def test_verify_token_is_single_use(self, db, student):
-        r = requests.post(f"{API}/student/auth/request-link", json={"email": student["email"]}, timeout=15)
-        assert r.status_code == 200
-        rec = db.student_magic_links.find_one({"email": student["email"]}, sort=[("created_at", -1)])
-        r1 = requests.post(f"{API}/student/auth/verify", json={"token": rec["token"]}, timeout=15)
-        assert r1.status_code == 200
-        r2 = requests.post(f"{API}/student/auth/verify", json={"token": rec["token"]}, timeout=15)
+    def test_invite_token_is_single_use_and_forces_password(self, session, db, other_student):
+        # Uses a throwaway student so this doesn't consume/re-onboard the
+        # shared `student` fixture other tests depend on.
+        r = session.post(f"{API}/students/{other_student['id']}/send-portal-invite",
+                          json={"channels": ["email"]}, timeout=15)
+        assert r.status_code == 200, r.text
+        token = _latest_invite_token(db, other_student["id"])
+
+        r1 = requests.post(f"{API}/student/auth/accept-invite", json={"token": token}, timeout=15)
+        assert r1.status_code == 200, r1.text
+        assert r1.json()["must_set_password"] is True
+
+        r2 = requests.post(f"{API}/student/auth/accept-invite", json={"token": token}, timeout=15)
         assert r2.status_code == 400
+
+    def test_resending_invite_supersedes_the_previous_one(self, session, db, other_student):
+        session.post(f"{API}/students/{other_student['id']}/send-portal-invite",
+                      json={"channels": ["email"]}, timeout=15)
+        old_token = _latest_invite_token(db, other_student["id"])
+        session.post(f"{API}/students/{other_student['id']}/send-portal-invite",
+                      json={"channels": ["email"]}, timeout=15)
+        r = requests.post(f"{API}/student/auth/accept-invite", json={"token": old_token}, timeout=15)
+        assert r.status_code == 400
 
     def test_student_me(self, student_session, student):
         r = student_session.get(f"{API}/student/me", timeout=10)
         assert r.status_code == 200
         assert r.json()["name"] == student["name"]
+        assert r.json()["has_password"] is True
+
+    def test_password_login_works_on_return_visit(self, student_session, student):
+        s = _login_as_student(student["email"])
+        r = s.get(f"{API}/student/me", timeout=10)
+        assert r.status_code == 200
+        assert r.json()["name"] == student["name"]
+
+    def test_password_login_rejects_wrong_password(self, student_session, student):
+        r = requests.post(f"{API}/student/auth/login",
+                           json={"email": student["email"], "password": "wrong-password"}, timeout=15)
+        assert r.status_code == 401
 
     def test_student_token_rejected_on_teacher_routes(self, student_session):
         r = student_session.get(f"{API}/students", timeout=10)
@@ -145,6 +195,42 @@ class TestStudentAuth:
     def test_teacher_token_rejected_on_student_routes(self, session):
         r = session.get(f"{API}/student/me", timeout=10)
         assert r.status_code == 401
+
+
+class TestStudentPasswordReset:
+    def test_forgot_password_is_generic_for_unknown_email(self):
+        r = requests.post(f"{API}/auth/forgot-password", json={"email": "nobody-abcxyz@example.com"}, timeout=15)
+        assert r.status_code == 200
+
+    def test_forgot_and_reset_password_for_student(self, student_session, db, student):
+        r = requests.post(f"{API}/auth/forgot-password", json={"email": student["email"]}, timeout=15)
+        assert r.status_code == 200
+        rec = db.password_reset_tokens.find_one(
+            {"email": student["email"], "account_type": "student"}, sort=[("created_at", -1)],
+        )
+        assert rec, "student password reset token not found"
+
+        new_password = "NewStudentPass456"
+        r2 = requests.post(f"{API}/auth/reset-password",
+                            json={"token": rec["token"], "new_password": new_password}, timeout=15)
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["account_type"] == "student"
+
+        # Old password no longer works, new one does.
+        r3 = requests.post(f"{API}/student/auth/login",
+                            json={"email": student["email"], "password": STUDENT_PASSWORD}, timeout=15)
+        assert r3.status_code == 401
+        s = _login_as_student(student["email"], password=new_password)
+        assert s.get(f"{API}/student/me", timeout=10).status_code == 200
+
+        # Restore the standard test password so other fixtures/tests keep
+        # working — the token above is already spent, so this needs a fresh one.
+        requests.post(f"{API}/auth/forgot-password", json={"email": student["email"]}, timeout=15)
+        restore_rec = db.password_reset_tokens.find_one(
+            {"email": student["email"], "account_type": "student"}, sort=[("created_at", -1)],
+        )
+        requests.post(f"{API}/auth/reset-password",
+                       json={"token": restore_rec["token"], "new_password": STUDENT_PASSWORD}, timeout=15)
 
 
 class TestStudentSchedule:
@@ -218,22 +304,20 @@ class TestChangeRequests:
         sched = student_session.get(f"{API}/student/schedule", timeout=10).json()
         assert any(b["day_of_week"] == 2 and b["start_time"] == "08:00" for b in sched)
 
-    def test_permanent_cancel_removes_from_recurring_block(self, session, student):
+    def test_permanent_cancel_removes_from_recurring_block(self, session, student, student_session):
+        # `student_session` isn't used directly here but ensures `student` has
+        # already been onboarded (has a password) before we log in again below.
         b = _far_future_block(session, [student["id"]], day_of_week=4, start_time="10:00", end_time="11:00")
-        db_client = MongoClient(MONGO_URL)
-        try:
-            student_session2 = _login_as_student(db_client[DB_NAME], student["email"])
-            r = student_session2.post(f"{API}/student/change-requests", json={
-                "block_id": b["id"], "type": "cancel", "scope": "permanent", "reason": "stopping this slot",
-            }, timeout=10)
-            assert r.status_code == 200, r.text
-            req_id = r.json()["id"]
-            r2 = session.post(f"{API}/change-requests/{req_id}/approve", timeout=10)
-            assert r2.status_code == 200, r2.text
-            r3 = session.get(f"{API}/schedule", timeout=10)
-            assert not any(x["id"] == b["id"] for x in r3.json())
-        finally:
-            db_client.close()
+        student_session2 = _login_as_student(student["email"])
+        r = student_session2.post(f"{API}/student/change-requests", json={
+            "block_id": b["id"], "type": "cancel", "scope": "permanent", "reason": "stopping this slot",
+        }, timeout=10)
+        assert r.status_code == 200, r.text
+        req_id = r.json()["id"]
+        r2 = session.post(f"{API}/change-requests/{req_id}/approve", timeout=10)
+        assert r2.status_code == 200, r2.text
+        r3 = session.get(f"{API}/schedule", timeout=10)
+        assert not any(x["id"] == b["id"] for x in r3.json())
 
 
 class TestPaymentProofs:

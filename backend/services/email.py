@@ -169,42 +169,6 @@ async def mark_invoice_sent(invoice_id: str, to_email: str):
     )
 
 
-async def send_student_magic_link_email(to_email: str, name: str, teacher_name: str, magic_link: str):
-    key = _email_key()
-    if not key:
-        logger.warning(f"Student portal login requested but no email key set. Link: {magic_link}")
-        return
-    from_name = _from_name()
-    html = f"""
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
-  <tr><td align="center">
-    <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
-      <tr><td>
-        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">Student portal</div>
-        <div style="font-size:22px;color:#d48464;font-weight:700;margin-bottom:20px">{teacher_name or from_name}</div>
-        <div style="font-size:15px;color:#2c2926;line-height:1.5">
-          Hi {name or "there"},<br><br>
-          Click below to sign in to your student portal. This link expires in 15 minutes and can only be used once.
-        </div>
-        <div style="margin:24px 0"><a href="{magic_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px">Sign in</a></div>
-        <div style="font-size:12px;color:#a89886">If you didn't request this, you can safely ignore this email.</div>
-      </td></tr>
-    </table>
-  </td></tr>
-</table>
-""".strip()
-    payload = {
-        "to": [to_email],
-        "subject": f"Sign in to your {teacher_name or from_name} student portal",
-        "html": html,
-        "from_name": from_name,
-    }
-    try:
-        await dispatch_email(payload)
-    except Exception as e:
-        logger.error(f"Student magic-link email failed: {e}")
-
-
 _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
@@ -274,10 +238,10 @@ async def send_change_request_email(to_email: str, student_name: str, req: dict,
         logger.error(f"Change request notification email failed: {e}")
 
 
-async def send_student_portal_invite_email(to_email: str, name: str, teacher_name: str, login_link: str):
+async def send_student_invite_email(to_email: str, name: str, teacher_name: str, invite_link: str):
     key = _email_key()
     if not key:
-        logger.warning(f"Student portal invite requested but no email key set. Link: {login_link}")
+        logger.warning(f"Student portal invite requested but no email key set. Link: {invite_link}")
         return
     from_name = _from_name()
     html = f"""
@@ -291,9 +255,11 @@ async def send_student_portal_invite_email(to_email: str, name: str, teacher_nam
           Hi {name or "there"},<br><br>
           {teacher_name or from_name} has set up a student portal where you can check your class schedule,
           see your dues, track your progress, keep your own notes, and request a change to a class
-          (at least 24 hours ahead). No password needed — just enter your email and we'll send you a sign-in link.
+          (at least 24 hours ahead). Click below to sign in and set up your password — this link works once
+          and expires in 7 days.
         </div>
-        <div style="margin:24px 0"><a href="{login_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px">Open student portal</a></div>
+        <div style="margin:24px 0"><a href="{invite_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px">Set up my account</a></div>
+        <div style="font-size:12px;color:#a89886">After this, you'll sign in with your email and password.</div>
       </td></tr>
     </table>
   </td></tr>

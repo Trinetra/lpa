@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useStudentAuth } from "@/context/StudentAuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { studentApi } from "@/lib/api";
+import InstallAppPrompt from "@/components/student/InstallAppPrompt";
 import {
   CalendarClock,
   Wallet,
@@ -65,7 +66,8 @@ export default function StudentPortalLayout() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto pt-6">
+        <div className="mt-auto pt-6 space-y-3">
+          <InstallAppPrompt />
           <button
             data-testid="portal-theme-toggle-btn"
             onClick={toggle}

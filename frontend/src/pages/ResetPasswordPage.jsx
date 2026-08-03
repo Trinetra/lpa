@@ -13,6 +13,7 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [done, setDone] = useState(false);
+  const [destination, setDestination] = useState("/login");
 
   const submit = async (e) => {
     e.preventDefault();
@@ -21,9 +22,11 @@ export default function ResetPasswordPage() {
     if (pw1 !== pw2) return setErr("Passwords do not match.");
     setLoading(true);
     try {
-      await api.post("/auth/reset-password", { token, new_password: pw1 });
+      const { data } = await api.post("/auth/reset-password", { token, new_password: pw1 });
+      const dest = data.account_type === "student" ? "/portal/login" : "/login";
+      setDestination(dest);
       setDone(true);
-      setTimeout(() => nav("/login", { replace: true }), 2500);
+      setTimeout(() => nav(dest, { replace: true }), 2500);
     } catch (e2) {
       setErr(e2?.response?.data?.detail || "Reset failed.");
     } finally {
@@ -48,6 +51,9 @@ export default function ResetPasswordPage() {
             <CheckCircle2 size={40} className="mx-auto mb-3" style={{ color: "var(--success)" }} />
             <div className="font-serif-display text-xl mb-2">Password updated</div>
             <div className="text-sm" style={{ color: "var(--text-muted)" }}>Redirecting to sign in…</div>
+            <Link to={destination} className="text-xs hover:underline mt-3 inline-block" style={{ color: "var(--text-muted)" }}>
+              Not redirected? Click here
+            </Link>
           </div>
         ) : (
           <form onSubmit={submit}>

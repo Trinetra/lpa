@@ -30,15 +30,24 @@ export function StudentAuthProvider({ children }) {
     };
   }, []);
 
-  const requestLink = async (email) => {
-    const { data } = await studentApi.post("/student/auth/request-link", { email });
+  const login = async (email, password) => {
+    const { data } = await studentApi.post("/student/auth/login", { email, password });
+    if (data.token) setStoredStudentToken(data.token);
+    // A successful password login guarantees a password_hash already exists.
+    setStudent({ id: data.id, name: data.name, has_password: true });
     return data;
   };
 
-  const verify = async (token) => {
-    const { data } = await studentApi.post("/student/auth/verify", { token });
+  const acceptInvite = async (token) => {
+    const { data } = await studentApi.post("/student/auth/accept-invite", { token });
     if (data.token) setStoredStudentToken(data.token);
-    setStudent({ id: data.id, name: data.name });
+    setStudent({ id: data.id, name: data.name, has_password: !data.must_set_password });
+    return data;
+  };
+
+  const setPassword = async (password) => {
+    const { data } = await studentApi.post("/student/auth/set-password", { password });
+    setStudent((s) => (s ? { ...s, has_password: true } : s));
     return data;
   };
 
@@ -53,7 +62,7 @@ export function StudentAuthProvider({ children }) {
   };
 
   return (
-    <StudentAuthContext.Provider value={{ student, setStudent, requestLink, verify, logout }}>
+    <StudentAuthContext.Provider value={{ student, setStudent, login, acceptInvite, setPassword, logout }}>
       {children}
     </StudentAuthContext.Provider>
   );

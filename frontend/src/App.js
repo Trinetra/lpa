@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
@@ -24,7 +24,8 @@ import TourDetailPage from "@/pages/TourDetailPage";
 import SharedTourPage from "@/pages/SharedTourPage";
 import PortalActivityPage from "@/pages/PortalActivityPage";
 import StudentLoginPage from "@/pages/student/StudentLoginPage";
-import StudentVerifyPage from "@/pages/student/StudentVerifyPage";
+import StudentAcceptInvitePage from "@/pages/student/StudentAcceptInvitePage";
+import StudentSetPasswordPage from "@/pages/student/StudentSetPasswordPage";
 import StudentSchedulePage from "@/pages/student/StudentSchedulePage";
 import StudentDuesPage from "@/pages/student/StudentDuesPage";
 import StudentProgressPage from "@/pages/student/StudentProgressPage";
@@ -44,7 +45,7 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
-function StudentProtectedRoute({ children }) {
+function StudentProtectedRoute({ children, requirePassword = false }) {
   const { student } = useStudentAuth();
   if (student === null) {
     return (
@@ -54,20 +55,50 @@ function StudentProtectedRoute({ children }) {
     );
   }
   if (student === false) return <Navigate to="/portal/login" replace />;
+  // Freshly-accepted invites land here without a password yet — bounce them
+  // to the forced set-password step before they can see anything else.
+  if (requirePassword && student.has_password === false) {
+    return <Navigate to="/portal/set-password" replace />;
+  }
   return children;
+}
+
+// Swaps the site-wide web manifest for a student-specific one (different
+// start_url/name) while anywhere under /portal, so "Add to Home Screen"
+// installs a shortcut that opens straight into the portal instead of the
+// teacher dashboard — reverted on unmount so the teacher app's own manifest
+// comes back for every other route.
+function useStudentManifest() {
+  useEffect(() => {
+    const link = document.querySelector('link[rel="manifest"]');
+    const original = link?.getAttribute("href");
+    if (link) link.setAttribute("href", "/manifest-student.json");
+    return () => {
+      if (link && original) link.setAttribute("href", original);
+    };
+  }, []);
 }
 
 // Mounted as its own provider scope so the student's session token/context
 // never mixes with the teacher's, even if both are open in one browser.
 function StudentPortalRoutes() {
+  useStudentManifest();
   return (
     <StudentAuthProvider>
       <Routes>
         <Route path="login" element={<StudentLoginPage />} />
-        <Route path="verify" element={<StudentVerifyPage />} />
+        <Route path="accept-invite" element={<StudentAcceptInvitePage />} />
         <Route
+          path="set-password"
           element={
             <StudentProtectedRoute>
+              <StudentSetPasswordPage />
+            </StudentProtectedRoute>
+          }
+        />
+        <Route
+          element={
+            <StudentProtectedRoute requirePassword>
               <StudentPortalLayout />
             </StudentProtectedRoute>
           }
