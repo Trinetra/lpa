@@ -247,6 +247,45 @@ class TestStudentSchedule:
             assert "student_ids" not in b
 
 
+class TestStudentProgress:
+    def test_progress_includes_teacher_notes_and_topics(self, session, student, student_session):
+        r = session.post(f"{API}/classes", json={
+            "student_id": student["id"], "hours": 1, "class_date": "2025-06-01",
+            "notes": "Great improvement on the adavu sequence",
+            "topics": ["Alarippu"],
+        }, timeout=10)
+        assert r.status_code in (200, 201), r.text
+        class_id = r.json()["id"]
+        try:
+            r2 = student_session.get(f"{API}/student/progress", timeout=10)
+            assert r2.status_code == 200
+            entry = next((c for c in r2.json() if c["id"] == class_id), None)
+            assert entry, "class not found in student progress"
+            assert entry["notes"] == "Great improvement on the adavu sequence"
+            assert entry["topics"] == ["Alarippu"]
+        finally:
+            session.delete(f"{API}/classes/{class_id}", timeout=10)
+
+    def test_progress_monthly_counts_this_months_class(self, session, student, student_session):
+        import datetime
+        today = datetime.date.today().isoformat()
+        r = session.post(f"{API}/classes", json={
+            "student_id": student["id"], "hours": 1.5, "class_date": today,
+        }, timeout=10)
+        assert r.status_code in (200, 201), r.text
+        class_id = r.json()["id"]
+        try:
+            r2 = student_session.get(f"{API}/student/progress-monthly", params={"months": 3}, timeout=10)
+            assert r2.status_code == 200, r2.text
+            body = r2.json()
+            assert len(body["series"]) == 3
+            current_month = body["series"][-1]
+            assert current_month["classes"] >= 1
+            assert current_month["hours"] >= 1.5
+        finally:
+            session.delete(f"{API}/classes/{class_id}", timeout=10)
+
+
 class TestChangeRequests:
     def test_rejects_within_24h(self, student_session, db, block):
         # Force the block's next occurrence inside the 24h window by pointing

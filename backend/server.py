@@ -2168,8 +2168,6 @@ async def student_dues(student: dict = Depends(get_current_student)):
 
 @api_router.get("/student/progress")
 async def student_progress(student: dict = Depends(get_current_student)):
-    # Only date/hours/topics — the teacher's `notes` on a class log are
-    # private commentary, never exposed here.
     cur = db.classes.find({
         "owner_id": student["owner_id"], "student_id": student["_id"],
     }).sort("class_date", -1)
@@ -2180,8 +2178,40 @@ async def student_progress(student: dict = Depends(get_current_student)):
             "class_date": c.get("class_date"),
             "hours": c.get("hours"),
             "topics": c.get("topics", []),
+            "notes": c.get("notes"),
         })
     return out
+
+@api_router.get("/student/progress-monthly")
+async def student_progress_monthly(months: int = 6, student: dict = Depends(get_current_student)):
+    # Same month-bucketing approach as /stats/monthly, scoped to this student.
+    now = datetime.now(timezone.utc).replace(day=1)
+    month_keys = []
+    y, m = now.year, now.month
+    for _ in range(months):
+        month_keys.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    month_keys.reverse()
+
+    classes_count = {k: 0 for k in month_keys}
+    hours = {k: 0.0 for k in month_keys}
+    async for c in db.classes.find({"owner_id": student["owner_id"], "student_id": student["_id"]}):
+        d = c.get("class_date") or ""
+        key = d[:7] if len(d) >= 7 else None
+        if key in classes_count:
+            classes_count[key] += 1
+            hours[key] += float(c.get("hours", 0))
+
+    return {
+        "months": month_keys,
+        "series": [
+            {"month": k, "classes": classes_count[k], "hours": round(hours[k], 2)}
+            for k in month_keys
+        ],
+    }
 
 # --------------- Student notes (private — never exposed to the teacher) -----------------
 @api_router.get("/student/notes")
