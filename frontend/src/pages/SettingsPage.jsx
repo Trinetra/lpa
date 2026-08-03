@@ -2,8 +2,25 @@ import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
-import { KeyRound, Upload, Save, Loader2, CalendarClock, Link2, Unlink, CheckCircle2, HardDriveDownload } from "lucide-react";
+import PushNotificationToggle from "@/components/PushNotificationToggle";
+import { KeyRound, Upload, Save, Loader2, CalendarClock, Link2, Unlink, CheckCircle2, HardDriveDownload, BellRing } from "lucide-react";
 import { toast } from "sonner";
+
+function NotificationsCard() {
+  return (
+    <div data-testid="notifications-card" className="surface p-6">
+      <div className="flex items-center gap-2 mb-1">
+        <BellRing size={14} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
+        <div className="uppercase-label">Notifications</div>
+      </div>
+      <h2 className="font-serif-display text-2xl mb-2">Push notifications</h2>
+      <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
+        Get notified on this device the moment a student submits a cancellation or reschedule request.
+      </p>
+      <PushNotificationToggle apiClient={api} subscribeUrl="/push/subscribe" unsubscribeUrl="/push/unsubscribe" testidPrefix="settings-push" />
+    </div>
+  );
+}
 
 function BackupCard() {
   const [status, setStatus] = useState(null);
@@ -513,6 +530,7 @@ export default function SettingsPage() {
         </p>
       </header>
       {profile && <StudioProfileCard profile={profile} onSaved={setProfile} />}
+      <NotificationsCard />
       <CalendarConnectCard />
       <BackupCard />
       <ChangePasswordCard />

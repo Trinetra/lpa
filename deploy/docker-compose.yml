@@ -68,6 +68,22 @@ services:
       ZOOM_ACCOUNT_ID: "${ZOOM_ACCOUNT_ID:-}"
       ZOOM_CLIENT_ID: "${ZOOM_CLIENT_ID:-}"
       ZOOM_CLIENT_SECRET: "${ZOOM_CLIENT_SECRET:-}"
+      # Web Push (optional — change-request notifications still work via
+      # email without it). Generate a key pair once with (needs `pywebpush`
+      # installed — same venv as backend/requirements.txt):
+      #   python3 -c "
+      #   from py_vapid import Vapid; from py_vapid.utils import b64urlencode
+      #   from cryptography.hazmat.primitives import serialization
+      #   v = Vapid(); v.generate_keys()
+      #   priv = v.private_key.private_numbers().private_value.to_bytes(32, 'big')
+      #   pub = v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+      #   print('VAPID_PUBLIC_KEY=', b64urlencode(pub)); print('VAPID_PRIVATE_KEY=', b64urlencode(priv))"
+      # VAPID_PUBLIC_KEY also needs to be set as REACT_APP_VAPID_PUBLIC_KEY
+      # in the frontend's Netlify build environment (same public key, never
+      # the private one).
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
+      VAPID_SUBJECT: "${VAPID_SUBJECT:-}"
     volumes:
       - ./data/uploads:/data/uploads
     ports:

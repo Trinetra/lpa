@@ -37,6 +37,7 @@ from services import backup as backup_service
 from services import reminders as reminders_service
 from services import zoom as zoom_service
 from services import fx as fx_service
+from services import push as push_service
 from services import geocoding as geocoding_service
 
 # --------------- Config -----------------
@@ -870,7 +871,9 @@ async def send_student_portal_invite(sid: str, body: StudentInviteRequest, user:
 
     app_url = (os.environ.get("APP_URL") or "").rstrip("/")
     invite_link = f"{app_url}/portal/accept-invite?token={token}"
-    teacher_name = user.get("teacher_name") or user.get("name") or "your teacher"
+    # The studio brand, not the teacher's personal name — matches how the
+    # class-reminder email already picks its "brand" (services/reminders.py).
+    teacher_name = user.get("studio_name") or user.get("teacher_name") or user.get("name") or "your teacher"
 
     result = {}
 
@@ -2292,6 +2295,7 @@ async def create_change_request(body: ChangeRequestCreate, student: dict = Depen
     res = await db.schedule_change_requests.insert_one(doc)
     doc["_id"] = res.inserted_id
 
+    kind = "cancel" if doc["type"] == "cancel" else "reschedule"
     if doc["status"] == "pending":
         owner = await db.users.find_one({"_id": ObjectId(student["owner_id"])})
         teacher_email = (owner or {}).get("contact_email") or (owner or {}).get("email")
@@ -2301,6 +2305,19 @@ async def create_change_request(body: ChangeRequestCreate, student: dict = Depen
             await email_service.send_change_request_email(
                 teacher_email, student.get("name") or "A student", doc, review_link,
             )
+        await push_service.send_push(
+            "user", student["owner_id"],
+            "New request", f"{student.get('name') or 'A student'} asked to {kind} a class",
+            "/requests",
+        )
+    else:
+        # Auto-denied — nothing for the teacher to do, but the student should
+        # still hear back immediately rather than only seeing it in the app.
+        await push_service.send_push(
+            "student", student["_id"],
+            "Request not available", doc["denial_reason"] or "That time isn't available",
+            "/portal/schedule",
+        )
 
     return ser_change_request(doc)
 
@@ -2462,6 +2479,11 @@ async def approve_change_request(request_id: str, user: dict = Depends(get_curre
         {"_id": req["_id"]},
         {"$set": {"status": "approved", "decided_at": datetime.now(timezone.utc).isoformat()}},
     )
+    kind = "cancel" if req["type"] == "cancel" else "reschedule"
+    await push_service.send_push(
+        "student", req["student_id"],
+        "Request approved", f"Your {kind} request was approved", "/portal/schedule",
+    )
     updated = await db.schedule_change_requests.find_one({"_id": req["_id"]})
     return ser_change_request(updated)
 
@@ -2477,6 +2499,9 @@ async def deny_change_request(request_id: str, body: ChangeRequestDeny, user: di
         {"$set": {"status": "denied", "denial_reason": body.reason,
                   "decided_at": datetime.now(timezone.utc).isoformat()}},
     )
+    kind = "cancel" if req["type"] == "cancel" else "reschedule"
+    push_body = f"Your {kind} request was denied" + (f": {body.reason}" if body.reason else "")
+    await push_service.send_push("student", req["student_id"], "Request denied", push_body, "/portal/schedule")
     updated = await db.schedule_change_requests.find_one({"_id": req["_id"]})
     return ser_change_request(updated)
 
@@ -2512,6 +2537,51 @@ async def get_payment_proof_file(proof_id: str, user: dict = Depends(get_current
         raise HTTPException(status_code=404, detail="Not found")
     data, ct = get_object(rec["storage_path"])
     return Response(content=data, media_type=rec.get("content_type", ct))
+
+# --------------- Push notifications (change-request events) -----------------
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+class PushSubscribeRequest(BaseModel):
+    endpoint: str
+    keys: PushSubscriptionKeys
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+async def _save_push_subscription(owner_type: str, owner_id: str, body: PushSubscribeRequest):
+    await db.push_subscriptions.update_one(
+        {"endpoint": body.endpoint},
+        {"$set": {
+            "owner_type": owner_type,
+            "owner_id": owner_id,
+            "endpoint": body.endpoint,
+            "keys": body.keys.model_dump(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+
+@api_router.post("/push/subscribe")
+async def push_subscribe(body: PushSubscribeRequest, user: dict = Depends(get_current_user)):
+    await _save_push_subscription("user", user["_id"], body)
+    return {"ok": True}
+
+@api_router.post("/push/unsubscribe")
+async def push_unsubscribe(body: PushUnsubscribeRequest, user: dict = Depends(get_current_user)):
+    await db.push_subscriptions.delete_one({"endpoint": body.endpoint, "owner_type": "user", "owner_id": user["_id"]})
+    return {"ok": True}
+
+@api_router.post("/student/push/subscribe")
+async def student_push_subscribe(body: PushSubscribeRequest, student: dict = Depends(get_current_student)):
+    await _save_push_subscription("student", student["_id"], body)
+    return {"ok": True}
+
+@api_router.post("/student/push/unsubscribe")
+async def student_push_unsubscribe(body: PushUnsubscribeRequest, student: dict = Depends(get_current_student)):
+    await db.push_subscriptions.delete_one({"endpoint": body.endpoint, "owner_type": "student", "owner_id": student["_id"]})
+    return {"ok": True}
 
 # --------------- Google Calendar OAuth -----------------
 @api_router.get("/calendar/status")
@@ -3197,6 +3267,8 @@ async def on_startup():
     await db.student_notes.create_index([("student_id", 1), ("created_at", -1)])
     await db.payment_proofs.create_index([("owner_id", 1), ("status", 1)])
     await db.payment_proofs.create_index([("student_id", 1), ("uploaded_at", -1)])
+    await db.push_subscriptions.create_index("endpoint", unique=True)
+    await db.push_subscriptions.create_index([("owner_type", 1), ("owner_id", 1)])
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

@@ -4,6 +4,7 @@ import { useStudentAuth } from "@/context/StudentAuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { studentApi } from "@/lib/api";
 import InstallAppPrompt from "@/components/student/InstallAppPrompt";
+import PushNotificationToggle from "@/components/PushNotificationToggle";
 import {
   CalendarClock,
   Wallet,
@@ -68,6 +69,13 @@ export default function StudentPortalLayout() {
         </nav>
         <div className="mt-auto pt-6 space-y-3">
           <InstallAppPrompt />
+          <PushNotificationToggle
+            apiClient={studentApi}
+            subscribeUrl="/student/push/subscribe"
+            unsubscribeUrl="/student/push/unsubscribe"
+            testidPrefix="portal-push"
+            variant="nav"
+          />
           <button
             data-testid="portal-theme-toggle-btn"
             onClick={toggle}
