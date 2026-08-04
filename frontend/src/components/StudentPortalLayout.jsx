@@ -3,7 +3,6 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useStudentAuth } from "@/context/StudentAuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { studentApi } from "@/lib/api";
-import InstallAppPrompt from "@/components/student/InstallAppPrompt";
 import PushNotificationToggle from "@/components/PushNotificationToggle";
 import {
   CalendarClock,
@@ -11,6 +10,7 @@ import {
   BookOpenCheck,
   NotebookPen,
   Receipt,
+  Settings,
   Sun,
   Moon,
   LogOut,
@@ -37,6 +37,7 @@ export default function StudentPortalLayout() {
     { to: "/portal/progress", label: "Progress", icon: BookOpenCheck, tid: "portal-nav-progress" },
     { to: "/portal/notes", label: "Notes", icon: NotebookPen, tid: "portal-nav-notes" },
     { to: "/portal/payment-proof", label: "Payment proof", icon: Receipt, tid: "portal-nav-payment-proof" },
+    { to: "/portal/settings", label: "Settings", icon: Settings, tid: "portal-nav-settings" },
   ];
 
   return (
@@ -68,7 +69,6 @@ export default function StudentPortalLayout() {
           ))}
         </nav>
         <div className="mt-auto pt-6 space-y-3">
-          <InstallAppPrompt />
           <PushNotificationToggle
             apiClient={studentApi}
             subscribeUrl="/student/push/subscribe"

@@ -31,6 +31,7 @@ import StudentDuesPage from "@/pages/student/StudentDuesPage";
 import StudentProgressPage from "@/pages/student/StudentProgressPage";
 import StudentNotesPage from "@/pages/student/StudentNotesPage";
 import StudentPaymentProofPage from "@/pages/student/StudentPaymentProofPage";
+import StudentSettingsPage from "@/pages/student/StudentSettingsPage";
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -109,6 +110,7 @@ function StudentPortalRoutes() {
           <Route path="progress" element={<StudentProgressPage />} />
           <Route path="notes" element={<StudentNotesPage />} />
           <Route path="payment-proof" element={<StudentPaymentProofPage />} />
+          <Route path="settings" element={<StudentSettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="login" replace />} />
       </Routes>

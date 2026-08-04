@@ -131,6 +131,10 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
+class StudentChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
@@ -2068,6 +2072,19 @@ async def student_set_password(body: StudentSetPasswordRequest, student: dict = 
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     await db.students.update_one(
         {"_id": ObjectId(student["_id"])}, {"$set": {"password_hash": hash_password(body.password)}}
+    )
+    return {"ok": True}
+
+@api_router.post("/student/auth/change-password")
+async def student_change_password(body: StudentChangePasswordRequest, student: dict = Depends(get_current_student)):
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    full = await db.students.find_one({"_id": ObjectId(student["_id"])})
+    if not full or not full.get("password_hash") or not verify_password(body.current_password, full["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    await db.students.update_one(
+        {"_id": ObjectId(student["_id"])},
+        {"$set": {"password_hash": hash_password(body.new_password)}}
     )
     return {"ok": True}
 
