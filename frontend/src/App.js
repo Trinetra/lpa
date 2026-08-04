@@ -69,13 +69,25 @@ function StudentProtectedRoute({ children, requirePassword = false }) {
 // installs a shortcut that opens straight into the portal instead of the
 // teacher dashboard — reverted on unmount so the teacher app's own manifest
 // comes back for every other route.
+//
+// Also swaps apple-mobile-web-app-title: iOS reads that tag (and
+// apple-touch-icon) straight from the DOM at "Add to Home Screen" time
+// rather than fetching the manifest, so this needs its own swap — but
+// unlike the manifest fetch, there's no race here, since a student only
+// taps Share -> Add to Home Screen well after this effect has already run.
 function useStudentManifest() {
   useEffect(() => {
     const link = document.querySelector('link[rel="manifest"]');
-    const original = link?.getAttribute("href");
+    const originalHref = link?.getAttribute("href");
     if (link) link.setAttribute("href", "/manifest-student.json");
+
+    const titleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    const originalTitle = titleMeta?.getAttribute("content");
+    if (titleMeta) titleMeta.setAttribute("content", "Student Portal");
+
     return () => {
-      if (link && original) link.setAttribute("href", original);
+      if (link && originalHref) link.setAttribute("href", originalHref);
+      if (titleMeta && originalTitle) titleMeta.setAttribute("content", originalTitle);
     };
   }, []);
 }
