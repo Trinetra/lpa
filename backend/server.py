@@ -376,6 +376,7 @@ def ser_student(doc):
         "photo_path": doc.get("photo_path"),
         "is_active": doc.get("is_active", True),
         "created_at": doc.get("created_at"),
+        "portal_active": bool(doc.get("password_hash")),
     }
 
 def ser_class(doc):

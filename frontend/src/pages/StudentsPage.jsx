@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
-import { Plus, Trash2, Pencil, Upload, X, UserX, UserCheck } from "lucide-react";
+import { Plus, Trash2, Pencil, Upload, X, UserX, UserCheck, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
 
@@ -296,6 +296,17 @@ export default function StudentsPage() {
                         <span className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full shrink-0"
                           style={{ color: "var(--text-muted)", border: "1px solid var(--border)" }}>
                           Inactive
+                        </span>
+                      )}
+                      {s.portal_active && (
+                        <span
+                          data-testid={`student-portal-badge-${s.id}`}
+                          title="Logged in and set a portal password"
+                          className="flex items-center gap-1 text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full shrink-0"
+                          style={{ color: "var(--success)", border: "1px solid var(--success)" }}
+                        >
+                          <ShieldCheck size={10} strokeWidth={2} />
+                          Portal
                         </span>
                       )}
                     </div>
