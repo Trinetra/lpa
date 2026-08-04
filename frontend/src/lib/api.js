@@ -5,13 +5,13 @@ export const API = `${BACKEND_URL}/api`;
 const TOKEN_KEY = "kalpana_access_token";
 
 export function setStoredToken(token) {
-  if (token) sessionStorage.setItem(TOKEN_KEY, token);
-  else sessionStorage.removeItem(TOKEN_KEY);
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
 }
 
 export function getStoredToken() {
   try {
-    return sessionStorage.getItem(TOKEN_KEY);
+    return localStorage.getItem(TOKEN_KEY);
   } catch {
     return null;
   }
@@ -22,7 +22,7 @@ export const api = axios.create({
   withCredentials: true,
 });
 
-// Attach Bearer token from sessionStorage on every request (belt & suspenders
+// Attach Bearer token from localStorage on every request (belt & suspenders
 // alongside httpOnly cookies — needed when cookies are blocked in
 // iframe / third-party contexts).
 api.interceptors.request.use((config) => {
@@ -43,13 +43,13 @@ api.interceptors.request.use((config) => {
 const STUDENT_TOKEN_KEY = "kalpana_student_access_token";
 
 export function setStoredStudentToken(token) {
-  if (token) sessionStorage.setItem(STUDENT_TOKEN_KEY, token);
-  else sessionStorage.removeItem(STUDENT_TOKEN_KEY);
+  if (token) localStorage.setItem(STUDENT_TOKEN_KEY, token);
+  else localStorage.removeItem(STUDENT_TOKEN_KEY);
 }
 
 export function getStoredStudentToken() {
   try {
-    return sessionStorage.getItem(STUDENT_TOKEN_KEY);
+    return localStorage.getItem(STUDENT_TOKEN_KEY);
   } catch {
     return null;
   }
