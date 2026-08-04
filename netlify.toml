@@ -17,6 +17,14 @@
   status = 301
   force = true
 
+# The student portal's manifest link (see index.html) is relative, so it
+# resolves to /portal/manifest.json on any /portal/* page — rewrite that to
+# the actual student manifest file. Must come before the SPA catch-all below.
+[[redirects]]
+  from = "/portal/manifest.json"
+  to = "/manifest-student.json"
+  status = 200
+
 # Client-side routing — every unknown path serves index.html so React Router
 # handles it (login, reset-password, invoice/<token>, etc.).
 [[redirects]]

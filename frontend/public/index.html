@@ -6,7 +6,15 @@
         <meta name="theme-color" content="#7A1F2B" />
         <meta name="description" content="Pravaaha Center for Movement — track classes, bill students, get paid." />
         <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
-        <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+        <!-- Relative (not %PUBLIC_URL%-absolute) so it resolves against the
+             current page path: /portal/manifest.json under the student
+             portal, /manifest.json everywhere else. This lets Netlify choose
+             the right manifest file server-side before any JS runs, instead
+             of swapping the <link> client-side after mount — iOS reads the
+             manifest at "Add to Home Screen" time, which can race or outright
+             ignore a post-mount swap, so a client-side-only fix isn't
+             reliable here. -->
+        <link rel="manifest" href="manifest.json" />
 
         <!-- iOS "Add to Home Screen": Safari ignores most of the web manifest
              spec and needs its own tags to behave like a real installed app
