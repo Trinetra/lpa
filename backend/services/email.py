@@ -354,3 +354,54 @@ async def send_event_invite_email(to_email: str, name: str, event_name: str, tea
         "from_name": from_name,
     }
     await dispatch_email(payload)
+
+
+async def send_event_announcement_email(to_email: str, name: str, event_name: str, teacher_name: str,
+                                         event_link: str, start_date: Optional[str], time_str: Optional[str],
+                                         description: Optional[str] = None, image_event_id: Optional[str] = None):
+    """Invites a past CRM contact to register for a new/upcoming event —
+    distinct from send_event_invite_email, which confirms Zoom details to
+    someone who has already registered and been approved for a specific
+    event. This one just points at the public registration page, and
+    includes the event's own poster image + description since that's what
+    actually sells someone on attending."""
+    key = _email_key()
+    if not key:
+        logger.warning(f"Event announcement requested but no email key set. Event: {event_name}, Link: {event_link}")
+        return
+    from_name = _from_name()
+    when = " ".join(filter(None, [start_date, time_str])) or "soon"
+    image_html = ""
+    if image_event_id:
+        image_url = f"{_backend_url()}/api/events/{image_event_id}/image"
+        image_html = f'<img src="{image_url}" alt="{event_name}" width="456" style="width:100%;max-width:456px;border-radius:8px;display:block;margin-bottom:20px" />'
+    description_html = ""
+    if description:
+        description_html = f'<div style="font-size:14px;color:#2c2926;line-height:1.5;white-space:pre-wrap;margin-top:16px">{description}</div>'
+    html = f"""
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
+  <tr><td align="center">
+    <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
+      <tr><td>
+        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">New event</div>
+        <div style="font-size:22px;color:#d48464;font-weight:700;margin-bottom:20px">{event_name}</div>
+        {image_html}
+        <div style="font-size:15px;color:#2c2926;line-height:1.5">
+          Hi {name or "there"},<br><br>
+          {teacher_name or from_name} would love to have you at {event_name}, happening {when}.
+          Click below to register.
+        </div>
+        {description_html}
+        <div style="margin:24px 0"><a href="{event_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px">Register now</a></div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+""".strip()
+    payload = {
+        "to": [to_email],
+        "subject": f"You're invited: {event_name}",
+        "html": html,
+        "from_name": from_name,
+    }
+    await dispatch_email(payload)

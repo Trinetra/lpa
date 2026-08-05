@@ -273,6 +273,11 @@ RESERVED_SLUGS = {
     "portal", "requests", "event", "events", "crm",
 }
 
+# Public tour/event links live on the bare root domain, not the app's own
+# APP_URL (app.pravaahacfm.com) — see frontend's TourDetailPage/EventDetailPage
+# ROOT_DOMAIN constant, which this mirrors for server-built email links.
+PUBLIC_ROOT_DOMAIN = "pravaahacfm.com"
+
 class TourStopCreate(BaseModel):
     city: str
     venue: Optional[str] = None
@@ -415,6 +420,10 @@ class EventRegistrationApprove(BaseModel):
 
 class EventPushInviteRequest(BaseModel):
     registration_ids: Optional[List[str]] = None  # None => all approved-not-yet-invited
+
+class CrmBulkInviteRequest(BaseModel):
+    contact_ids: List[str]
+    event_id: str
 
 # --------------- Serializers -----------------
 def ser_student(doc):
@@ -3461,10 +3470,102 @@ async def get_event_registration_proof(event_id: str, reg_id: str, user: dict = 
         raise HTTPException(status_code=404, detail="File unavailable")
     return Response(content=data, media_type=ct or "application/octet-stream")
 
+def _age_from_dob(dob: Optional[str]) -> Optional[int]:
+    if not dob:
+        return None
+    try:
+        born = datetime.strptime(dob[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    today = datetime.now(timezone.utc).date()
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
 @api_router.get("/crm/contacts")
-async def list_crm_contacts(user: dict = Depends(get_current_user)):
-    cur = db.crm_contacts.find({"owner_id": user["_id"]}).sort("created_at", -1)
-    return [ser_crm_contact(d) async for d in cur]
+async def list_crm_contacts(
+    q: Optional[str] = None,
+    country: Optional[str] = None,
+    min_age: Optional[int] = None,
+    max_age: Optional[int] = None,
+    event_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Contact list enriched with derived, cross-registration fields —
+    events_participated, latest freetext experience, and age — since none of
+    those live on the crm_contacts record itself (a contact can register for
+    several events, each with its own experience text and status)."""
+    contacts = [d async for d in db.crm_contacts.find({"owner_id": user["_id"]})]
+    contact_ids = [str(c["_id"]) for c in contacts]
+
+    regs_by_contact: dict = {}
+    async for r in db.event_registrations.find({"owner_id": user["_id"], "crm_contact_id": {"$in": contact_ids}}):
+        regs_by_contact.setdefault(r["crm_contact_id"], []).append(r)
+
+    event_names = {}
+    if regs_by_contact:
+        all_event_ids = {r["event_id"] for regs in regs_by_contact.values() for r in regs}
+        async for ev in db.events.find({"_id": {"$in": [ObjectId(eid) for eid in all_event_ids]}}):
+            event_names[str(ev["_id"])] = ev.get("name")
+
+    out = []
+    for c in contacts:
+        cid = str(c["_id"])
+        regs = regs_by_contact.get(cid, [])
+        regs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+        item = ser_crm_contact(c)
+        item["age"] = _age_from_dob(c.get("dob"))
+        item["events_participated"] = [
+            {"event_id": r["event_id"], "event_name": event_names.get(r["event_id"]), "status": r.get("status")}
+            for r in regs
+        ]
+        item["latest_experience"] = next((r.get("experience") for r in regs if r.get("experience")), None)
+
+        if country and (c.get("country") or "").strip().lower() != country.strip().lower():
+            continue
+        if min_age is not None and (item["age"] is None or item["age"] < min_age):
+            continue
+        if max_age is not None and (item["age"] is None or item["age"] > max_age):
+            continue
+        if event_id and not any(r["event_id"] == event_id for r in regs):
+            continue
+        if q:
+            needle = q.strip().lower()
+            haystack = " ".join(filter(None, [
+                c.get("name"), c.get("email"), item["latest_experience"],
+            ])).lower()
+            if needle not in haystack:
+                continue
+
+        out.append(item)
+
+    out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return out
+
+@api_router.post("/crm/contacts/bulk-invite")
+async def crm_bulk_invite(body: CrmBulkInviteRequest, user: dict = Depends(get_current_user)):
+    event = await _get_owned_event(body.event_id, user["_id"])
+    if event.get("status") != "published":
+        raise HTTPException(status_code=400, detail="Publish the event before inviting contacts")
+    link = f"https://{PUBLIC_ROOT_DOMAIN}/{event['custom_slug']}" if event.get("custom_slug") \
+        else f"{os.environ.get('APP_URL', '').rstrip('/')}/event/{event['share_token']}"
+    owner = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    teacher_name = (owner or {}).get("teacher_name") or (owner or {}).get("name") if owner else None
+    sent, failed = [], []
+    for cid in body.contact_ids:
+        contact = await db.crm_contacts.find_one({"_id": ObjectId(cid), "owner_id": user["_id"]})
+        if not contact:
+            failed.append(cid)
+            continue
+        try:
+            await email_service.send_event_announcement_email(
+                contact["email"], contact.get("name"), event.get("name"), teacher_name, link,
+                event.get("start_date"), event.get("time"),
+                description=event.get("description"), image_event_id=str(event["_id"]) if event.get("image_path") else None,
+            )
+            sent.append(cid)
+        except Exception as e:
+            logger.error(f"Event announcement email failed for {contact.get('email')}: {e}")
+            failed.append(cid)
+    return {"sent": sent, "failed": failed}
 
 # --------------- Public event pages & registration -----------------
 async def _ser_shared_event(event: dict) -> dict:
@@ -3472,6 +3573,7 @@ async def _ser_shared_event(event: dict) -> dict:
     studio = {
         "studio_name": (owner or {}).get("studio_name"),
         "teacher_name": (owner or {}).get("teacher_name") or (owner or {}).get("name"),
+        "social_youtube": (owner or {}).get("social_youtube"),
         "social_instagram": (owner or {}).get("social_instagram"),
         "social_facebook": (owner or {}).get("social_facebook"),
     }

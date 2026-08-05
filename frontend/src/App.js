@@ -24,6 +24,7 @@ import TourDetailPage from "@/pages/TourDetailPage";
 import SharedTourPage from "@/pages/SharedTourPage";
 import EventsPage from "@/pages/EventsPage";
 import EventDetailPage from "@/pages/EventDetailPage";
+import CrmPage from "@/pages/CrmPage";
 import SharedEventPage from "@/pages/SharedEventPage";
 import PublicSlugResolverPage from "@/pages/PublicSlugResolverPage";
 import PortalActivityPage from "@/pages/PortalActivityPage";
@@ -162,6 +163,7 @@ function AppRoutes() {
         <Route path="/tours/:id" element={<TourDetailPage />} />
         <Route path="/events" element={<EventsPage />} />
         <Route path="/events/:id" element={<EventDetailPage />} />
+        <Route path="/crm" element={<CrmPage />} />
         <Route path="/charts" element={<ChartsPage />} />
         <Route path="/requests" element={<PortalActivityPage />} />
         <Route path="/settings" element={<SettingsPage />} />
