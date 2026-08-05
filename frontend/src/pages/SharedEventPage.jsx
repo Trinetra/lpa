@@ -2,8 +2,9 @@ import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import { API } from "@/lib/api";
+import { useTheme } from "@/context/ThemeContext";
 import { fmtCurrency } from "@/pages/StudentsPage";
-import { Instagram, Facebook, Upload, Loader2, CheckCircle2 } from "lucide-react";
+import { Instagram, Facebook, Youtube, Upload, Loader2, CheckCircle2, Sun, Moon } from "lucide-react";
 import { toast } from "sonner";
 
 const fmtDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "");
@@ -235,6 +236,7 @@ export default function SharedEventPage({ bySlug = false }) {
   return (
     <div className="min-h-screen py-14 px-6" style={{ background: "var(--bg)" }}>
       <div className="max-w-2xl mx-auto space-y-6">
+        <TopBar />
         <header>
           <div className="uppercase-label mb-2">{studio.studio_name || "Workshop"}</div>
           <h1 className="font-serif-display text-4xl sm:text-5xl mb-3" data-testid="shared-event-name">{event.name}</h1>
@@ -245,15 +247,15 @@ export default function SharedEventPage({ bySlug = false }) {
           <div className="font-serif-display text-2xl mt-2" style={{ color: "var(--primary)" }}>
             {fmtCurrency(event.price, event.currency)}
           </div>
-          {(studio.social_instagram || studio.social_facebook) && (
+          {(event.social_instagram || event.social_facebook) && (
             <div className="flex gap-3 mt-3">
-              {studio.social_instagram && (
-                <a href={studio.social_instagram} target="_blank" rel="noreferrer" data-testid="shared-event-instagram">
+              {event.social_instagram && (
+                <a href={event.social_instagram} target="_blank" rel="noreferrer" data-testid="shared-event-instagram">
                   <Instagram size={18} />
                 </a>
               )}
-              {studio.social_facebook && (
-                <a href={studio.social_facebook} target="_blank" rel="noreferrer" data-testid="shared-event-facebook">
+              {event.social_facebook && (
+                <a href={event.social_facebook} target="_blank" rel="noreferrer" data-testid="shared-event-facebook">
                   <Facebook size={18} />
                 </a>
               )}
@@ -277,7 +279,39 @@ export default function SharedEventPage({ bySlug = false }) {
         ) : (
           <RegistrationForm event={event} onRegistered={setRegistration} />
         )}
+
+        {(studio.social_youtube || studio.social_instagram || studio.social_facebook) && (
+          <footer className="flex justify-center gap-4 pt-6" style={{ color: "var(--text-muted)" }}>
+            {studio.social_youtube && (
+              <a href={studio.social_youtube} target="_blank" rel="noreferrer" data-testid="shared-event-studio-youtube">
+                <Youtube size={18} />
+              </a>
+            )}
+            {studio.social_instagram && (
+              <a href={studio.social_instagram} target="_blank" rel="noreferrer" data-testid="shared-event-studio-instagram">
+                <Instagram size={18} />
+              </a>
+            )}
+            {studio.social_facebook && (
+              <a href={studio.social_facebook} target="_blank" rel="noreferrer" data-testid="shared-event-studio-facebook">
+                <Facebook size={18} />
+              </a>
+            )}
+          </footer>
+        )}
       </div>
+    </div>
+  );
+}
+
+function TopBar() {
+  const { theme, toggle } = useTheme();
+  return (
+    <div className="flex items-center justify-between">
+      <img src="/icon-192.png" alt="Pravaaha Center for Movement" data-testid="shared-event-logo" style={{ height: 32, width: 32 }} />
+      <button type="button" onClick={toggle} data-testid="shared-event-theme-toggle" className="btn-ghost p-2">
+        {theme === "dark" ? <Sun size={16} strokeWidth={1.5} /> : <Moon size={16} strokeWidth={1.5} />}
+      </button>
     </div>
   );
 }
