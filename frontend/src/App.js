@@ -22,6 +22,10 @@ import SharedInvoicePage from "@/pages/SharedInvoicePage";
 import ToursPage from "@/pages/ToursPage";
 import TourDetailPage from "@/pages/TourDetailPage";
 import SharedTourPage from "@/pages/SharedTourPage";
+import EventsPage from "@/pages/EventsPage";
+import EventDetailPage from "@/pages/EventDetailPage";
+import SharedEventPage from "@/pages/SharedEventPage";
+import PublicSlugResolverPage from "@/pages/PublicSlugResolverPage";
 import PortalActivityPage from "@/pages/PortalActivityPage";
 import StudentLoginPage from "@/pages/student/StudentLoginPage";
 import StudentAcceptInvitePage from "@/pages/student/StudentAcceptInvitePage";
@@ -137,6 +141,7 @@ function AppRoutes() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/invoice/:token" element={<SharedInvoicePage />} />
       <Route path="/tour/:token" element={<SharedTourPage />} />
+      <Route path="/event/:token" element={<SharedEventPage />} />
       <Route path="/portal/*" element={<StudentPortalRoutes />} />
       <Route
         element={
@@ -155,16 +160,19 @@ function AppRoutes() {
         <Route path="/invoices" element={<InvoicesPage />} />
         <Route path="/tours" element={<ToursPage />} />
         <Route path="/tours/:id" element={<TourDetailPage />} />
+        <Route path="/events" element={<EventsPage />} />
+        <Route path="/events/:id" element={<EventDetailPage />} />
         <Route path="/charts" element={<ChartsPage />} />
         <Route path="/requests" element={<PortalActivityPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
-      {/* Custom tour public links (e.g. pravaahacfm.com/tour2026) — tried only
-          after every real app route above fails to match, since this is a
-          single dynamic segment that would otherwise shadow nothing but
-          could in principle collide if a tour slug ever matched a route
-          name (blocked server-side via RESERVED_SLUGS). */}
-      <Route path="/:slug" element={<SharedTourPage bySlug />} />
+      {/* Custom public links (e.g. pravaahacfm.com/tour2026 or /workshop2026)
+          — tried only after every real app route above fails to match,
+          since this is a single dynamic segment that would otherwise shadow
+          nothing but could in principle collide if a slug ever matched a
+          route name (blocked server-side via RESERVED_SLUGS). Resolves to
+          either a tour or an event — see PublicSlugResolverPage. */}
+      <Route path="/:slug" element={<PublicSlugResolverPage />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

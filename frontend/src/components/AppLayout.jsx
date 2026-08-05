@@ -20,6 +20,7 @@ import {
   MoreHorizontal,
   Inbox,
   X,
+  PartyPopper,
 } from "lucide-react";
 
 export default function AppLayout() {
@@ -72,6 +73,7 @@ export default function AppLayout() {
     { to: "/payments", label: "Payments", icon: Wallet, tid: "nav-payments" },
     { to: "/invoices", label: "Invoices", icon: FileText, tid: "nav-invoices" },
     { to: "/tours", label: "Tours", icon: Plane, tid: "nav-tours" },
+    { to: "/events", label: "Events", icon: PartyPopper, tid: "nav-events" },
     { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
     { to: "/requests", label: "Requests", icon: Inbox, tid: "nav-requests" },
     { to: "/settings", label: "Settings", icon: Settings, tid: "nav-settings" },

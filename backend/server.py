@@ -270,7 +270,7 @@ class TourUpdate(BaseModel):
 RESERVED_SLUGS = {
     "login", "reset-password", "invoice", "tour", "dashboard", "students",
     "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
-    "portal", "requests",
+    "portal", "requests", "event", "events", "crm",
 }
 
 class TourStopCreate(BaseModel):
@@ -361,6 +361,61 @@ class TourInvoiceUpdate(BaseModel):
 class TourInvoiceSend(BaseModel):
     channels: List[str] = Field(default_factory=lambda: ["email"])  # 'email' and/or 'whatsapp'
 
+# --------------- Events (workshops) -----------------
+class EventCreate(BaseModel):
+    name: str
+    start_date: str  # ISO date
+    end_date: str
+    time: Optional[str] = None  # freetext, e.g. "6:00 PM - 8:00 PM IST"
+    description: Optional[str] = None
+    image_path: Optional[str] = None
+    social_instagram: Optional[str] = None
+    social_facebook: Optional[str] = None
+    price: float = 0.0
+    currency: str = "INR"
+    zoom_meeting_id: Optional[str] = None
+    zoom_passcode: Optional[str] = None
+
+class EventUpdate(BaseModel):
+    name: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    time: Optional[str] = None
+    description: Optional[str] = None
+    image_path: Optional[str] = None
+    social_instagram: Optional[str] = None
+    social_facebook: Optional[str] = None
+    price: Optional[float] = None
+    currency: Optional[str] = None
+    zoom_meeting_id: Optional[str] = None
+    zoom_passcode: Optional[str] = None
+    status: Optional[str] = None  # "draft" | "published"
+    custom_slug: Optional[str] = None
+
+EVENT_STATUSES = {"draft", "published"}
+EVENT_REGISTRATION_STATUSES = {"pending", "approved", "invited"}
+EVENT_PAYMENT_METHODS = {"upi", "bank_transfer"}
+
+class EventRegistrationCreate(BaseModel):
+    name: str
+    dob: Optional[str] = None  # ISO date
+    mobile: str
+    email: EmailStr
+    city: Optional[str] = None
+    country: Optional[str] = None
+    experience: Optional[str] = None
+
+class EventRegistrationPayment(BaseModel):
+    payment_method: str  # "upi" | "bank_transfer"
+    payment_reference: str
+
+class EventRegistrationApprove(BaseModel):
+    payment_amount: Optional[float] = None
+    payment_notes: Optional[str] = None
+
+class EventPushInviteRequest(BaseModel):
+    registration_ids: Optional[List[str]] = None  # None => all approved-not-yet-invited
+
 # --------------- Serializers -----------------
 def ser_student(doc):
     return {
@@ -431,6 +486,61 @@ def ser_tour(doc):
         "notes": doc.get("notes"),
         "share_token": doc.get("share_token"),
         "custom_slug": doc.get("custom_slug"),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_event(doc):
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get("name"),
+        "start_date": doc.get("start_date"),
+        "end_date": doc.get("end_date"),
+        "time": doc.get("time"),
+        "description": doc.get("description"),
+        "image_path": doc.get("image_path"),
+        "social_instagram": doc.get("social_instagram"),
+        "social_facebook": doc.get("social_facebook"),
+        "price": doc.get("price", 0.0),
+        "currency": doc.get("currency", "INR"),
+        "zoom_meeting_id": doc.get("zoom_meeting_id"),
+        "zoom_passcode": doc.get("zoom_passcode"),
+        "status": doc.get("status", "draft"),
+        "share_token": doc.get("share_token"),
+        "custom_slug": doc.get("custom_slug"),
+        "created_at": doc.get("created_at"),
+    }
+
+def ser_event_registration(doc):
+    return {
+        "id": str(doc["_id"]),
+        "event_id": doc.get("event_id"),
+        "name": doc.get("name"),
+        "dob": doc.get("dob"),
+        "mobile": doc.get("mobile"),
+        "email": doc.get("email"),
+        "city": doc.get("city"),
+        "country": doc.get("country"),
+        "experience": doc.get("experience"),
+        "status": doc.get("status", "pending"),
+        "payment_method": doc.get("payment_method"),
+        "payment_reference": doc.get("payment_reference"),
+        "payment_proof_path": doc.get("payment_proof_path"),
+        "payment_amount": doc.get("payment_amount"),
+        "payment_notes": doc.get("payment_notes"),
+        "created_at": doc.get("created_at"),
+        "approved_at": doc.get("approved_at"),
+        "invited_at": doc.get("invited_at"),
+    }
+
+def ser_crm_contact(doc):
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get("name"),
+        "email": doc.get("email"),
+        "mobile": doc.get("mobile"),
+        "city": doc.get("city"),
+        "country": doc.get("country"),
+        "dob": doc.get("dob"),
         "created_at": doc.get("created_at"),
     }
 
@@ -3222,6 +3332,296 @@ async def get_tour_by_slug(slug: str):
         raise HTTPException(status_code=404, detail="Not found")
     return await _ser_shared_tour(tour)
 
+# --------------- Events (workshops) -----------------
+async def _get_owned_event(event_id: str, owner_id: str) -> dict:
+    event = await db.events.find_one({"_id": ObjectId(event_id), "owner_id": owner_id})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return event
+
+def _validate_event_slug(updates: dict, event_id: Optional[str]):
+    slug = updates["custom_slug"].strip().lower()
+    if not slug:
+        updates["custom_slug"] = None
+        return
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,48}[a-z0-9]", slug):
+        raise HTTPException(status_code=400,
+            detail="Custom link can only contain lowercase letters, numbers, and hyphens (3-50 characters)")
+    if slug in RESERVED_SLUGS:
+        raise HTTPException(status_code=400, detail=f'"{slug}" is reserved and can\'t be used')
+    updates["custom_slug"] = slug
+
+@api_router.get("/events")
+async def list_events(user: dict = Depends(get_current_user)):
+    cur = db.events.find({"owner_id": user["_id"]}).sort("start_date", -1)
+    return [ser_event(d) async for d in cur]
+
+@api_router.post("/events")
+async def create_event(body: EventCreate, user: dict = Depends(get_current_user)):
+    if body.currency not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {SUPPORTED_CURRENCIES}")
+    doc = body.model_dump()
+    doc["owner_id"] = user["_id"]
+    doc["status"] = "draft"
+    doc["share_token"] = secrets.token_urlsafe(24)
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.events.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_event(doc)
+
+@api_router.get("/events/{event_id}")
+async def get_event(event_id: str, user: dict = Depends(get_current_user)):
+    return ser_event(await _get_owned_event(event_id, user["_id"]))
+
+@api_router.patch("/events/{event_id}")
+async def update_event(event_id: str, body: EventUpdate, user: dict = Depends(get_current_user)):
+    await _get_owned_event(event_id, user["_id"])
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    if "currency" in updates and updates["currency"] not in SUPPORTED_CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"currency must be one of {SUPPORTED_CURRENCIES}")
+    if "status" in updates and updates["status"] not in EVENT_STATUSES:
+        raise HTTPException(status_code=400, detail=f"status must be one of {EVENT_STATUSES}")
+    if "custom_slug" in updates:
+        _validate_event_slug(updates, event_id)
+        if updates["custom_slug"]:
+            existing = await db.events.find_one({"custom_slug": updates["custom_slug"], "_id": {"$ne": ObjectId(event_id)}})
+            if existing:
+                raise HTTPException(status_code=409, detail="That custom link is already taken by another event")
+    await db.events.update_one({"_id": ObjectId(event_id)}, {"$set": updates})
+    return ser_event(await db.events.find_one({"_id": ObjectId(event_id)}))
+
+@api_router.delete("/events/{event_id}")
+async def delete_event(event_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_event(event_id, user["_id"])
+    await db.events.delete_one({"_id": ObjectId(event_id)})
+    await db.event_registrations.delete_many({"event_id": event_id, "owner_id": user["_id"]})
+    return {"ok": True}
+
+@api_router.get("/events/{event_id}/registrations")
+async def list_event_registrations(event_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_event(event_id, user["_id"])
+    cur = db.event_registrations.find({"event_id": event_id, "owner_id": user["_id"]}).sort("created_at", -1)
+    return [ser_event_registration(d) async for d in cur]
+
+@api_router.post("/events/{event_id}/registrations/{reg_id}/approve")
+async def approve_event_registration(event_id: str, reg_id: str, body: EventRegistrationApprove,
+                                      user: dict = Depends(get_current_user)):
+    await _get_owned_event(event_id, user["_id"])
+    reg = await db.event_registrations.find_one({"_id": ObjectId(reg_id), "event_id": event_id, "owner_id": user["_id"]})
+    if not reg:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    updates = {
+        "status": "approved",
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if body.payment_amount is not None:
+        updates["payment_amount"] = body.payment_amount
+    if body.payment_notes is not None:
+        updates["payment_notes"] = body.payment_notes
+    await db.event_registrations.update_one({"_id": reg["_id"]}, {"$set": updates})
+    return ser_event_registration(await db.event_registrations.find_one({"_id": reg["_id"]}))
+
+@api_router.post("/events/{event_id}/push-invite")
+async def push_event_invite(event_id: str, body: EventPushInviteRequest, user: dict = Depends(get_current_user)):
+    event = await _get_owned_event(event_id, user["_id"])
+    q = {"event_id": event_id, "owner_id": user["_id"], "status": "approved"}
+    if body.registration_ids:
+        q["_id"] = {"$in": [ObjectId(rid) for rid in body.registration_ids]}
+    owner = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    teacher_name = owner.get("teacher_name") or owner.get("name") if owner else None
+    sent, failed = [], []
+    async for reg in db.event_registrations.find(q):
+        try:
+            await email_service.send_event_invite_email(
+                reg["email"], reg.get("name"), event.get("name"), teacher_name,
+                event.get("zoom_meeting_id"), event.get("zoom_passcode"),
+                event.get("start_date"), event.get("time"),
+            )
+            await db.event_registrations.update_one(
+                {"_id": reg["_id"]},
+                {"$set": {"status": "invited", "invited_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            sent.append(str(reg["_id"]))
+        except Exception as e:
+            logger.error(f"Event invite email failed for {reg.get('email')}: {e}")
+            failed.append(str(reg["_id"]))
+    return {"sent": sent, "failed": failed}
+
+@api_router.get("/events/{event_id}/registrations/{reg_id}/proof")
+async def get_event_registration_proof(event_id: str, reg_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_event(event_id, user["_id"])
+    reg = await db.event_registrations.find_one({"_id": ObjectId(reg_id), "event_id": event_id, "owner_id": user["_id"]})
+    if not reg or not reg.get("payment_proof_path"):
+        raise HTTPException(status_code=404, detail="No proof on file")
+    try:
+        data, ct = get_object(reg["payment_proof_path"])
+    except Exception:
+        raise HTTPException(status_code=404, detail="File unavailable")
+    return Response(content=data, media_type=ct or "application/octet-stream")
+
+@api_router.get("/crm/contacts")
+async def list_crm_contacts(user: dict = Depends(get_current_user)):
+    cur = db.crm_contacts.find({"owner_id": user["_id"]}).sort("created_at", -1)
+    return [ser_crm_contact(d) async for d in cur]
+
+# --------------- Public event pages & registration -----------------
+async def _ser_shared_event(event: dict) -> dict:
+    owner = await db.users.find_one({"_id": ObjectId(event["owner_id"])}) if event.get("owner_id") else None
+    studio = {
+        "studio_name": (owner or {}).get("studio_name"),
+        "teacher_name": (owner or {}).get("teacher_name") or (owner or {}).get("name"),
+        "social_instagram": (owner or {}).get("social_instagram"),
+        "social_facebook": (owner or {}).get("social_facebook"),
+    }
+    return {
+        "id": str(event["_id"]),
+        "name": event.get("name"),
+        "start_date": event.get("start_date"),
+        "end_date": event.get("end_date"),
+        "time": event.get("time"),
+        "description": event.get("description"),
+        "image_path": event.get("image_path"),
+        "social_instagram": event.get("social_instagram"),
+        "social_facebook": event.get("social_facebook"),
+        "price": event.get("price", 0.0),
+        "currency": event.get("currency", "INR"),
+        "studio": studio,
+    }
+
+async def _get_published_event_or_404(event: Optional[dict]) -> dict:
+    if not event or event.get("status") != "published":
+        raise HTTPException(status_code=404, detail="Event not found")
+    return await _ser_shared_event(event)
+
+@api_router.get("/events/share/{share_token}")
+async def get_shared_event(share_token: str):
+    event = await db.events.find_one({"share_token": share_token})
+    return await _get_published_event_or_404(event)
+
+@api_router.get("/events/slug/{slug}")
+async def get_event_by_slug(slug: str):
+    event = await db.events.find_one({"custom_slug": slug.lower()})
+    return await _get_published_event_or_404(event)
+
+async def _upsert_crm_contact(owner_id: str, body: EventRegistrationCreate) -> str:
+    email = body.email.lower().strip()
+    existing = await db.crm_contacts.find_one({"owner_id": owner_id, "email": email})
+    if existing:
+        await db.crm_contacts.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {
+                "name": body.name, "mobile": body.mobile, "city": body.city,
+                "country": body.country, "dob": body.dob,
+            }}
+        )
+        return str(existing["_id"])
+    doc = {
+        "owner_id": owner_id, "name": body.name, "email": email, "mobile": body.mobile,
+        "city": body.city, "country": body.country, "dob": body.dob,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    res = await db.crm_contacts.insert_one(doc)
+    return str(res.inserted_id)
+
+async def _get_event_for_public_action(event_id: str) -> dict:
+    event = await db.events.find_one({"_id": ObjectId(event_id)})
+    if not event or event.get("status") != "published":
+        raise HTTPException(status_code=404, detail="Event not found")
+    return event
+
+@api_router.post("/events/{event_id}/register")
+async def register_for_event(event_id: str, body: EventRegistrationCreate):
+    event = await _get_event_for_public_action(event_id)
+    crm_contact_id = await _upsert_crm_contact(event["owner_id"], body)
+    doc = body.model_dump()
+    doc["email"] = doc["email"].lower().strip()
+    doc["event_id"] = event_id
+    doc["owner_id"] = event["owner_id"]
+    doc["status"] = "pending"
+    doc["crm_contact_id"] = crm_contact_id
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.event_registrations.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_event_registration(doc)
+
+@api_router.get("/events/{event_id}/registrations/{reg_id}/qr")
+async def event_registration_qr(event_id: str, reg_id: str):
+    event = await _get_event_for_public_action(event_id)
+    reg = await db.event_registrations.find_one({"_id": ObjectId(reg_id), "event_id": event_id})
+    if not reg:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    owner = await db.users.find_one({"_id": ObjectId(event["owner_id"])})
+    upi_vpa = (owner or {}).get("contact_upi")
+    price = event.get("price", 0.0)
+    if not upi_vpa or price <= 0:
+        raise HTTPException(status_code=404, detail="No QR available")
+    teacher_name = (owner or {}).get("teacher_name") or (owner or {}).get("name") or ""
+    qr_bytes = pdf_service.upi_qr_bytes(upi_vpa, teacher_name, price)
+    if not qr_bytes:
+        raise HTTPException(status_code=404, detail="QR generation failed")
+    return Response(content=qr_bytes, media_type="image/png")
+
+@api_router.get("/events/{event_id}/image")
+async def event_public_image(event_id: str):
+    event = await _get_event_for_public_action(event_id)
+    if not event.get("image_path"):
+        raise HTTPException(status_code=404, detail="No image")
+    try:
+        data, ct = get_object(event["image_path"])
+    except Exception:
+        raise HTTPException(status_code=404, detail="Image unavailable")
+    return Response(content=data, media_type=ct or "image/jpeg")
+
+@api_router.get("/events/{event_id}/bank-details")
+async def event_bank_details(event_id: str):
+    event = await _get_event_for_public_action(event_id)
+    owner = await db.users.find_one({"_id": ObjectId(event["owner_id"])})
+    snapshot = invoices_service.build_studio_snapshot(owner)
+    return {
+        "bank_name": snapshot.get("bank_name"),
+        "bank_account_number": snapshot.get("bank_account_number"),
+        "bank_ifsc_code": snapshot.get("bank_ifsc_code"),
+        "bank_swift_code": snapshot.get("bank_swift_code"),
+        "contact_upi": snapshot.get("contact_upi"),
+    }
+
+@api_router.post("/events/{event_id}/registrations/{reg_id}/payment")
+async def submit_event_registration_payment(event_id: str, reg_id: str, body: EventRegistrationPayment):
+    await _get_event_for_public_action(event_id)
+    reg = await db.event_registrations.find_one({"_id": ObjectId(reg_id), "event_id": event_id})
+    if not reg:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    if body.payment_method not in EVENT_PAYMENT_METHODS:
+        raise HTTPException(status_code=400, detail=f"payment_method must be one of {EVENT_PAYMENT_METHODS}")
+    await db.event_registrations.update_one(
+        {"_id": reg["_id"]},
+        {"$set": {"payment_method": body.payment_method, "payment_reference": body.payment_reference}}
+    )
+    return ser_event_registration(await db.event_registrations.find_one({"_id": reg["_id"]}))
+
+@api_router.post("/events/{event_id}/registrations/{reg_id}/payment-proof")
+async def upload_event_registration_proof(event_id: str, reg_id: str, file: UploadFile = File(...)):
+    await _get_event_for_public_action(event_id)
+    reg = await db.event_registrations.find_one({"_id": ObjectId(reg_id), "event_id": event_id})
+    if not reg:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    if not file.content_type or file.content_type not in PAYMENT_PROOF_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPG, PNG, WEBP or PDF files are allowed")
+    data = await file.read()
+    if len(data) > PAYMENT_PROOF_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File is too large (max 10MB)")
+    ext = "jpg"
+    if file.filename and "." in file.filename:
+        ext = file.filename.rsplit(".", 1)[-1].lower()
+    path = f"{APP_NAME}/event-payment-proofs/{reg['owner_id']}/{event_id}/{uuid.uuid4()}.{ext}"
+    result = put_object(path, data, file.content_type)
+    await db.event_registrations.update_one(
+        {"_id": reg["_id"]}, {"$set": {"payment_proof_path": result["path"]}}
+    )
+    return ser_event_registration(await db.event_registrations.find_one({"_id": reg["_id"]}))
+
 # --------------- Backups -----------------
 @api_router.get("/backup/status")
 async def backup_status(user: dict = Depends(get_current_user)):
@@ -3336,6 +3736,14 @@ async def on_startup():
     await db.payment_proofs.create_index([("student_id", 1), ("uploaded_at", -1)])
     await db.push_subscriptions.create_index("endpoint", unique=True)
     await db.push_subscriptions.create_index([("owner_type", 1), ("owner_id", 1)])
+
+    # Events (workshops)
+    await db.events.create_index("owner_id")
+    await db.events.create_index("share_token", unique=True)
+    await db.events.create_index("custom_slug", unique=True, sparse=True)
+    await db.event_registrations.create_index([("event_id", 1), ("created_at", -1)])
+    await db.event_registrations.create_index([("owner_id", 1), ("status", 1)])
+    await db.crm_contacts.create_index([("owner_id", 1), ("email", 1)], unique=True)
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

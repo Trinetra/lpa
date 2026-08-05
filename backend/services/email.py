@@ -312,3 +312,45 @@ async def send_password_reset_email(to_email: str, name: str, reset_link: str):
         await dispatch_email(payload)
     except Exception as e:
         logger.error(f"Password reset email failed: {e}")
+
+
+async def send_event_invite_email(to_email: str, name: str, event_name: str, teacher_name: str,
+                                   zoom_meeting_id: Optional[str], zoom_passcode: Optional[str],
+                                   start_date: Optional[str], time_str: Optional[str]):
+    key = _email_key()
+    if not key:
+        logger.warning(f"Event invite requested but no email key set. Event: {event_name}, Zoom: {zoom_meeting_id}")
+        return
+    from_name = _from_name()
+    when = " ".join(filter(None, [start_date, time_str])) or "the scheduled time"
+    zoom_lines = ""
+    if zoom_meeting_id:
+        zoom_lines += f'<div style="font-size:15px;color:#2c2926;margin-top:4px">Meeting ID: <b>{zoom_meeting_id}</b></div>'
+    if zoom_passcode:
+        zoom_lines += f'<div style="font-size:15px;color:#2c2926;margin-top:4px">Passcode: <b>{zoom_passcode}</b></div>'
+    html = f"""
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
+  <tr><td align="center">
+    <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
+      <tr><td>
+        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">You're confirmed</div>
+        <div style="font-size:22px;color:#d48464;font-weight:700;margin-bottom:20px">{event_name}</div>
+        <div style="font-size:15px;color:#2c2926;line-height:1.5">
+          Hi {name or "there"},<br><br>
+          Your spot for {event_name} with {teacher_name or from_name} is confirmed. Here are your Zoom details
+          for {when}:
+        </div>
+        <div style="margin:20px 0;padding:16px;background:#f5efe8;border-radius:8px">{zoom_lines}</div>
+        <div style="font-size:12px;color:#a89886">See you there!</div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+""".strip()
+    payload = {
+        "to": [to_email],
+        "subject": f"You're confirmed for {event_name} — Zoom details inside",
+        "html": html,
+        "from_name": from_name,
+    }
+    await dispatch_email(payload)
