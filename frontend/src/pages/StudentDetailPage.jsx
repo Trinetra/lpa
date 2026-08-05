@@ -6,6 +6,19 @@ import { toast } from "sonner";
 import { ArrowLeft, Phone, Mail, Calendar, Send } from "lucide-react";
 import { fmtCurrency } from "@/pages/StudentsPage";
 
+function ordinal(n) {
+  if (n % 10 === 1 && n % 100 !== 11) return `${n}st`;
+  if (n % 10 === 2 && n % 100 !== 12) return `${n}nd`;
+  if (n % 10 === 3 && n % 100 !== 13) return `${n}rd`;
+  return `${n}th`;
+}
+
+function fmtDate(isoDate) {
+  const d = new Date(`${isoDate}T00:00:00`);
+  const month = d.toLocaleString("en-IN", { month: "short" });
+  return `${ordinal(d.getDate())} ${month} ${d.getFullYear()}`;
+}
+
 export default function StudentDetailPage() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -139,7 +152,7 @@ export default function StudentDetailPage() {
           {classes.map((c) => (
             <div key={c.id} className="flex justify-between px-6 py-3 text-sm" style={{ borderTop: "1px solid var(--border)" }}>
               <div>
-                <div>{c.class_date}</div>
+                <div>{fmtDate(c.class_date)}</div>
                 {c.topics && c.topics.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1">
                     {c.topics.map((t) => (
