@@ -424,6 +424,7 @@ class EventPushInviteRequest(BaseModel):
 class CrmBulkInviteRequest(BaseModel):
     contact_ids: List[str]
     event_id: str
+    force: bool = False  # re-send to contacts already invited to this event
 
 # --------------- Serializers -----------------
 def ser_student(doc):
@@ -3506,6 +3507,12 @@ async def list_crm_contacts(
         async for ev in db.events.find({"_id": {"$in": [ObjectId(eid) for eid in all_event_ids]}}):
             event_names[str(ev["_id"])] = ev.get("name")
 
+    opens_by_contact: dict = {}
+    async for o in db.crm_invite_opens.find({"owner_id": user["_id"], "contact_id": {"$in": contact_ids}}):
+        existing = opens_by_contact.get(o["contact_id"])
+        if not existing or (o.get("sent_at") or "") > (existing.get("sent_at") or ""):
+            opens_by_contact[o["contact_id"]] = o
+
     out = []
     for c in contacts:
         cid = str(c["_id"])
@@ -3518,6 +3525,12 @@ async def list_crm_contacts(
             for r in regs
         ]
         item["latest_experience"] = next((r.get("experience") for r in regs if r.get("experience")), None)
+        latest_open = opens_by_contact.get(cid)
+        item["latest_invite"] = {
+            "sent_at": latest_open.get("sent_at"),
+            "opened_at": latest_open.get("opened_at"),
+            "clicked_at": latest_open.get("clicked_at"),
+        } if latest_open else None
 
         if country and (c.get("country") or "").strip().lower() != country.strip().lower():
             continue
@@ -3540,6 +3553,16 @@ async def list_crm_contacts(
     out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return out
 
+@api_router.get("/crm/contacts/already-invited")
+async def crm_already_invited(event_id: str, user: dict = Depends(get_current_user)):
+    """Which of this owner's contacts have already been sent an invite for
+    this event — lets the frontend warn/pre-filter before a bulk-invite
+    accidentally re-spams someone."""
+    cids = set()
+    async for o in db.crm_invite_opens.find({"owner_id": user["_id"], "event_id": event_id}):
+        cids.add(o["contact_id"])
+    return {"contact_ids": list(cids)}
+
 @api_router.post("/crm/contacts/bulk-invite")
 async def crm_bulk_invite(body: CrmBulkInviteRequest, user: dict = Depends(get_current_user)):
     event = await _get_owned_event(body.event_id, user["_id"])
@@ -3549,23 +3572,106 @@ async def crm_bulk_invite(body: CrmBulkInviteRequest, user: dict = Depends(get_c
         else f"{os.environ.get('APP_URL', '').rstrip('/')}/event/{event['share_token']}"
     owner = await db.users.find_one({"_id": ObjectId(user["_id"])})
     teacher_name = (owner or {}).get("teacher_name") or (owner or {}).get("name") if owner else None
-    sent, failed = [], []
+    backend_url = os.environ.get("BACKEND_URL", "").rstrip("/")
+
+    already_invited = set()
+    if not body.force:
+        async for o in db.crm_invite_opens.find({"owner_id": user["_id"], "event_id": body.event_id}):
+            already_invited.add(o["contact_id"])
+
+    campaign_id = str(uuid.uuid4())
+    sent, failed, skipped = [], [], []
     for cid in body.contact_ids:
+        if cid in already_invited:
+            skipped.append(cid)
+            continue
         contact = await db.crm_contacts.find_one({"_id": ObjectId(cid), "owner_id": user["_id"]})
         if not contact:
             failed.append(cid)
             continue
+        track_token = secrets.token_urlsafe(16)
         try:
             await email_service.send_event_announcement_email(
                 contact["email"], contact.get("name"), event.get("name"), teacher_name, link,
                 event.get("start_date"), event.get("time"),
                 description=event.get("description"), image_event_id=str(event["_id"]) if event.get("image_path") else None,
+                track_pixel_url=f"{backend_url}/api/crm/track-open/{track_token}.png",
+                track_click_url=f"{backend_url}/api/crm/track-click/{track_token}",
             )
+            # Recorded only on a confirmed send — otherwise a failed send would
+            # still count toward the duplicate-invite guard and campaign stats,
+            # making a contact who never actually got the email look "already
+            # invited" and blocking a legitimate retry.
+            await db.crm_invite_opens.insert_one({
+                "owner_id": user["_id"], "contact_id": cid, "event_id": body.event_id,
+                "campaign_id": campaign_id, "track_token": track_token,
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+                "opened_at": None, "clicked_at": None,
+            })
             sent.append(cid)
         except Exception as e:
             logger.error(f"Event announcement email failed for {contact.get('email')}: {e}")
             failed.append(cid)
-    return {"sent": sent, "failed": failed}
+    return {"sent": sent, "failed": failed, "skipped": skipped, "campaign_id": campaign_id if sent else None}
+
+@api_router.get("/crm/campaigns")
+async def list_crm_campaigns(user: dict = Depends(get_current_user)):
+    """One row per bulk-invite send — sent/opened/clicked counts, for judging
+    how a past push performed."""
+    campaigns: dict = {}
+    async for o in db.crm_invite_opens.find({"owner_id": user["_id"], "campaign_id": {"$exists": True}}):
+        cid = o["campaign_id"]
+        c = campaigns.setdefault(cid, {
+            "campaign_id": cid, "event_id": o["event_id"], "sent_at": o["sent_at"],
+            "sent": 0, "opened": 0, "clicked": 0,
+        })
+        c["sent"] += 1
+        if o.get("opened_at"):
+            c["opened"] += 1
+        if o.get("clicked_at"):
+            c["clicked"] += 1
+        if o["sent_at"] < c["sent_at"]:
+            c["sent_at"] = o["sent_at"]
+
+    event_ids = {c["event_id"] for c in campaigns.values()}
+    event_names = {}
+    if event_ids:
+        async for ev in db.events.find({"_id": {"$in": [ObjectId(eid) for eid in event_ids]}}):
+            event_names[str(ev["_id"])] = ev.get("name")
+
+    out = list(campaigns.values())
+    for c in out:
+        c["event_name"] = event_names.get(c["event_id"])
+    out.sort(key=lambda c: c["sent_at"], reverse=True)
+    return out
+
+# 1x1 transparent PNG, served as an email open-tracking pixel.
+_TRACKING_PIXEL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49444852000000010000000108060000001f15c489"
+    "0000000b49444154789c6360000200000500017a5eab3f0000000049454e44ae426082"
+)
+
+@api_router.get("/crm/track-open/{track_token}.png")
+async def crm_track_open(track_token: str):
+    await db.crm_invite_opens.update_one(
+        {"track_token": track_token, "opened_at": None},
+        {"$set": {"opened_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return Response(content=_TRACKING_PIXEL_PNG, media_type="image/png")
+
+@api_router.get("/crm/track-click/{track_token}")
+async def crm_track_click(track_token: str):
+    send = await db.crm_invite_opens.find_one({"track_token": track_token})
+    if send and send.get("clicked_at") is None:
+        await db.crm_invite_opens.update_one(
+            {"_id": send["_id"]}, {"$set": {"clicked_at": datetime.now(timezone.utc).isoformat()}}
+        )
+    event = await db.events.find_one({"_id": ObjectId(send["event_id"])}) if send else None
+    if not event:
+        raise HTTPException(status_code=404, detail="Not found")
+    link = f"https://{PUBLIC_ROOT_DOMAIN}/{event['custom_slug']}" if event.get("custom_slug") \
+        else f"{os.environ.get('APP_URL', '').rstrip('/')}/event/{event['share_token']}"
+    return RedirectResponse(url=link, status_code=302)
 
 # --------------- Public event pages & registration -----------------
 async def _ser_shared_event(event: dict) -> dict:
@@ -3846,6 +3952,8 @@ async def on_startup():
     await db.event_registrations.create_index([("event_id", 1), ("created_at", -1)])
     await db.event_registrations.create_index([("owner_id", 1), ("status", 1)])
     await db.crm_contacts.create_index([("owner_id", 1), ("email", 1)], unique=True)
+    await db.crm_invite_opens.create_index("track_token", unique=True)
+    await db.crm_invite_opens.create_index([("owner_id", 1), ("contact_id", 1)])
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

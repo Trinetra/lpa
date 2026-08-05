@@ -356,9 +356,26 @@ async def send_event_invite_email(to_email: str, name: str, event_name: str, tea
     await dispatch_email(payload)
 
 
+def _format_event_when(start_date: Optional[str], time_str: Optional[str]) -> str:
+    """'2026-07-13' + '6:00 PM IST' -> 'Sunday, 13th July 2026 at 6:00 PM IST'."""
+    if not start_date:
+        return "soon"
+    try:
+        d = datetime.strptime(start_date[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return " ".join(filter(None, [start_date, time_str])) or "soon"
+    day = d.day
+    suffix = "th" if 11 <= day % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    when = f"{d.strftime('%A')}, {day}{suffix} {d.strftime('%B %Y')}"
+    if time_str:
+        when += f" at {time_str}"
+    return when
+
+
 async def send_event_announcement_email(to_email: str, name: str, event_name: str, teacher_name: str,
                                          event_link: str, start_date: Optional[str], time_str: Optional[str],
-                                         description: Optional[str] = None, image_event_id: Optional[str] = None):
+                                         description: Optional[str] = None, image_event_id: Optional[str] = None,
+                                         track_pixel_url: Optional[str] = None, track_click_url: Optional[str] = None):
     """Invites a past CRM contact to register for a new/upcoming event —
     distinct from send_event_invite_email, which confirms Zoom details to
     someone who has already registered and been approved for a specific
@@ -370,7 +387,7 @@ async def send_event_announcement_email(to_email: str, name: str, event_name: st
         logger.warning(f"Event announcement requested but no email key set. Event: {event_name}, Link: {event_link}")
         return
     from_name = _from_name()
-    when = " ".join(filter(None, [start_date, time_str])) or "soon"
+    when = _format_event_when(start_date, time_str)
     image_html = ""
     if image_event_id:
         image_url = f"{_backend_url()}/api/events/{image_event_id}/image"
@@ -378,6 +395,8 @@ async def send_event_announcement_email(to_email: str, name: str, event_name: st
     description_html = ""
     if description:
         description_html = f'<div style="font-size:14px;color:#2c2926;line-height:1.5;white-space:pre-wrap;margin-top:16px">{description}</div>'
+    register_link = track_click_url or event_link
+    pixel_html = f'<img src="{track_pixel_url}" alt="" width="1" height="1" style="display:block;border:0" />' if track_pixel_url else ""
     html = f"""
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
   <tr><td align="center">
@@ -388,15 +407,16 @@ async def send_event_announcement_email(to_email: str, name: str, event_name: st
         {image_html}
         <div style="font-size:15px;color:#2c2926;line-height:1.5">
           Hi {name or "there"},<br><br>
-          {teacher_name or from_name} would love to have you at {event_name}, happening {when}.
+          We would love to have you at {event_name}, happening on {when}.
           Click below to register.
         </div>
         {description_html}
-        <div style="margin:24px 0"><a href="{event_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px">Register now</a></div>
+        <div style="margin:24px 0"><a href="{register_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px">Register now</a></div>
       </td></tr>
     </table>
   </td></tr>
 </table>
+{pixel_html}
 """.strip()
     payload = {
         "to": [to_email],

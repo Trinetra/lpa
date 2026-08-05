@@ -9,17 +9,32 @@ function InviteModal({ selectedIds, onClose, onSent }) {
   const [events, setEvents] = useState(null);
   const [eventId, setEventId] = useState("");
   const [sending, setSending] = useState(false);
+  const [alreadyInvited, setAlreadyInvited] = useState(null);
+  const [force, setForce] = useState(false);
 
   useEffect(() => {
     api.get("/events").then((r) => setEvents(r.data.filter((e) => e.status === "published"))).catch(() => setEvents([]));
   }, []);
 
+  useEffect(() => {
+    setForce(false);
+    if (!eventId) { setAlreadyInvited(null); return; }
+    api.get("/crm/contacts/already-invited", { params: { event_id: eventId } })
+      .then((r) => setAlreadyInvited(new Set(r.data.contact_ids)))
+      .catch(() => setAlreadyInvited(new Set()));
+  }, [eventId]);
+
+  const overlapCount = alreadyInvited ? selectedIds.filter((id) => alreadyInvited.has(id)).length : 0;
+
   const send = async () => {
     if (!eventId) return toast.error("Pick an event first");
     setSending(true);
     try {
-      const { data } = await api.post("/crm/contacts/bulk-invite", { contact_ids: selectedIds, event_id: eventId });
-      toast.success(`Invited ${data.sent.length} contact(s)${data.failed.length ? `, ${data.failed.length} failed` : ""}`);
+      const { data } = await api.post("/crm/contacts/bulk-invite", { contact_ids: selectedIds, event_id: eventId, force });
+      const parts = [`Invited ${data.sent.length}`];
+      if (data.skipped?.length) parts.push(`${data.skipped.length} skipped (already invited)`);
+      if (data.failed?.length) parts.push(`${data.failed.length} failed`);
+      toast.success(parts.join(", "));
       onSent();
     } catch (e) {
       toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Failed to send invites");
@@ -43,7 +58,7 @@ function InviteModal({ selectedIds, onClose, onSent }) {
           </div>
         ) : (
           <>
-            <label className="block mb-6">
+            <label className="block mb-4">
               <span className="uppercase-label block mb-1">Event</span>
               <select value={eventId} onChange={(e) => setEventId(e.target.value)}
                 data-testid="crm-invite-event-select"
@@ -57,6 +72,18 @@ function InviteModal({ selectedIds, onClose, onSent }) {
                 ))}
               </select>
             </label>
+
+            {overlapCount > 0 && (
+              <div className="text-xs mb-4 p-3 rounded" data-testid="crm-invite-overlap-warning"
+                style={{ background: "rgba(214,120,90,0.12)", color: "var(--warning)" }}>
+                {overlapCount} of {selectedIds.length} selected already got an invite for this event.
+                <label className="flex items-center gap-2 mt-2">
+                  <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} data-testid="crm-invite-force-checkbox" />
+                  Resend to them anyway
+                </label>
+              </div>
+            )}
+
             <div className="flex justify-end gap-3">
               <button type="button" onClick={onClose} className="btn-ghost" data-testid="crm-invite-cancel">Cancel</button>
               <button type="button" onClick={send} disabled={sending} className="btn-pill flex items-center gap-2" data-testid="crm-invite-send">
@@ -81,6 +108,7 @@ export default function CrmPage() {
   const [eventFilter, setEventFilter] = useState("");
   const [selected, setSelected] = useState(new Set());
   const [showInvite, setShowInvite] = useState(false);
+  const [campaignsRefresh, setCampaignsRefresh] = useState(0);
 
   useEffect(() => {
     api.get("/events").then((r) => setPastEvents(r.data)).catch(() => setPastEvents([]));
@@ -197,8 +225,9 @@ export default function CrmPage() {
             <div className="col-span-3">Name</div>
             <div className="col-span-3">Contact</div>
             <div className="col-span-1 text-right">Age</div>
-            <div className="col-span-2">Country</div>
+            <div className="col-span-1">Country</div>
             <div className="col-span-2">Past events</div>
+            <div className="col-span-1">Last invite</div>
           </div>
           {contacts.map((c) => (
             <div key={c.id} data-testid={`crm-contact-row-${c.id}`}
@@ -218,7 +247,7 @@ export default function CrmPage() {
                 <div>{c.mobile}</div>
               </div>
               <div className="sm:col-span-1 sm:text-right">{c.age ?? "—"}</div>
-              <div className="sm:col-span-2">{c.country || "—"}</div>
+              <div className="sm:col-span-1">{c.country || "—"}</div>
               <div className="sm:col-span-2 flex flex-wrap gap-1">
                 {c.events_participated.length === 0 ? (
                   <span style={{ color: "var(--text-muted)" }}>—</span>
@@ -231,18 +260,71 @@ export default function CrmPage() {
                   ))
                 )}
               </div>
+              <div className="sm:col-span-1">
+                <InviteStatus invite={c.latest_invite} />
+              </div>
             </div>
           ))}
         </div>
       )}
 
+      <CampaignsPanel refreshKey={campaignsRefresh} />
+
       {showInvite && (
         <InviteModal
           selectedIds={[...selected]}
           onClose={() => setShowInvite(false)}
-          onSent={() => { setShowInvite(false); setSelected(new Set()); }}
+          onSent={() => { setShowInvite(false); setSelected(new Set()); load(); setCampaignsRefresh((n) => n + 1); }}
         />
       )}
     </div>
+  );
+}
+
+function InviteStatus({ invite }) {
+  if (!invite) return <span className="text-xs" style={{ color: "var(--text-muted)" }}>—</span>;
+  const label = invite.clicked_at ? "Clicked" : invite.opened_at ? "Opened" : "Sent";
+  const color = invite.clicked_at ? "var(--success)" : invite.opened_at ? "var(--primary)" : "var(--text-muted)";
+  return (
+    <span className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full"
+      style={{ color, border: `1px solid ${color}` }}>
+      {label}
+    </span>
+  );
+}
+
+function CampaignsPanel({ refreshKey }) {
+  const [campaigns, setCampaigns] = useState(null);
+
+  useEffect(() => {
+    api.get("/crm/campaigns").then((r) => setCampaigns(r.data)).catch(() => setCampaigns([]));
+  }, [refreshKey]);
+
+  if (campaigns === null || campaigns.length === 0) return null;
+
+  return (
+    <section>
+      <div className="uppercase-label mb-3">Past invite campaigns</div>
+      <div className="surface overflow-hidden">
+        <div className="hidden sm:grid sm:grid-cols-12 px-6 py-3 uppercase-label" style={{ borderBottom: "1px solid var(--border)" }}>
+          <div className="col-span-4">Event</div>
+          <div className="col-span-2">Sent on</div>
+          <div className="col-span-2 text-right">Sent</div>
+          <div className="col-span-2 text-right">Opened</div>
+          <div className="col-span-2 text-right">Clicked</div>
+        </div>
+        {campaigns.map((c) => (
+          <div key={c.campaign_id} data-testid={`crm-campaign-row-${c.campaign_id}`}
+            className="px-4 sm:px-6 py-3 text-sm flex flex-col sm:grid sm:grid-cols-12 sm:items-center gap-1 sm:gap-0"
+            style={{ borderTop: "1px solid var(--border)" }}>
+            <div className="sm:col-span-4 font-serif-display">{c.event_name || "Event"}</div>
+            <div className="sm:col-span-2 text-xs" style={{ color: "var(--text-muted)" }}>{fmtDate(c.sent_at?.slice(0, 10))}</div>
+            <div className="sm:col-span-2 sm:text-right">{c.sent}</div>
+            <div className="sm:col-span-2 sm:text-right">{c.opened} <span className="text-xs" style={{ color: "var(--text-muted)" }}>({c.sent ? Math.round((c.opened / c.sent) * 100) : 0}%)</span></div>
+            <div className="sm:col-span-2 sm:text-right">{c.clicked} <span className="text-xs" style={{ color: "var(--text-muted)" }}>({c.sent ? Math.round((c.clicked / c.sent) * 100) : 0}%)</span></div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
