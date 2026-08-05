@@ -4,8 +4,7 @@ import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
 import { toast } from "sonner";
 import { ArrowLeft, Phone, Mail, Calendar, Send } from "lucide-react";
-
-const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+import { fmtCurrency } from "@/pages/StudentsPage";
 
 export default function StudentDetailPage() {
   const { id } = useParams();
@@ -104,7 +103,7 @@ export default function StudentDetailPage() {
         </div>
         <div className="text-right shrink-0 hidden md:block">
           <div className="uppercase-label">Rate</div>
-          <div className="font-serif-display text-2xl">{fmt(student.hourly_rate)}/hr</div>
+          <div className="font-serif-display text-2xl">{fmtCurrency(student.hourly_rate, student.currency)}/hr</div>
         </div>
       </header>
 
@@ -112,8 +111,8 @@ export default function StudentDetailPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="surface p-4"><div className="uppercase-label">Classes</div><div className="font-serif-display text-2xl">{summary.classes_count}</div></div>
           <div className="surface p-4"><div className="uppercase-label">Hours</div><div className="font-serif-display text-2xl">{summary.hours_total}</div></div>
-          <div className="surface p-4"><div className="uppercase-label">Billed</div><div className="font-serif-display text-2xl">{fmt(summary.total_billed)}</div></div>
-          <div className="surface p-4"><div className="uppercase-label">Due</div><div className="font-serif-display text-2xl" style={{ color: summary.balance_due > 0 ? "var(--error)" : "var(--success)" }}>{fmt(summary.balance_due)}</div></div>
+          <div className="surface p-4"><div className="uppercase-label">Billed</div><div className="font-serif-display text-2xl">{fmtCurrency(summary.total_billed, student.currency)}</div></div>
+          <div className="surface p-4"><div className="uppercase-label">Due</div><div className="font-serif-display text-2xl" style={{ color: summary.balance_due > 0 ? "var(--error)" : "var(--success)" }}>{fmtCurrency(summary.balance_due, student.currency)}</div></div>
         </div>
       )}
 
@@ -154,8 +153,8 @@ export default function StudentDetailPage() {
                 {c.notes && <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{c.notes}</div>}
               </div>
               <div className="text-right">
-                <div>{c.hours}h · {fmt(c.rate)}/h</div>
-                <div className="font-serif-display" style={{ color: "var(--primary)" }}>{fmt(c.amount)}</div>
+                <div>{c.hours}h · {fmtCurrency(c.rate, student.currency)}/h</div>
+                <div className="font-serif-display" style={{ color: "var(--primary)" }}>{fmtCurrency(c.amount, student.currency)}</div>
               </div>
             </div>
           ))}
@@ -174,7 +173,7 @@ export default function StudentDetailPage() {
                 <div>{p.paid_on}</div>
                 <div className="text-xs" style={{ color: "var(--text-muted)" }}>{p.method}</div>
               </div>
-              <div className="font-serif-display" style={{ color: "var(--success)" }}>{fmt(p.amount)}</div>
+              <div className="font-serif-display" style={{ color: "var(--success)" }}>{fmtCurrency(p.amount, student.currency)}</div>
             </div>
           ))}
         </div>

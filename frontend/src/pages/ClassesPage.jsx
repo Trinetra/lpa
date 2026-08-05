@@ -3,8 +3,8 @@ import { api, formatApiErrorDetail } from "@/lib/api";
 import { Plus, Trash2, Pencil, X, Video, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
+import { fmtCurrency } from "@/pages/StudentsPage";
 
-const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const today = () => new Date().toISOString().slice(0, 10);
 
 const fmtMeetingWhen = (iso) => {
@@ -351,7 +351,7 @@ export default function ClassesPage() {
               <option value="" style={{ background: "var(--surface)" }}>Select student…</option>
               {visibleStudents.map((s) => (
                 <option key={s.id} value={s.id} style={{ background: "var(--surface)" }}>
-                  {s.name} — ₹{s.hourly_rate}/hr
+                  {s.name} — {fmtCurrency(s.hourly_rate, s.currency)}/hr
                 </option>
               ))}
             </select>
@@ -434,7 +434,7 @@ export default function ClassesPage() {
             <div className="flex flex-col sm:grid sm:grid-cols-12 sm:items-center gap-2 sm:gap-0">
               <div className="sm:col-span-3 flex justify-between sm:block">
                 <span>{c.class_date}</span>
-                <span className="sm:hidden font-serif-display" style={{ color: "var(--primary)" }}>{fmt(c.amount)}</span>
+                <span className="sm:hidden font-serif-display" style={{ color: "var(--primary)" }}>{fmtCurrency(c.amount, c.currency)}</span>
               </div>
               <div className="sm:col-span-3 truncate" style={{ color: "var(--text-muted)" }}>{nameOf(c.student_id)}</div>
               <div className="sm:col-span-1 sm:text-right flex sm:block items-center justify-between">
@@ -443,10 +443,10 @@ export default function ClassesPage() {
               </div>
               <div className="sm:col-span-2 sm:text-right flex sm:block items-center justify-between">
                 <span className="sm:hidden uppercase-label">Rate</span>
-                <span>{fmt(c.rate)}</span>
+                <span>{fmtCurrency(c.rate, c.currency)}</span>
               </div>
               <div className="hidden sm:block sm:col-span-2 sm:text-right font-serif-display" style={{ color: "var(--primary)" }}>
-                {fmt(c.amount)}
+                {fmtCurrency(c.amount, c.currency)}
               </div>
               <div className="sm:col-span-1 flex items-center justify-end gap-3 pt-2 sm:pt-0 mt-1 sm:mt-0" style={{ borderTop: "1px dashed var(--border)" }}>
                 <button
