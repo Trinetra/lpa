@@ -235,10 +235,6 @@ export default function SharedEventPage({ bySlug = false }) {
   return (
     <div className="min-h-screen py-14 px-6" style={{ background: "var(--bg)" }}>
       <div className="max-w-2xl mx-auto space-y-6">
-        {event.image_path && (
-          <img src={`${API}/events/${event.id}/image`} alt={event.name} data-testid="shared-event-image"
-            className="w-full rounded-lg object-cover" style={{ maxHeight: 320 }} />
-        )}
         <header>
           <div className="uppercase-label mb-2">{studio.studio_name || "Workshop"}</div>
           <h1 className="font-serif-display text-4xl sm:text-5xl mb-3" data-testid="shared-event-name">{event.name}</h1>
@@ -264,6 +260,11 @@ export default function SharedEventPage({ bySlug = false }) {
             </div>
           )}
         </header>
+
+        {event.image_path && (
+          <img src={`${API}/events/${event.id}/image`} alt={event.name} data-testid="shared-event-image"
+            className="w-full rounded-lg object-cover" style={{ maxHeight: 480 }} />
+        )}
 
         {event.description && (
           <div className="surface p-6 text-sm whitespace-pre-wrap" style={{ color: "var(--text)" }} data-testid="shared-event-description">
