@@ -106,20 +106,25 @@ function DetailsForm({ event, onSaved }) {
     }
   };
 
+  const save = async (statusOverride) => {
+    await api.patch(`/events/${event.id}`, {
+      ...form,
+      price: Number(form.price) || 0,
+      social_instagram: form.social_instagram || null,
+      social_facebook: form.social_facebook || null,
+      zoom_meeting_id: form.zoom_meeting_id || null,
+      zoom_passcode: form.zoom_passcode || null,
+      description: form.description || null,
+      time: form.time || null,
+      ...(statusOverride ? { status: statusOverride } : {}),
+    });
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.patch(`/events/${event.id}`, {
-        ...form,
-        price: Number(form.price) || 0,
-        social_instagram: form.social_instagram || null,
-        social_facebook: form.social_facebook || null,
-        zoom_meeting_id: form.zoom_meeting_id || null,
-        zoom_passcode: form.zoom_passcode || null,
-        description: form.description || null,
-        time: form.time || null,
-      });
+      await save();
       toast.success("Event updated");
       onSaved();
     } catch (e2) {
@@ -129,13 +134,21 @@ function DetailsForm({ event, onSaved }) {
     }
   };
 
+  // Publishing also saves the rest of the form (image, description, price,
+  // etc.) in the same request — otherwise a teacher who uploads an image or
+  // edits details and then clicks "Publish" (reasonably expecting that to
+  // save everything) would have those edits silently discarded, since only
+  // the status field would reach the server.
   const togglePublish = async () => {
+    setSaving(true);
     try {
-      await api.patch(`/events/${event.id}`, { status: event.status === "published" ? "draft" : "published" });
+      await save(event.status === "published" ? "draft" : "published");
       toast.success(event.status === "published" ? "Event unpublished" : "Event published");
       onSaved();
     } catch (e2) {
       toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Failed");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -152,7 +165,7 @@ function DetailsForm({ event, onSaved }) {
           >
             {event.status}
           </span>
-          <button type="button" onClick={togglePublish} data-testid="event-publish-toggle" className="btn-ghost text-xs">
+          <button type="button" onClick={togglePublish} disabled={saving} data-testid="event-publish-toggle" className="btn-ghost text-xs">
             {event.status === "published" ? "Unpublish" : "Publish"}
           </button>
         </div>
