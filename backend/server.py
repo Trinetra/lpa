@@ -1433,13 +1433,19 @@ async def dashboard(user: dict = Depends(get_current_user)):
         item["student_name"] = st.get("name") if st else "Unknown"
         recent.append(item)
 
-    # Today's scheduled classes, from the recurring weekly schedule (not the
-    # classes log, which records classes already given).
+    # Upcoming classes still to come today, from the recurring weekly
+    # schedule (not the classes log, which records classes already given) —
+    # blocks whose end_time has already passed are left off, so this reads
+    # as "what's left today" rather than every block regardless of time.
     await _prune_expired_one_offs(user["_id"])
-    today = date.today()
+    now_ist = datetime.now(IST)
+    today = now_ist.date()
+    now_hm = now_ist.strftime("%H:%M")
     today_classes = []
     cur = db.schedule_blocks.find({"owner_id": user["_id"], "day_of_week": today.weekday()}).sort("start_time", 1)
     async for b in cur:
+        if b.get("end_time") and b["end_time"] <= now_hm:
+            continue
         names = [student_map[sid]["name"] for sid in b.get("student_ids", []) if sid in student_map]
         today_classes.append({
             "id": str(b["_id"]),

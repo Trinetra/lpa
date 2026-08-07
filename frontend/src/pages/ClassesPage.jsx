@@ -12,6 +12,11 @@ const fmtMeetingWhen = (iso) => {
   return d.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 };
 
+const fmtClassDate = (isoDate) => {
+  const d = new Date(`${isoDate}T00:00:00`);
+  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "long", year: "numeric" });
+};
+
 // Lets her pick a real past Zoom session instead of typing date/hours by
 // hand — selecting one pre-fills the log-class form's date and duration.
 function ZoomPicker({ onPick }) {
@@ -439,7 +444,7 @@ export default function ClassesPage() {
             {/* Mobile: two-line card. Desktop: 12-col grid */}
             <div className="flex flex-col sm:grid sm:grid-cols-12 sm:items-center gap-2 sm:gap-0">
               <div className="sm:col-span-3 flex justify-between sm:block">
-                <span>{c.class_date}</span>
+                <span>{fmtClassDate(c.class_date)}</span>
                 <span className="sm:hidden font-serif-display" style={{ color: "var(--primary)" }}>{fmtCurrency(c.amount, c.currency)}</span>
               </div>
               <div className="sm:col-span-3 truncate" style={{ color: "var(--text-muted)" }}>{nameOf(c.student_id)}</div>

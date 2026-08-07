@@ -102,10 +102,10 @@ export default function DashboardPage() {
           <div className="surface p-6">
             <div className="flex items-center gap-2 mb-4">
               <CalendarClock size={16} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
-              <div className="uppercase-label">Today · {todayName}</div>
+              <div className="uppercase-label">Upcoming today · {todayName}</div>
             </div>
             {data.today_classes.length === 0 ? (
-              <p className="text-sm" style={{ color: "var(--text-muted)" }}>No classes scheduled today.</p>
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>No more classes scheduled today.</p>
             ) : (
               <div className="space-y-3">
                 {data.today_classes.map((c) => (
