@@ -125,6 +125,12 @@ function TopicPicker({ topics, onChange, allTopics, testidPrefix }) {
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); addTopic(input); }
         }}
+        // Typed text only becomes a saved chip on Enter or picking a
+        // suggestion — unlike a plain text field, so it can be silently lost
+        // if someone types a term and just clicks elsewhere (this is exactly
+        // what was happening: vocabulary typed here never made it into the
+        // saved class). Committing on blur closes that gap.
+        onBlur={() => { if (input.trim()) addTopic(input); }}
         placeholder="Add a topic taught (e.g. Alarippu)…"
         data-testid={`${testidPrefix}-input`}
         className="w-full bg-transparent border border-white/10 rounded px-3 py-2 text-sm"

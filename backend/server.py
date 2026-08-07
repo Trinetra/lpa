@@ -1125,7 +1125,11 @@ async def update_class(cid: str, body: ClassLogUpdate, user: dict = Depends(get_
     if not existing:
         raise HTTPException(status_code=404, detail="Class not found")
 
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    # exclude_unset (not "v is not None") so a field explicitly cleared to
+    # null/empty-string in the request — e.g. clearing the Notes field —
+    # actually gets saved as cleared, instead of being silently dropped
+    # because it looks the same as "field not included in this PATCH".
+    updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -1136,10 +1140,11 @@ async def update_class(cid: str, body: ClassLogUpdate, user: dict = Depends(get_
         raise HTTPException(status_code=404, detail="Student not found")
 
     hours = updates.get("hours", existing.get("hours"))
-    rate_override = updates.get("rate_override")
-    # rate_override key present -> use it (may be null explicitly not possible via patch since None is stripped)
-    if rate_override is not None:
-        rate = rate_override
+    # rate_override key present in the request -> use it (including an
+    # explicit null, meaning "clear the override, fall back to the
+    # student's rate" — see the branch below).
+    if "rate_override" in updates and updates["rate_override"] is not None:
+        rate = updates["rate_override"]
     elif "rate_override" not in updates and existing.get("rate") is not None and existing.get("student_id") == student_id and updates.get("student_id") is None:
         # keep existing rate if student unchanged and no override change
         rate = existing.get("rate")
