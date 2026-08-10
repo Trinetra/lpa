@@ -18,6 +18,7 @@ from bson import ObjectId
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -127,7 +128,16 @@ async def get_credentials(owner_id: str, scopes: Optional[list] = None) -> Optio
         client_secret=os.environ["GOOGLE_OAUTH_CLIENT_SECRET"],
         scopes=scopes or SCOPES,
     )
-    creds.refresh(GoogleAuthRequest())
+    try:
+        creds.refresh(GoogleAuthRequest())
+    except RefreshError:
+        # Expired/revoked refresh token (e.g. the teacher's Google session
+        # was invalidated) — every caller already treats a None return the
+        # same as "Calendar isn't connected", so schedule edits and other
+        # Calendar-dependent actions keep working without sync rather than
+        # crashing outright until she reconnects.
+        logger.error(f"Google credentials refresh failed for owner {owner_id} — token likely expired/revoked")
+        return None
     return creds
 
 

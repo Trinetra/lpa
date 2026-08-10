@@ -1,8 +1,66 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { studentApi, formatApiErrorDetail } from "@/lib/api";
+import { useStudentAuth } from "@/context/StudentAuthContext";
 import InstallAppCard from "@/components/student/InstallAppCard";
-import { KeyRound, Loader2 } from "lucide-react";
+import StudentAuthImage from "@/components/student/StudentAuthImage";
+import PushNotificationToggle from "@/components/PushNotificationToggle";
+import { KeyRound, Loader2, Upload, User, BellRing } from "lucide-react";
 import { toast } from "sonner";
+
+function ProfilePhotoCard() {
+  const { student, setStudent } = useStudentAuth();
+  const [photoPath, setPhotoPath] = useState(student?.photo_path || null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const { data } = await studentApi.post("/student/me/photo", body, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setPhotoPath(data.path);
+      setStudent((s) => (s ? { ...s, photo_path: data.path } : s));
+      toast.success("Photo updated");
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div data-testid="portal-photo-card" className="surface p-6">
+      <div className="flex items-center gap-2 mb-6">
+        <User size={14} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
+        <div className="uppercase-label">Profile</div>
+      </div>
+      <div className="flex items-center gap-4">
+        <div className="w-16 h-16 rounded-full overflow-hidden shrink-0" style={{ background: "var(--surface-2)" }}>
+          <StudentAuthImage
+            path={photoPath}
+            className="w-full h-full object-cover"
+            testid="portal-photo-preview"
+            fallback={
+              <div className="w-full h-full flex items-center justify-center font-serif-display text-xl" style={{ color: "var(--primary)" }}>
+                {(student?.name || "?").charAt(0)}
+              </div>
+            }
+          />
+        </div>
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+          className="btn-ghost flex items-center gap-2 text-xs" data-testid="portal-photo-upload-btn">
+          {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Change photo
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" onChange={handleUpload} className="hidden" data-testid="portal-photo-input" />
+      </div>
+    </div>
+  );
+}
 
 function ChangePasswordCard() {
   const [current, setCurrent] = useState("");
@@ -65,6 +123,28 @@ function ChangePasswordCard() {
   );
 }
 
+function NotificationsCard() {
+  return (
+    <div data-testid="portal-notifications-card" className="surface p-6">
+      <div className="flex items-center gap-2 mb-1">
+        <BellRing size={14} strokeWidth={1.5} style={{ color: "var(--primary)" }} />
+        <div className="uppercase-label">Notifications</div>
+      </div>
+      <h2 className="font-serif-display text-2xl mb-2">Push notifications</h2>
+      <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
+        Get notified on this device when your teacher reschedules or cancels a class, and when
+        your own change requests are approved or denied.
+      </p>
+      <PushNotificationToggle
+        apiClient={studentApi}
+        subscribeUrl="/student/push/subscribe"
+        unsubscribeUrl="/student/push/unsubscribe"
+        testidPrefix="portal-settings-push"
+      />
+    </div>
+  );
+}
+
 export default function StudentSettingsPage() {
   return (
     <div data-testid="portal-settings-page" className="space-y-8">
@@ -74,6 +154,8 @@ export default function StudentSettingsPage() {
       </header>
 
       <div className="space-y-6 max-w-xl">
+        <ProfilePhotoCard />
+        <NotificationsCard />
         <InstallAppCard />
         <ChangePasswordCard />
       </div>

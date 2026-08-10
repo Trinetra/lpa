@@ -160,6 +160,7 @@ class ProfileUpdate(BaseModel):
     bank_swift_code: Optional[str] = None
 
 SUPPORTED_CURRENCIES = ["INR", "EUR", "USD", "GBP"]
+_WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
 
 class StudentCreate(BaseModel):
@@ -2009,6 +2010,16 @@ async def update_schedule_block(block_id: str, body: ScheduleBlockUpdate, user: 
     if event_id and event_id != doc.get("google_event_id"):
         await db.schedule_blocks.update_one({"_id": doc["_id"]}, {"$set": {"google_event_id": event_id}})
         doc["google_event_id"] = event_id
+
+    # Only the day/time actually moving is worth a push — not every metadata
+    # edit (notes, is_one_off toggling without a day change, etc).
+    if day_of_week != existing["day_of_week"] or start_time != existing["start_time"] or end_time != existing["end_time"]:
+        when = f"{_WEEKDAY_NAMES[day_of_week]} {start_time}"
+        for sid in doc["student_ids"]:
+            await push_service.send_push(
+                "student", sid,
+                "Class rescheduled", f"Your teacher moved this class to {when}", "/portal/schedule",
+            )
     return ser_schedule_block(doc)
 
 @api_router.delete("/schedule/{block_id}")
@@ -2018,6 +2029,11 @@ async def delete_schedule_block(block_id: str, user: dict = Depends(get_current_
         raise HTTPException(status_code=404, detail="Schedule block not found")
     await calendar_service.sync_block_delete(user["_id"], existing.get("google_event_id"))
     await db.schedule_blocks.delete_one({"_id": ObjectId(block_id), "owner_id": user["_id"]})
+    for sid in existing.get("student_ids", []):
+        await push_service.send_push(
+            "student", sid,
+            "Class cancelled", "Your teacher removed this class from the schedule", "/portal/schedule",
+        )
     return {"ok": True}
 
 # --------------- Student portal -----------------
@@ -2040,6 +2056,9 @@ class StudentSetPasswordRequest(BaseModel):
 class StudentLoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+class StudentSelfUpdate(BaseModel):
+    photo_path: Optional[str] = None
 
 class StudentNoteCreate(BaseModel):
     text: str
@@ -2268,12 +2287,45 @@ async def student_me(student: dict = Depends(get_current_student)):
         "name": student.get("name"),
         "email": student.get("email"),
         "level": student.get("level"),
+        "photo_path": student.get("photo_path"),
         "has_password": student.get("_has_password", False),
         "studio_name": (owner or {}).get("studio_name"),
         "teacher_name": (owner or {}).get("teacher_name") or (owner or {}).get("name"),
         "contact_email": (owner or {}).get("contact_email") or (owner or {}).get("email"),
         "contact_phone": (owner or {}).get("contact_phone"),
     }
+
+@api_router.patch("/student/me")
+async def update_own_profile(body: StudentSelfUpdate, student: dict = Depends(get_current_student)):
+    # Deliberately narrow — only the photo is self-editable. Name/email/level
+    # stay teacher-managed roster fields, not something a student can change
+    # unilaterally.
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.students.update_one({"_id": ObjectId(student["_id"])}, {"$set": updates})
+    return {"ok": True}
+
+@api_router.post("/student/me/photo")
+async def upload_own_photo(file: UploadFile = File(...), student: dict = Depends(get_current_student)):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads allowed")
+    ext = "jpg"
+    if file.filename and "." in file.filename:
+        ext = file.filename.rsplit(".", 1)[-1].lower()
+    path = f"{APP_NAME}/uploads/{student['owner_id']}/student-{student['_id']}/{uuid.uuid4()}.{ext}"
+    data = await file.read()
+    result = put_object(path, data, file.content_type)
+    await db.files.insert_one({
+        "storage_path": result["path"],
+        "student_id": student["_id"],
+        "content_type": file.content_type,
+        "size": result.get("size"),
+        "is_deleted": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    await db.students.update_one({"_id": ObjectId(student["_id"])}, {"$set": {"photo_path": result["path"]}})
+    return {"path": result["path"]}
 
 def _next_occurrence_datetime(day_of_week: int, start_time: str, now_ist: datetime) -> datetime:
     """Next strictly-future occurrence of a weekly day/time, as an IST-aware
