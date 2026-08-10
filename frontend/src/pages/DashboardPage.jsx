@@ -46,7 +46,20 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get("/dashboard").then((r) => setData(r.data)).finally(() => setLoading(false));
+    const load = () => api.get("/dashboard").then((r) => setData(r.data)).finally(() => setLoading(false));
+    load();
+    // A PWA left open in the background can sit on a stale dashboard
+    // indefinitely — refetch on refocus so "upcoming today" (time-sensitive)
+    // and anything changed elsewhere/on another device shows up without
+    // needing to fully close and reopen the app.
+    const onFocus = () => load();
+    const onVisibility = () => { if (document.visibilityState === "visible") load(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   if (loading) return <div data-testid="dashboard-loading" className="uppercase-label">Loading…</div>;

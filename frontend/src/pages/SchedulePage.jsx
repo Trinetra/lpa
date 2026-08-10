@@ -341,6 +341,22 @@ export default function SchedulePage() {
 
   useEffect(() => { load(); }, []);
 
+  // A PWA left open in the background can sit on a stale in-memory schedule
+  // indefinitely — this fetch only ever ran once on mount, so a class added
+  // elsewhere (another device, or the same phone earlier) never appeared
+  // until the app was fully killed and reopened. Refetch whenever the tab
+  // regains focus/visibility so switching back to it is enough.
+  useEffect(() => {
+    const onFocus = () => load();
+    const onVisibility = () => { if (document.visibilityState === "visible") load(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const patchBlock = async (id, body) => {
