@@ -41,7 +41,14 @@ export default function PushNotificationToggle({
         toast.success("Push notifications enabled");
       }
     } catch (e) {
-      toast.error("Couldn't update notification settings");
+      console.error("Push subscription failed:", e);
+      if (e?.name === "NotAllowedError" || Notification.permission === "denied") {
+        toast.error("Notifications are blocked for this site in your browser settings");
+      } else if (e?.name === "NotSupportedError") {
+        toast.error("Push notifications aren't supported in this browser");
+      } else {
+        toast.error(e?.message ? `Couldn't update notification settings: ${e.message}` : "Couldn't update notification settings");
+      }
     } finally {
       setBusy(false);
     }
