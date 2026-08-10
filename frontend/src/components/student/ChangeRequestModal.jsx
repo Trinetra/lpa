@@ -1,11 +1,30 @@
 import React, { useState } from "react";
 import { studentApi, formatApiErrorDetail } from "@/lib/api";
+import { useStudentAuth } from "@/context/StudentAuthContext";
 import { toast } from "sonner";
-import { X } from "lucide-react";
+import { X, AlertTriangle } from "lucide-react";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
+function TooLateModal({ studentName, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+      <div data-testid="portal-change-too-late-modal" className="surface w-full max-w-sm p-6 text-center">
+        <AlertTriangle size={28} style={{ color: "var(--error)", margin: "0 auto 12px" }} />
+        <p className="text-sm mb-6" style={{ color: "var(--text)" }}>
+          Sorry, {studentName}, you cannot reschedule this class yourself since it is within the 24 hour period.
+          Please contact Lakshmi directly to request a schedule change.
+        </p>
+        <button type="button" onClick={onClose} className="btn-pill" data-testid="portal-change-too-late-close">
+          Okay
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ChangeRequestModal({ block, onClose, onDone }) {
+  const { student } = useStudentAuth();
   const [type, setType] = useState("cancel");
   const [scope, setScope] = useState("one_time");
   const [requestedDay, setRequestedDay] = useState(block.day_of_week);
@@ -14,6 +33,7 @@ export default function ChangeRequestModal({ block, onClose, onDone }) {
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState("");
+  const [tooLate, setTooLate] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -35,10 +55,19 @@ export default function ChangeRequestModal({ block, onClose, onDone }) {
       onDone?.(data);
       onClose();
     } catch (e2) {
+      if (e2?.response?.status === 422) {
+        setSubmitting(false);
+        setTooLate(true);
+        return;
+      }
       setErr(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't submit that request");
       setSubmitting(false);
     }
   };
+
+  if (tooLate) {
+    return <TooLateModal studentName={student?.name || "there"} onClose={onClose} />;
+  }
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)" }}>
