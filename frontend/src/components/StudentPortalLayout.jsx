@@ -14,6 +14,7 @@ import {
   Sun,
   Moon,
   LogOut,
+  Megaphone,
 } from "lucide-react";
 
 export default function StudentPortalLayout() {
@@ -33,6 +34,7 @@ export default function StudentPortalLayout() {
 
   const links = [
     { to: "/portal/schedule", label: "Schedule", icon: CalendarClock, tid: "portal-nav-schedule" },
+    { to: "/portal/announcements", label: "Announcements", icon: Megaphone, tid: "portal-nav-announcements" },
     { to: "/portal/dues", label: "Dues", icon: Wallet, tid: "portal-nav-dues" },
     { to: "/portal/progress", label: "Progress", icon: BookOpenCheck, tid: "portal-nav-progress" },
     { to: "/portal/notes", label: "Notes", icon: NotebookPen, tid: "portal-nav-notes" },

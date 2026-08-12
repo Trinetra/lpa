@@ -25,6 +25,7 @@ import SharedTourPage from "@/pages/SharedTourPage";
 import EventsPage from "@/pages/EventsPage";
 import EventDetailPage from "@/pages/EventDetailPage";
 import CrmPage from "@/pages/CrmPage";
+import AnnouncementsPage from "@/pages/AnnouncementsPage";
 import SharedEventPage from "@/pages/SharedEventPage";
 import PublicSlugResolverPage from "@/pages/PublicSlugResolverPage";
 import PortalActivityPage from "@/pages/PortalActivityPage";
@@ -37,6 +38,7 @@ import StudentProgressPage from "@/pages/student/StudentProgressPage";
 import StudentNotesPage from "@/pages/student/StudentNotesPage";
 import StudentPaymentProofPage from "@/pages/student/StudentPaymentProofPage";
 import StudentSettingsPage from "@/pages/student/StudentSettingsPage";
+import StudentAnnouncementsPage from "@/pages/student/StudentAnnouncementsPage";
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -128,6 +130,7 @@ function StudentPortalRoutes() {
           <Route path="notes" element={<StudentNotesPage />} />
           <Route path="payment-proof" element={<StudentPaymentProofPage />} />
           <Route path="settings" element={<StudentSettingsPage />} />
+          <Route path="announcements" element={<StudentAnnouncementsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="login" replace />} />
       </Routes>
@@ -164,6 +167,7 @@ function AppRoutes() {
         <Route path="/events" element={<EventsPage />} />
         <Route path="/events/:id" element={<EventDetailPage />} />
         <Route path="/crm" element={<CrmPage />} />
+        <Route path="/announcements" element={<AnnouncementsPage />} />
         <Route path="/charts" element={<ChartsPage />} />
         <Route path="/requests" element={<PortalActivityPage />} />
         <Route path="/settings" element={<SettingsPage />} />

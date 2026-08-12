@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
-import { Plus, Trash2, Pencil, X, Video, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Pencil, X, Video, ChevronDown, Mic } from "lucide-react";
 import { toast } from "sonner";
 import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
 import { fmtCurrency } from "@/pages/StudentsPage";
+import VoiceNoteRecorder from "@/components/VoiceNoteRecorder";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -173,6 +174,7 @@ function EditClassModal({ item, students, allTopics, onClose, onSaved }) {
     topics: item.topics || [],
   });
   const [saving, setSaving] = useState(false);
+  const [audioState, setAudioState] = useState(item);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -247,6 +249,17 @@ function EditClassModal({ item, students, allTopics, onClose, onSaved }) {
               data-testid="edit-class-notes"
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
           </label>
+          <div className="sm:col-span-2">
+            <span className="uppercase-label block mb-1">Voice note</span>
+            <VoiceNoteRecorder
+              classId={item.id}
+              existing={audioState}
+              onChanged={(updated) => { setAudioState(updated); onSaved(); }}
+            />
+            {audioState.transcript && (
+              <p className="text-xs mt-2 italic" style={{ color: "var(--text-muted)" }}>"{audioState.transcript}"</p>
+            )}
+          </div>
         </div>
         <div className="flex justify-end gap-3 mt-6">
           <button type="button" onClick={onClose} className="btn-ghost" data-testid="edit-class-cancel">Cancel</button>
@@ -275,6 +288,7 @@ export default function ClassesPage() {
   });
   const [saving, setSaving] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
+  const [pendingAudio, setPendingAudio] = useState(null); // { blob, duration } recorded before the class exists
 
   const visibleStudents = filterActive(students, showInactive);
   const inactiveCount = inactiveCountOf(students);
@@ -298,7 +312,7 @@ export default function ClassesPage() {
     }
     setSaving(true);
     try {
-      await api.post("/classes", {
+      const { data: created } = await api.post("/classes", {
         student_id: form.student_id,
         hours: Number(form.hours),
         class_date: form.class_date,
@@ -307,8 +321,21 @@ export default function ClassesPage() {
         rate_override:
           form.rate_override === "" ? null : Number(form.rate_override),
       });
+      if (pendingAudio) {
+        const body = new FormData();
+        body.append("file", pendingAudio.blob, `note.${pendingAudio.blob.type.includes("mp4") ? "m4a" : "webm"}`);
+        body.append("duration_seconds", String(pendingAudio.duration));
+        try {
+          await api.post(`/classes/${created.id}/audio`, body, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+        } catch (e3) {
+          toast.error("Class logged, but the voice note failed to save");
+        }
+      }
       toast.success("Class logged");
       setForm({ ...form, hours: 1, notes: "", rate_override: "", topics: [] });
+      setPendingAudio(null);
       load();
     } catch (e2) {
       toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Save failed");
@@ -399,6 +426,10 @@ export default function ClassesPage() {
               data-testid="log-notes-input"
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
           </label>
+          <div className="md:col-span-5">
+            <span className="uppercase-label block mb-1">Voice note</span>
+            <VoiceNoteRecorder onLocalBlob={(blob, duration) => setPendingAudio(blob ? { blob, duration } : null)} />
+          </div>
           <div className="md:col-span-1 flex items-end">
             <button type="submit" disabled={saving} data-testid="log-submit-btn"
               className="btn-pill w-full flex items-center justify-center gap-2">
@@ -493,6 +524,11 @@ export default function ClassesPage() {
             )}
             {c.notes && (
               <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{c.notes}</div>
+            )}
+            {c.has_audio && (
+              <div className="flex items-center gap-1 mt-1 text-xs" style={{ color: "var(--primary)" }}>
+                <Mic size={11} /> Voice note
+              </div>
             )}
           </div>
         ))}

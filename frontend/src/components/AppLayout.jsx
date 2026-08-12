@@ -22,6 +22,7 @@ import {
   X,
   PartyPopper,
   Contact,
+  Megaphone,
 } from "lucide-react";
 
 export default function AppLayout() {
@@ -76,6 +77,7 @@ export default function AppLayout() {
     { to: "/tours", label: "Tours", icon: Plane, tid: "nav-tours" },
     { to: "/events", label: "Events", icon: PartyPopper, tid: "nav-events" },
     { to: "/crm", label: "Contacts", icon: Contact, tid: "nav-crm" },
+    { to: "/announcements", label: "Announcements", icon: Megaphone, tid: "nav-announcements" },
     { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
     { to: "/requests", label: "Requests", icon: Inbox, tid: "nav-requests" },
     { to: "/settings", label: "Settings", icon: Settings, tid: "nav-settings" },

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { studentApi } from "@/lib/api";
 import { useTheme } from "@/context/ThemeContext";
+import StudentAudioPlayer from "@/components/student/StudentAudioPlayer";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -131,6 +132,14 @@ export default function StudentProgressPage() {
                 )}
                 {c.notes && (
                   <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{c.notes}</div>
+                )}
+                {c.has_audio && (
+                  <div className="mt-1.5">
+                    <StudentAudioPlayer classId={c.id} durationSeconds={c.audio_duration_seconds} testid={`portal-audio-${c.id}`} />
+                    {c.transcript && (
+                      <p className="text-xs mt-1 italic" style={{ color: "var(--text-muted)" }}>"{c.transcript}"</p>
+                    )}
+                  </div>
                 )}
               </div>
               <div className="shrink-0" style={{ color: "var(--text-muted)" }}>{c.hours}h</div>

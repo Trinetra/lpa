@@ -39,6 +39,7 @@ from services import zoom as zoom_service
 from services import fx as fx_service
 from services import push as push_service
 from services import geocoding as geocoding_service
+from services import transcription as transcription_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
@@ -162,6 +163,11 @@ class ProfileUpdate(BaseModel):
 SUPPORTED_CURRENCIES = ["INR", "EUR", "USD", "GBP"]
 _WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
+# Browsers pick their own native MediaRecorder codec — Chrome/Firefox/Edge
+# default to WebM/Opus, Safari/iOS to MP4/AAC. Both are already compact and
+# well-suited for voice; no server-side transcoding needed.
+CLASS_AUDIO_CONTENT_TYPES = {"audio/webm", "audio/mp4", "audio/ogg", "audio/mpeg", "audio/wav"}
+CLASS_AUDIO_MAX_BYTES = 25 * 1024 * 1024
 
 class StudentCreate(BaseModel):
     name: str
@@ -271,7 +277,7 @@ class TourUpdate(BaseModel):
 RESERVED_SLUGS = {
     "login", "reset-password", "invoice", "tour", "dashboard", "students",
     "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
-    "portal", "requests", "event", "events", "crm",
+    "portal", "requests", "event", "events", "crm", "announcements",
 }
 
 # Public tour/event links live on the bare root domain, not the app's own
@@ -425,6 +431,14 @@ class EventPushInviteRequest(BaseModel):
 class CrmBulkInviteRequest(BaseModel):
     contact_ids: List[str]
     event_id: str
+
+class AnnouncementCreate(BaseModel):
+    body: str
+    image_path: Optional[str] = None
+
+class AnnouncementUpdate(BaseModel):
+    body: Optional[str] = None
+    image_path: Optional[str] = None
     force: bool = False  # re-send to contacts already invited to this event
 
 # --------------- Serializers -----------------
@@ -457,6 +471,10 @@ def ser_class(doc):
         "currency": doc.get("currency", "INR"),
         "amount": doc.get("amount"),
         "created_at": doc.get("created_at"),
+        "has_audio": bool(doc.get("audio_path")),
+        "audio_duration_seconds": doc.get("audio_duration_seconds"),
+        "transcript": doc.get("transcript"),
+        "transcript_status": doc.get("transcript_status"),
     }
 
 def ser_payment(doc):
@@ -553,6 +571,16 @@ def ser_crm_contact(doc):
         "country": doc.get("country"),
         "dob": doc.get("dob"),
         "created_at": doc.get("created_at"),
+    }
+
+def ser_announcement(doc):
+    return {
+        "id": str(doc["_id"]),
+        "body": doc.get("body"),
+        "image_path": doc.get("image_path"),
+        "is_retracted": doc.get("is_retracted", False),
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
     }
 
 def ser_tour_stop(doc):
@@ -1164,6 +1192,67 @@ async def update_class(cid: str, body: ClassLogUpdate, user: dict = Depends(get_
     if updates.get("topics"):
         await _remember_topics(user["_id"], updates["topics"])
     return ser_class(doc)
+
+@api_router.post("/classes/{cid}/audio")
+async def upload_class_audio(cid: str, file: UploadFile = File(...), duration_seconds: Optional[float] = Form(None),
+                              user: dict = Depends(get_current_user)):
+    existing = await db.classes.find_one({"_id": ObjectId(cid), "owner_id": user["_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if not file.content_type or file.content_type.split(";")[0] not in CLASS_AUDIO_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported audio format")
+    data = await file.read()
+    if len(data) > CLASS_AUDIO_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Recording is too large (max 25MB)")
+    ext = {"audio/webm": "webm", "audio/mp4": "m4a", "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/wav": "wav"}.get(
+        file.content_type.split(";")[0], "webm"
+    )
+    path = f"{APP_NAME}/class-audio/{user['_id']}/{cid}/{uuid.uuid4()}.{ext}"
+    result = put_object(path, data, file.content_type)
+    await db.files.insert_one({
+        "storage_path": result["path"],
+        "user_id": user["_id"],
+        "content_type": file.content_type,
+        "size": result.get("size"),
+        "is_deleted": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    # A re-recording replaces the old one outright — one voice note per
+    # class, not a growing list — so any previous transcript is stale too.
+    await db.classes.update_one(
+        {"_id": ObjectId(cid)},
+        {"$set": {
+            "audio_path": result["path"],
+            "audio_duration_seconds": duration_seconds,
+            "transcript": None,
+            "transcript_status": "pending" if os.environ.get("OPENAI_API_KEY") else None,
+        }},
+    )
+    doc = await db.classes.find_one({"_id": ObjectId(cid)})
+    return ser_class(doc)
+
+@api_router.delete("/classes/{cid}/audio")
+async def delete_class_audio(cid: str, user: dict = Depends(get_current_user)):
+    existing = await db.classes.find_one({"_id": ObjectId(cid), "owner_id": user["_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Class not found")
+    await db.classes.update_one(
+        {"_id": ObjectId(cid)},
+        {"$set": {"audio_path": None, "audio_duration_seconds": None, "transcript": None, "transcript_status": None}},
+    )
+    doc = await db.classes.find_one({"_id": ObjectId(cid)})
+    return ser_class(doc)
+
+@api_router.get("/classes/{cid}/audio")
+async def get_class_audio(cid: str, user: dict = Depends(get_current_user)):
+    existing = await db.classes.find_one({"_id": ObjectId(cid), "owner_id": user["_id"]})
+    if not existing or not existing.get("audio_path"):
+        raise HTTPException(status_code=404, detail="No recording on file")
+    try:
+        data, ct = get_object(existing["audio_path"])
+    except Exception:
+        raise HTTPException(status_code=404, detail="Recording unavailable")
+    return Response(content=data, media_type=ct or "audio/webm")
 
 # --------------- FX / payment reconciliation -----------------
 @api_router.get("/fx-rate")
@@ -2380,8 +2469,24 @@ async def student_progress(student: dict = Depends(get_current_student)):
             "hours": c.get("hours"),
             "topics": c.get("topics", []),
             "notes": c.get("notes"),
+            "has_audio": bool(c.get("audio_path")),
+            "audio_duration_seconds": c.get("audio_duration_seconds"),
+            "transcript": c.get("transcript"),
         })
     return out
+
+@api_router.get("/student/classes/{cid}/audio")
+async def get_student_class_audio(cid: str, student: dict = Depends(get_current_student)):
+    existing = await db.classes.find_one({
+        "_id": ObjectId(cid), "owner_id": student["owner_id"], "student_id": student["_id"],
+    })
+    if not existing or not existing.get("audio_path"):
+        raise HTTPException(status_code=404, detail="No recording on file")
+    try:
+        data, ct = get_object(existing["audio_path"])
+    except Exception:
+        raise HTTPException(status_code=404, detail="Recording unavailable")
+    return Response(content=data, media_type=ct or "audio/webm")
 
 @api_router.get("/student/progress-monthly")
 async def student_progress_monthly(months: int = 6, student: dict = Depends(get_current_student)):
@@ -3544,6 +3649,107 @@ def _age_from_dob(dob: Optional[str]) -> Optional[int]:
     today = datetime.now(timezone.utc).date()
     return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
 
+# --------------- Announcements -----------------
+async def _get_owned_announcement(announcement_id: str, owner_id: str) -> dict:
+    a = await db.announcements.find_one({"_id": ObjectId(announcement_id), "owner_id": owner_id})
+    if not a:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    return a
+
+@api_router.get("/announcements")
+async def list_announcements(user: dict = Depends(get_current_user)):
+    """Newest first, with a read/unread count against currently active
+    students — retracted posts stay listed (struck through client-side) so
+    there's a record of what was said and un-said, rather than vanishing."""
+    active_count = await db.students.count_documents({"owner_id": user["_id"], "is_active": {"$ne": False}})
+    out = []
+    cur = db.announcements.find({"owner_id": user["_id"]}).sort("created_at", -1)
+    async for a in cur:
+        item = ser_announcement(a)
+        read_count = await db.announcement_reads.count_documents({"announcement_id": str(a["_id"])})
+        item["read_count"] = read_count
+        item["total_students"] = active_count
+        out.append(item)
+    return out
+
+@api_router.post("/announcements")
+async def create_announcement(body: AnnouncementCreate, user: dict = Depends(get_current_user)):
+    now = datetime.now(timezone.utc).isoformat()
+    doc = body.model_dump()
+    doc["owner_id"] = user["_id"]
+    doc["is_retracted"] = False
+    doc["created_at"] = now
+    doc["updated_at"] = now
+    res = await db.announcements.insert_one(doc)
+    doc["_id"] = res.inserted_id
+
+    owner = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    teacher_name = (owner or {}).get("teacher_name") or (owner or {}).get("name") or "Your teacher"
+    preview = body.body if len(body.body) <= 120 else body.body[:117] + "..."
+    async for s in db.students.find({"owner_id": user["_id"], "is_active": {"$ne": False}}):
+        await push_service.send_push(
+            "student", str(s["_id"]), f"New update from {teacher_name}", preview, "/portal/announcements",
+        )
+    return ser_announcement(doc)
+
+@api_router.patch("/announcements/{announcement_id}")
+async def update_announcement(announcement_id: str, body: AnnouncementUpdate, user: dict = Depends(get_current_user)):
+    await _get_owned_announcement(announcement_id, user["_id"])
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.announcements.update_one({"_id": ObjectId(announcement_id)}, {"$set": updates})
+    return ser_announcement(await db.announcements.find_one({"_id": ObjectId(announcement_id)}))
+
+@api_router.post("/announcements/{announcement_id}/retract")
+async def retract_announcement(announcement_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_announcement(announcement_id, user["_id"])
+    await db.announcements.update_one(
+        {"_id": ObjectId(announcement_id)},
+        {"$set": {"is_retracted": True, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return ser_announcement(await db.announcements.find_one({"_id": ObjectId(announcement_id)}))
+
+@api_router.post("/announcements/{announcement_id}/unretract")
+async def unretract_announcement(announcement_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_announcement(announcement_id, user["_id"])
+    await db.announcements.update_one(
+        {"_id": ObjectId(announcement_id)},
+        {"$set": {"is_retracted": False, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return ser_announcement(await db.announcements.find_one({"_id": ObjectId(announcement_id)}))
+
+@api_router.delete("/announcements/{announcement_id}")
+async def delete_announcement(announcement_id: str, user: dict = Depends(get_current_user)):
+    await _get_owned_announcement(announcement_id, user["_id"])
+    await db.announcements.delete_one({"_id": ObjectId(announcement_id)})
+    await db.announcement_reads.delete_many({"announcement_id": announcement_id})
+    return {"ok": True}
+
+@api_router.get("/student/announcements")
+async def list_student_announcements(student: dict = Depends(get_current_student)):
+    out = []
+    cur = db.announcements.find({"owner_id": student["owner_id"], "is_retracted": {"$ne": True}}).sort("created_at", -1)
+    async for a in cur:
+        item = ser_announcement(a)
+        read = await db.announcement_reads.find_one({"announcement_id": str(a["_id"]), "student_id": student["_id"]})
+        item["read"] = bool(read)
+        out.append(item)
+    return out
+
+@api_router.post("/student/announcements/{announcement_id}/read")
+async def mark_announcement_read(announcement_id: str, student: dict = Depends(get_current_student)):
+    a = await db.announcements.find_one({"_id": ObjectId(announcement_id), "owner_id": student["owner_id"]})
+    if not a:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    await db.announcement_reads.update_one(
+        {"announcement_id": announcement_id, "student_id": student["_id"]},
+        {"$setOnInsert": {"read_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"ok": True}
+
 @api_router.get("/crm/contacts")
 async def list_crm_contacts(
     q: Optional[str] = None,
@@ -3954,6 +4160,33 @@ async def reminders_cron(secret: str = Query(...)):
         raise HTTPException(status_code=404, detail="Admin user not found")
     return await reminders_service.send_due_reminders(str(user["_id"]))
 
+@api_router.post("/transcription/cron")
+async def transcription_cron(secret: str = Query(...)):
+    """Triggered periodically by a host cron job — transcribes any class
+    voice note still marked pending, one request per recording (Whisper has
+    no batch endpoint). No-op entirely if OPENAI_API_KEY isn't set."""
+    expected = os.environ.get("BACKUP_CRON_SECRET")  # reuse the same shared secret
+    if not expected or secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not transcription_service.is_configured():
+        return {"ok": True, "processed": 0, "reason": "OPENAI_API_KEY not set"}
+
+    processed, failed = 0, 0
+    async for c in db.classes.find({"transcript_status": "pending", "audio_path": {"$ne": None}}):
+        try:
+            data, ct = get_object(c["audio_path"])
+            ext = c["audio_path"].rsplit(".", 1)[-1]
+            text = await transcription_service.transcribe(data, ct or "audio/webm", f"note.{ext}")
+            await db.classes.update_one(
+                {"_id": c["_id"]}, {"$set": {"transcript": text, "transcript_status": "done"}}
+            )
+            processed += 1
+        except Exception as e:
+            logger.error(f"Transcription failed for class {c['_id']}: {e}")
+            await db.classes.update_one({"_id": c["_id"]}, {"$set": {"transcript_status": "failed"}})
+            failed += 1
+    return {"ok": True, "processed": processed, "failed": failed}
+
 # --------------- App wiring -----------------
 app.include_router(api_router)
 
@@ -4017,6 +4250,8 @@ async def on_startup():
     await db.crm_contacts.create_index([("owner_id", 1), ("email", 1)], unique=True)
     await db.crm_invite_opens.create_index("track_token", unique=True)
     await db.crm_invite_opens.create_index([("owner_id", 1), ("contact_id", 1)])
+    await db.announcements.create_index([("owner_id", 1), ("created_at", -1)])
+    await db.announcement_reads.create_index([("announcement_id", 1), ("student_id", 1)], unique=True)
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()
