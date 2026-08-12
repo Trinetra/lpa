@@ -82,7 +82,7 @@ function ZoomPicker({ onPick }) {
 
 // Free-add, studio-wide topic tags: type a new one to create it (added to
 // the shared autocomplete list on save), or pick from what's already there.
-function TopicPicker({ topics, onChange, allTopics, testidPrefix }) {
+function TopicPicker({ topics, onChange, allTopics, testidPrefix, onDeleteTopic }) {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -144,11 +144,23 @@ function TopicPicker({ topics, onChange, allTopics, testidPrefix }) {
       {open && (suggestions.length > 0 || isNew) && (
         <div className="absolute z-10 mt-1 w-full surface p-1 max-h-48 overflow-y-auto" style={{ borderColor: "var(--border)" }}>
           {suggestions.map((t) => (
-            <button key={t} type="button" onClick={() => addTopic(t)}
-              data-testid={`${testidPrefix}-suggestion-${t}`}
-              className="w-full text-left text-sm px-3 py-1.5 rounded hover:bg-white/5">
-              {t}
-            </button>
+            <div key={t} className="flex items-center gap-1">
+              <button type="button" onClick={() => addTopic(t)}
+                data-testid={`${testidPrefix}-suggestion-${t}`}
+                className="flex-1 text-left text-sm px-3 py-1.5 rounded hover:bg-white/5 truncate">
+                {t}
+              </button>
+              {onDeleteTopic && (
+                <button type="button"
+                  onClick={(e) => { e.stopPropagation(); onDeleteTopic(t); }}
+                  data-testid={`${testidPrefix}-suggestion-delete-${t}`}
+                  title="Remove from vocabulary list"
+                  className="p-1.5 rounded hover:bg-white/5 shrink-0"
+                  style={{ color: "var(--text-muted)" }}>
+                  <X size={12} />
+                </button>
+              )}
+            </div>
           ))}
           {isNew && (
             <button type="button" onClick={() => addTopic(input)}
@@ -164,7 +176,7 @@ function TopicPicker({ topics, onChange, allTopics, testidPrefix }) {
   );
 }
 
-function EditClassModal({ item, students, allTopics, onClose, onSaved }) {
+function EditClassModal({ item, students, allTopics, onClose, onSaved, onDeleteTopic }) {
   const [form, setForm] = useState({
     student_id: item.student_id,
     hours: item.hours,
@@ -241,7 +253,7 @@ function EditClassModal({ item, students, allTopics, onClose, onSaved }) {
           <label className="sm:col-span-2">
             <span className="uppercase-label block mb-1">Topics taught</span>
             <TopicPicker topics={form.topics} onChange={(topics) => setForm({ ...form, topics })}
-              allTopics={allTopics} testidPrefix="edit-class-topic" />
+              allTopics={allTopics} testidPrefix="edit-class-topic" onDeleteTopic={onDeleteTopic} />
           </label>
           <label className="sm:col-span-2">
             <span className="uppercase-label block mb-1">Notes</span>
@@ -353,6 +365,17 @@ export default function ClassesPage() {
 
   const nameOf = (id) => students.find((s) => s.id === id)?.name || "—";
 
+  const deleteTopic = async (name) => {
+    if (!window.confirm(`Remove "${name}" from the vocabulary list? This won't change any class it's already logged on.`)) return;
+    try {
+      await api.delete("/class-topics", { params: { name } });
+      setAllTopics((prev) => prev.filter((t) => t !== name));
+      toast.success(`Removed "${name}"`);
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Couldn't remove");
+    }
+  };
+
   return (
     <div data-testid="classes-page" className="space-y-8">
       <header className="flex items-end justify-between flex-wrap gap-4">
@@ -418,7 +441,7 @@ export default function ClassesPage() {
           <label className="md:col-span-5">
             <span className="uppercase-label block mb-1">Topics taught</span>
             <TopicPicker topics={form.topics} onChange={(topics) => setForm({ ...form, topics })}
-              allTopics={allTopics} testidPrefix="log-topic" />
+              allTopics={allTopics} testidPrefix="log-topic" onDeleteTopic={deleteTopic} />
           </label>
           <label className="md:col-span-4">
             <span className="uppercase-label block mb-1">Notes</span>
@@ -541,6 +564,7 @@ export default function ClassesPage() {
           allTopics={allTopics}
           onClose={() => setEditing(null)}
           onSaved={load}
+          onDeleteTopic={deleteTopic}
         />
       )}
     </div>

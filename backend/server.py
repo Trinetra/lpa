@@ -1089,6 +1089,20 @@ async def list_class_topics(user: dict = Depends(get_current_user)):
     cur = db.class_topics.find({"owner_id": user["_id"]}).sort("name", 1)
     return [t["name"] async for t in cur]
 
+@api_router.delete("/class-topics")
+async def delete_class_topic(name: str = Query(...), user: dict = Depends(get_current_user)):
+    # A query param, not a path segment — topic names can contain "/" (dance
+    # notation sometimes does), which Starlette's router won't reliably
+    # accept even URL-encoded in a path.
+    #
+    # Removes it from the autocomplete dictionary only — classes that
+    # already have this topic logged keep it untouched, same as deleting a
+    # tag from a taxonomy doesn't rewrite past records.
+    res = await db.class_topics.delete_one({"owner_id": user["_id"], "name": name})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    return {"ok": True}
+
 @api_router.get("/zoom/status")
 async def zoom_status(user: dict = Depends(get_current_user)):
     return {"configured": zoom_service.is_configured()}
