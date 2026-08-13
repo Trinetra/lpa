@@ -12,6 +12,7 @@ import DashboardPage from "@/pages/DashboardPage";
 import StudentsPage from "@/pages/StudentsPage";
 import StudentDetailPage from "@/pages/StudentDetailPage";
 import SchedulePage from "@/pages/SchedulePage";
+import CalendarPage from "@/pages/CalendarPage";
 import ClassesPage from "@/pages/ClassesPage";
 import PaymentsPage from "@/pages/PaymentsPage";
 import InvoicesPage from "@/pages/InvoicesPage";
@@ -33,6 +34,7 @@ import StudentLoginPage from "@/pages/student/StudentLoginPage";
 import StudentAcceptInvitePage from "@/pages/student/StudentAcceptInvitePage";
 import StudentSetPasswordPage from "@/pages/student/StudentSetPasswordPage";
 import StudentSchedulePage from "@/pages/student/StudentSchedulePage";
+import StudentCalendarPage from "@/pages/student/StudentCalendarPage";
 import StudentDuesPage from "@/pages/student/StudentDuesPage";
 import StudentProgressPage from "@/pages/student/StudentProgressPage";
 import StudentNotesPage from "@/pages/student/StudentNotesPage";
@@ -125,6 +127,7 @@ function StudentPortalRoutes() {
         >
           <Route index element={<Navigate to="schedule" replace />} />
           <Route path="schedule" element={<StudentSchedulePage />} />
+          <Route path="calendar" element={<StudentCalendarPage />} />
           <Route path="dues" element={<StudentDuesPage />} />
           <Route path="progress" element={<StudentProgressPage />} />
           <Route path="notes" element={<StudentNotesPage />} />
@@ -159,6 +162,7 @@ function AppRoutes() {
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/students/:id" element={<StudentDetailPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
+        <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/classes" element={<ClassesPage />} />
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/invoices" element={<InvoicesPage />} />

@@ -6,6 +6,7 @@ import { studentApi } from "@/lib/api";
 import PushNotificationToggle from "@/components/PushNotificationToggle";
 import {
   CalendarClock,
+  CalendarDays,
   Wallet,
   BookOpenCheck,
   NotebookPen,
@@ -34,6 +35,7 @@ export default function StudentPortalLayout() {
 
   const links = [
     { to: "/portal/schedule", label: "Schedule", icon: CalendarClock, tid: "portal-nav-schedule" },
+    { to: "/portal/calendar", label: "Calendar", icon: CalendarDays, tid: "portal-nav-calendar" },
     { to: "/portal/announcements", label: "Announcements", icon: Megaphone, tid: "portal-nav-announcements" },
     { to: "/portal/dues", label: "Dues", icon: Wallet, tid: "portal-nav-dues" },
     { to: "/portal/progress", label: "Progress", icon: BookOpenCheck, tid: "portal-nav-progress" },

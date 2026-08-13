@@ -252,6 +252,25 @@ class ScheduleBlockUpdate(BaseModel):
 class CalendarNameUpdate(BaseModel):
     calendar_name: str
 
+class OccurrenceRescheduleRequest(BaseModel):
+    date: str  # ISO date, new date for this occurrence
+    start_time: str
+    end_time: str
+
+class PersonalEventCreate(BaseModel):
+    title: str
+    date: str  # ISO date
+    start_time: str
+    end_time: str
+    notes: Optional[str] = None
+
+class PersonalEventUpdate(BaseModel):
+    title: Optional[str] = None
+    date: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    notes: Optional[str] = None
+
 EXPENSE_CATEGORIES = ["Flights", "Accommodation", "Local Transport", "Food",
                        "Venue/Equipment", "Other"]
 
@@ -277,7 +296,7 @@ class TourUpdate(BaseModel):
 RESERVED_SLUGS = {
     "login", "reset-password", "invoice", "tour", "dashboard", "students",
     "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
-    "portal", "requests", "event", "events", "crm", "announcements",
+    "portal", "requests", "event", "events", "crm", "announcements", "calendar",
 }
 
 # Public tour/event links live on the bare root domain, not the app's own
@@ -503,6 +522,44 @@ def ser_schedule_block(doc):
         "is_one_off": doc.get("is_one_off", False),
         "created_at": doc.get("created_at"),
         "synced_to_calendar": bool(doc.get("google_event_id")),
+    }
+
+def ser_occurrence(doc):
+    return {
+        "id": str(doc["_id"]),
+        "block_id": doc.get("block_id"),
+        "date": doc.get("date"),
+        "start_time": doc.get("start_time"),
+        "end_time": doc.get("end_time"),
+        "student_ids": doc.get("student_ids", []),
+        "notes": doc.get("notes"),
+        "status": doc.get("status", "scheduled"),
+        "origin": doc.get("origin", "recurring"),
+        "moved_from_date": doc.get("moved_from_date"),
+    }
+
+def ser_occurrence_for_student(doc):
+    # Deliberately omits student_ids — a student must never learn who else is
+    # on a shared occurrence.
+    return {
+        "id": str(doc["_id"]),
+        "date": doc.get("date"),
+        "start_time": doc.get("start_time"),
+        "end_time": doc.get("end_time"),
+        "notes": doc.get("notes"),
+        "status": doc.get("status", "scheduled"),
+        "origin": doc.get("origin", "recurring"),
+    }
+
+def ser_personal_event(doc):
+    return {
+        "id": str(doc["_id"]),
+        "title": doc.get("title"),
+        "date": doc.get("date"),
+        "start_time": doc.get("start_time"),
+        "end_time": doc.get("end_time"),
+        "notes": doc.get("notes"),
+        "created_at": doc.get("created_at"),
     }
 
 def ser_tour(doc):
@@ -1537,31 +1594,35 @@ async def dashboard(user: dict = Depends(get_current_user)):
         item["student_name"] = st.get("name") if st else "Unknown"
         recent.append(item)
 
-    # Upcoming classes still to come today, from the recurring weekly
-    # schedule (not the classes log, which records classes already given) —
-    # blocks whose end_time has already passed are left off, so this reads
-    # as "what's left today" rather than every block regardless of time.
-    await _prune_expired_one_offs(user["_id"])
+    # Upcoming classes still to come today, from the materialized dated
+    # occurrences (not the classes log, which records classes already given,
+    # and not live schedule_blocks recurrence math, which wouldn't reflect
+    # one-time reschedules/cancellations from the calendar view) — entries
+    # already ended or cancelled are left off, so this reads as "what's left
+    # today" rather than every occurrence regardless of status/time.
+    await _top_up_occurrences(user["_id"])
     now_ist = datetime.now(IST)
     today = now_ist.date()
+    today_str = today.isoformat()
     now_hm = now_ist.strftime("%H:%M")
     today_classes = []
-    cur = db.schedule_blocks.find({"owner_id": user["_id"], "day_of_week": today.weekday()}).sort("start_time", 1)
-    async for b in cur:
-        if b.get("end_time") and b["end_time"] <= now_hm:
+    cur = db.class_occurrences.find({
+        "owner_id": user["_id"], "date": today_str, "status": "scheduled",
+    }).sort("start_time", 1)
+    async for occ in cur:
+        if occ.get("end_time") and occ["end_time"] <= now_hm:
             continue
-        names = [student_map[sid]["name"] for sid in b.get("student_ids", []) if sid in student_map]
+        names = [student_map[sid]["name"] for sid in occ.get("student_ids", []) if sid in student_map]
         today_classes.append({
-            "id": str(b["_id"]),
-            "start_time": b.get("start_time"),
-            "end_time": b.get("end_time"),
+            "id": str(occ["_id"]),
+            "start_time": occ.get("start_time"),
+            "end_time": occ.get("end_time"),
             "student_names": names,
-            "is_one_off": b.get("is_one_off", False),
+            "is_one_off": occ.get("origin") != "recurring",
         })
 
     # Tour to-dos due today or overdue, still open — across every tour, so
     # she doesn't have to check each tour individually to know what's urgent.
-    today_str = today.isoformat()
     todos_due = []
     cur = db.tour_todos.find({
         "owner_id": user["_id"], "done": False,
@@ -2044,6 +2105,91 @@ async def _prune_expired_one_offs(owner_id: str):
         await calendar_service.sync_block_delete(owner_id, b.get("google_event_id"))
         await db.schedule_blocks.delete_one({"_id": b["_id"]})
 
+# --------------- Class occurrences (dated calendar) -----------------
+# class_occurrences materializes schedule_blocks into one document per dated
+# instance, rolling OCCURRENCE_HORIZON_DAYS ahead. This is the single source
+# of truth for "what's happening on date X" — the day/week/month calendar
+# view, clash detection against personal events, dashboard "today", and
+# student notifications all read this collection, never live day_of_week
+# recurrence math. A one-time reschedule/cancel just edits one occurrence
+# document and never touches schedule_blocks, so it can never leak back into
+# the recurring pattern.
+OCCURRENCE_HORIZON_DAYS = 56  # ~8 weeks
+
+async def _generate_occurrences_for_block(owner_id: str, block: dict, horizon_days: int = OCCURRENCE_HORIZON_DAYS):
+    """(Re)generates untouched future occurrences for one recurring block, out
+    to the horizon. Only ever inserts occurrences that don't already exist for
+    that (block_id, date) — an occurrence that was individually rescheduled or
+    cancelled (status != "scheduled", or origin != "recurring") is already
+    detached from the block and is never touched here. is_one_off blocks get
+    exactly one occurrence, on their occurs_on date, regardless of horizon."""
+    block_id = str(block["_id"])
+    today = date.today()
+
+    if block.get("is_one_off"):
+        occurs_on = block.get("occurs_on")
+        if not occurs_on or occurs_on < today.isoformat():
+            return
+        dates = [occurs_on]
+    else:
+        day_of_week = block["day_of_week"]
+        days_ahead = (day_of_week - today.weekday()) % 7
+        first = today + timedelta(days=days_ahead)
+        dates = []
+        d = first
+        while (d - today).days <= horizon_days:
+            dates.append(d.isoformat())
+            d += timedelta(days=7)
+
+    for d_str in dates:
+        existing = await db.class_occurrences.find_one({"block_id": block_id, "date": d_str})
+        if existing:
+            # Only refresh a still-untouched occurrence — one that's been
+            # individually rescheduled/cancelled must never be overwritten.
+            if existing.get("status") == "scheduled" and existing.get("origin") == "recurring":
+                await db.class_occurrences.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {
+                        "start_time": block["start_time"], "end_time": block["end_time"],
+                        "student_ids": block.get("student_ids", []), "notes": block.get("notes"),
+                    }},
+                )
+            continue
+        await db.class_occurrences.insert_one({
+            "owner_id": owner_id,
+            "block_id": block_id,
+            "date": d_str,
+            "start_time": block["start_time"],
+            "end_time": block["end_time"],
+            "student_ids": block.get("student_ids", []),
+            "notes": block.get("notes"),
+            "status": "scheduled",
+            "origin": "recurring",
+            "moved_from_date": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+async def _regenerate_block_occurrences(owner_id: str, block: dict):
+    """Called right after a schedule_blocks create/update. Drops future
+    untouched (still-"scheduled"/"recurring") occurrences for this block so
+    they get recreated at the new day/time, then regenerates. Occurrences
+    already detached by an individual reschedule/cancel — or already in the
+    past — are left exactly alone."""
+    block_id = str(block["_id"])
+    today_str = date.today().isoformat()
+    await db.class_occurrences.delete_many({
+        "block_id": block_id, "date": {"$gte": today_str},
+        "status": "scheduled", "origin": "recurring",
+    })
+    await _generate_occurrences_for_block(owner_id, block)
+
+async def _top_up_occurrences(owner_id: str):
+    """Extends every recurring block's occurrences out to the rolling
+    horizon — called by the daily cron. Doesn't touch one-off blocks beyond
+    their single occurrence, and never overwrites detached occurrences."""
+    async for b in db.schedule_blocks.find({"owner_id": owner_id, "is_one_off": {"$ne": True}}):
+        await _generate_occurrences_for_block(owner_id, b)
+
 @api_router.get("/schedule")
 async def list_schedule(user: dict = Depends(get_current_user)):
     await _prune_expired_one_offs(user["_id"])
@@ -2081,6 +2227,7 @@ async def create_schedule_block(body: ScheduleBlockCreate, user: dict = Depends(
     if event_id:
         await db.schedule_blocks.update_one({"_id": doc["_id"]}, {"$set": {"google_event_id": event_id}})
         doc["google_event_id"] = event_id
+    await _generate_occurrences_for_block(user["_id"], doc)
     return ser_schedule_block(doc)
 
 @api_router.patch("/schedule/{block_id}")
@@ -2123,6 +2270,7 @@ async def update_schedule_block(block_id: str, body: ScheduleBlockUpdate, user: 
                 "student", sid,
                 "Class rescheduled", f"Your teacher moved this class to {when}", "/portal/schedule",
             )
+    await _regenerate_block_occurrences(user["_id"], doc)
     return ser_schedule_block(doc)
 
 @api_router.delete("/schedule/{block_id}")
@@ -2132,12 +2280,186 @@ async def delete_schedule_block(block_id: str, user: dict = Depends(get_current_
         raise HTTPException(status_code=404, detail="Schedule block not found")
     await calendar_service.sync_block_delete(user["_id"], existing.get("google_event_id"))
     await db.schedule_blocks.delete_one({"_id": ObjectId(block_id), "owner_id": user["_id"]})
+    today_str = date.today().isoformat()
+    await db.class_occurrences.delete_many({
+        "block_id": block_id, "date": {"$gte": today_str},
+        "status": "scheduled", "origin": "recurring",
+    })
     for sid in existing.get("student_ids", []):
         await push_service.send_push(
             "student", sid,
             "Class cancelled", "Your teacher removed this class from the schedule", "/portal/schedule",
         )
     return {"ok": True}
+
+# --------------- Calendar (dated occurrences + personal events) -----------------
+# The day/week/month calendar view. Reads class_occurrences (materialized
+# dated class instances) and personal_events (Lakshmi's own non-class
+# engagements) side by side for a date range. Rescheduling/cancelling one
+# occurrence here is a direct, instant, one-time edit to that single document
+# — it never touches schedule_blocks (the recurring master pattern) and
+# never affects any other occurrence.
+
+async def _personal_events_overlap(owner_id: str, d_str: str, start_time: str, end_time: str) -> bool:
+    start_m = _time_to_minutes(start_time)
+    end_m = _time_to_minutes(end_time)
+    async for ev in db.personal_events.find({"owner_id": owner_id, "date": d_str}):
+        if _blocks_overlap(start_m, end_m, _time_to_minutes(ev["start_time"]), _time_to_minutes(ev["end_time"])):
+            return True
+    return False
+
+async def _occurrences_overlap(owner_id: str, d_str: str, start_time: str, end_time: str,
+                                exclude_occurrence_id: Optional[str] = None) -> bool:
+    start_m = _time_to_minutes(start_time)
+    end_m = _time_to_minutes(end_time)
+    async for occ in db.class_occurrences.find({"owner_id": owner_id, "date": d_str, "status": "scheduled"}):
+        if exclude_occurrence_id and str(occ["_id"]) == exclude_occurrence_id:
+            continue
+        if _blocks_overlap(start_m, end_m, _time_to_minutes(occ["start_time"]), _time_to_minutes(occ["end_time"])):
+            return True
+    return False
+
+@api_router.get("/calendar/occurrences")
+async def list_occurrences(start: str = Query(...), end: str = Query(...), user: dict = Depends(get_current_user)):
+    """All dated class occurrences for the owner between start and end
+    (inclusive ISO dates) — the data source for the month/week/day calendar
+    grid."""
+    await _top_up_occurrences(user["_id"])
+    student_map = {}
+    async for s in db.students.find({"owner_id": user["_id"]}):
+        student_map[str(s["_id"])] = s.get("name") or "Student"
+    out = []
+    cur = db.class_occurrences.find({
+        "owner_id": user["_id"], "date": {"$gte": start, "$lte": end},
+    }).sort([("date", 1), ("start_time", 1)])
+    async for occ in cur:
+        item = ser_occurrence(occ)
+        item["student_names"] = [student_map.get(sid, "Student") for sid in occ.get("student_ids", [])]
+        out.append(item)
+    return out
+
+@api_router.get("/calendar/personal-events")
+async def list_personal_events(start: str = Query(...), end: str = Query(...), user: dict = Depends(get_current_user)):
+    cur = db.personal_events.find({
+        "owner_id": user["_id"], "date": {"$gte": start, "$lte": end},
+    }).sort([("date", 1), ("start_time", 1)])
+    out = []
+    async for ev in cur:
+        out.append(ser_personal_event(ev))
+    return out
+
+@api_router.post("/calendar/personal-events")
+async def create_personal_event(body: PersonalEventCreate, user: dict = Depends(get_current_user)):
+    if _time_to_minutes(body.end_time) <= _time_to_minutes(body.start_time):
+        raise HTTPException(status_code=400, detail="end_time must be after start_time")
+    doc = body.model_dump()
+    doc["owner_id"] = user["_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.personal_events.insert_one(doc)
+    doc["_id"] = res.inserted_id
+
+    clash = await _occurrences_overlap(user["_id"], body.date, body.start_time, body.end_time)
+    result = ser_personal_event(doc)
+    result["clashes_with_classes"] = clash
+    return result
+
+@api_router.patch("/calendar/personal-events/{event_id}")
+async def update_personal_event(event_id: str, body: PersonalEventUpdate, user: dict = Depends(get_current_user)):
+    existing = await db.personal_events.find_one({"_id": ObjectId(event_id), "owner_id": user["_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Event not found")
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    start_time = updates.get("start_time", existing["start_time"])
+    end_time = updates.get("end_time", existing["end_time"])
+    if _time_to_minutes(end_time) <= _time_to_minutes(start_time):
+        raise HTTPException(status_code=400, detail="end_time must be after start_time")
+    await db.personal_events.update_one({"_id": ObjectId(event_id)}, {"$set": updates})
+    doc = await db.personal_events.find_one({"_id": ObjectId(event_id)})
+    clash = await _occurrences_overlap(user["_id"], doc["date"], doc["start_time"], doc["end_time"])
+    result = ser_personal_event(doc)
+    result["clashes_with_classes"] = clash
+    return result
+
+@api_router.delete("/calendar/personal-events/{event_id}")
+async def delete_personal_event(event_id: str, user: dict = Depends(get_current_user)):
+    res = await db.personal_events.delete_one({"_id": ObjectId(event_id), "owner_id": user["_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return {"ok": True}
+
+@api_router.post("/calendar/occurrences/{occurrence_id}/reschedule")
+async def reschedule_occurrence(occurrence_id: str, body: OccurrenceRescheduleRequest, user: dict = Depends(get_current_user)):
+    """Lakshmi moving one dated class occurrence herself — direct and
+    instant (no approval step, unlike the student change-request flow).
+    Only this single occurrence is affected; the recurring schedule_blocks
+    pattern this occurrence came from is untouched, so every other
+    occurrence of that block keeps its original day/time."""
+    occ = await db.class_occurrences.find_one({"_id": ObjectId(occurrence_id), "owner_id": user["_id"]})
+    if not occ:
+        raise HTTPException(status_code=404, detail="Occurrence not found")
+    if occ.get("status") != "scheduled":
+        raise HTTPException(status_code=400, detail="This class is already cancelled or moved")
+    if _time_to_minutes(body.end_time) <= _time_to_minutes(body.start_time):
+        raise HTTPException(status_code=400, detail="end_time must be after start_time")
+
+    clash = await _occurrences_overlap(user["_id"], body.date, body.start_time, body.end_time,
+                                        exclude_occurrence_id=occurrence_id)
+    if not clash:
+        clash = await _personal_events_overlap(user["_id"], body.date, body.start_time, body.end_time)
+    if clash:
+        raise HTTPException(status_code=409, detail="That time clashes with another class or a personal event")
+
+    await db.class_occurrences.update_one(
+        {"_id": occ["_id"]},
+        {"$set": {
+            "date": body.date, "start_time": body.start_time, "end_time": body.end_time,
+            "origin": "rescheduled", "moved_from_date": occ["date"],
+        }},
+    )
+    updated = await db.class_occurrences.find_one({"_id": occ["_id"]})
+    when = f"{body.date} {body.start_time}"
+    for sid in occ.get("student_ids", []):
+        await push_service.send_push(
+            "student", sid,
+            "Class rescheduled", f"Your class on {occ['date']} was moved to {when}", "/portal/calendar",
+        )
+    return ser_occurrence(updated)
+
+@api_router.post("/calendar/occurrences/{occurrence_id}/cancel")
+async def cancel_occurrence(occurrence_id: str, user: dict = Depends(get_current_user)):
+    occ = await db.class_occurrences.find_one({"_id": ObjectId(occurrence_id), "owner_id": user["_id"]})
+    if not occ:
+        raise HTTPException(status_code=404, detail="Occurrence not found")
+    if occ.get("status") != "scheduled":
+        raise HTTPException(status_code=400, detail="This class is already cancelled or moved")
+    await db.class_occurrences.update_one({"_id": occ["_id"]}, {"$set": {"status": "cancelled"}})
+    for sid in occ.get("student_ids", []):
+        await push_service.send_push(
+            "student", sid,
+            "Class cancelled", f"Your class on {occ['date']} was cancelled", "/portal/calendar",
+        )
+    return {"ok": True}
+
+@api_router.post("/calendar/occurrences/{occurrence_id}/restore")
+async def restore_occurrence(occurrence_id: str, user: dict = Depends(get_current_user)):
+    """Undo a cancel — only while it's still a same-slot cancellation (not
+    yet reworked into a reschedule elsewhere)."""
+    occ = await db.class_occurrences.find_one({"_id": ObjectId(occurrence_id), "owner_id": user["_id"]})
+    if not occ:
+        raise HTTPException(status_code=404, detail="Occurrence not found")
+    if occ.get("status") != "cancelled":
+        raise HTTPException(status_code=400, detail="This class isn't cancelled")
+    clash = await _occurrences_overlap(user["_id"], occ["date"], occ["start_time"], occ["end_time"],
+                                        exclude_occurrence_id=occurrence_id)
+    if not clash:
+        clash = await _personal_events_overlap(user["_id"], occ["date"], occ["start_time"], occ["end_time"])
+    if clash:
+        raise HTTPException(status_code=409, detail="That slot is no longer free — something else was scheduled since")
+    await db.class_occurrences.update_one({"_id": occ["_id"]}, {"$set": {"status": "scheduled"}})
+    updated = await db.class_occurrences.find_one({"_id": occ["_id"]})
+    return ser_occurrence(updated)
 
 # --------------- Student portal -----------------
 # Students get their own login to view their own schedule/dues/progress,
@@ -2464,6 +2786,22 @@ async def student_schedule(student: dict = Depends(get_current_student)):
         out.append(ser_schedule_block_for_student(b, occurs_on, occ_dt.isoformat()))
     return out
 
+@api_router.get("/student/calendar")
+async def student_calendar(start: str = Query(...), end: str = Query(...), student: dict = Depends(get_current_student)):
+    """Dated view of this student's own upcoming classes, read-only — the
+    same class_occurrences a student is on, materialized ahead by the
+    teacher's schedule. No personal-events layer or clash detection here;
+    those are Lakshmi-only."""
+    await _top_up_occurrences(student["owner_id"])
+    cur = db.class_occurrences.find({
+        "owner_id": student["owner_id"], "student_ids": student["_id"],
+        "date": {"$gte": start, "$lte": end}, "status": "scheduled",
+    }).sort([("date", 1), ("start_time", 1)])
+    out = []
+    async for occ in cur:
+        out.append(ser_occurrence_for_student(occ))
+    return out
+
 @api_router.get("/student/dues")
 async def student_dues(student: dict = Depends(get_current_student)):
     summary = await compute_student_summary(student["owner_id"], student["_id"])
@@ -2579,6 +2917,9 @@ async def delete_student_note(note_id: str, student: dict = Depends(get_current_
 # --------------- Change requests (cancel / reschedule) -----------------
 async def _has_overlap(owner_id: str, day_of_week: int, start_time: str, end_time: str,
                         exclude_block_id: Optional[str] = None) -> bool:
+    """Checks a requested weekly day/time against the recurring master
+    pattern — used for permanent-scope reschedules, which change the
+    schedule_blocks series itself."""
     start_m = _time_to_minutes(start_time)
     end_m = _time_to_minutes(end_time)
     async for b in db.schedule_blocks.find({"owner_id": owner_id, "day_of_week": day_of_week}):
@@ -2587,6 +2928,16 @@ async def _has_overlap(owner_id: str, day_of_week: int, start_time: str, end_tim
         if _blocks_overlap(start_m, end_m, _time_to_minutes(b["start_time"]), _time_to_minutes(b["end_time"])):
             return True
     return False
+
+async def _has_dated_clash(owner_id: str, d_str: str, start_time: str, end_time: str,
+                            exclude_occurrence_id: Optional[str] = None) -> bool:
+    """Checks a requested date/time against both dated class occurrences and
+    Lakshmi's personal events — used for one_time-scope reschedules, which
+    only ever affect a single dated occurrence, never the recurring
+    pattern."""
+    if await _occurrences_overlap(owner_id, d_str, start_time, end_time, exclude_occurrence_id):
+        return True
+    return await _personal_events_overlap(owner_id, d_str, start_time, end_time)
 
 @api_router.post("/student/change-requests")
 async def create_change_request(body: ChangeRequestCreate, student: dict = Depends(get_current_student)):
@@ -2639,10 +2990,17 @@ async def create_change_request(body: ChangeRequestCreate, student: dict = Depen
             raise HTTPException(status_code=400, detail="requested_day_of_week must be 0-6")
         if _time_to_minutes(body.requested_end_time) <= _time_to_minutes(body.requested_start_time):
             raise HTTPException(status_code=400, detail="requested end time must be after the start time")
-        clash = await _has_overlap(
-            student["owner_id"], body.requested_day_of_week, body.requested_start_time, body.requested_end_time,
-            exclude_block_id=body.block_id,
-        )
+        if body.scope == "permanent":
+            clash = await _has_overlap(
+                student["owner_id"], body.requested_day_of_week, body.requested_start_time, body.requested_end_time,
+                exclude_block_id=body.block_id,
+            )
+        else:
+            requested_dt = _next_occurrence_datetime(body.requested_day_of_week, body.requested_start_time, now_ist)
+            clash = await _has_dated_clash(
+                student["owner_id"], requested_dt.date().isoformat(),
+                body.requested_start_time, body.requested_end_time,
+            )
         if clash:
             # Auto-deny — a time that's already taken never reaches the
             # teacher for a decision.
@@ -2742,28 +3100,37 @@ async def _remove_student_from_block(owner_id: str, block: dict, student_id: str
         event_id = await calendar_service.sync_block_upsert(owner_id, updated, names)
         if event_id and event_id != updated.get("google_event_id"):
             await db.schedule_blocks.update_one({"_id": block["_id"]}, {"$set": {"google_event_id": event_id}})
+        await _regenerate_block_occurrences(owner_id, updated)
     else:
         await calendar_service.sync_block_delete(owner_id, block.get("google_event_id"))
         await db.schedule_blocks.delete_one({"_id": block["_id"]})
+        today_str = date.today().isoformat()
+        await db.class_occurrences.delete_many({
+            "block_id": str(block["_id"]), "date": {"$gte": today_str},
+            "status": "scheduled", "origin": "recurring",
+        })
 
-async def _retire_one_time_occurrence(owner_id: str, req: dict, block: dict):
-    """Called when approving a one_time cancel/reschedule. A recurring block
-    just gets this one date skipped (the series itself must survive). But if
-    `block` is already a one-off — itself the product of an earlier one_time
-    reschedule — there's no series to preserve, so delete it outright instead
-    of leaving a stale calendar event behind (a skip would hide it from the
-    student's own view, but the teacher's schedule/calendar still shows it,
-    forever, since nothing ever prunes a skipped-but-not-expired one-off)."""
-    if block.get("is_one_off"):
-        await calendar_service.sync_block_delete(owner_id, block.get("google_event_id"))
-        await db.schedule_blocks.delete_one({"_id": block["_id"]})
-    else:
-        await db.schedule_skips.update_one(
-            {"block_id": req["block_id"], "occurs_on": req["occurs_on"], "student_id": req["student_id"]},
-            {"$set": {"owner_id": owner_id, "source_request_id": str(req["_id"]),
-                      "created_at": datetime.now(timezone.utc).isoformat()}},
-            upsert=True,
-        )
+async def _find_requested_occurrence(owner_id: str, req: dict) -> Optional[dict]:
+    """Locates the specific dated class_occurrences document a one_time
+    change request refers to — matched on the block it came from, the date
+    the student was asked about, and the student being on it. Falls back to
+    generating it on the fly if the rolling horizon job hasn't materialized
+    that far out yet (shouldn't normally happen within the 24h+ notice
+    window, but a request made right at the edge of the horizon could)."""
+    occ = await db.class_occurrences.find_one({
+        "owner_id": owner_id, "block_id": req["block_id"], "date": req["occurs_on"],
+        "student_ids": req["student_id"],
+    })
+    if occ:
+        return occ
+    block = await db.schedule_blocks.find_one({"_id": ObjectId(req["block_id"]), "owner_id": owner_id})
+    if not block:
+        return None
+    await _generate_occurrences_for_block(owner_id, block)
+    return await db.class_occurrences.find_one({
+        "owner_id": owner_id, "block_id": req["block_id"], "date": req["occurs_on"],
+        "student_ids": req["student_id"],
+    })
 
 @api_router.get("/change-requests")
 async def list_change_requests(status: Optional[str] = None, user: dict = Depends(get_current_user)):
@@ -2790,7 +3157,7 @@ async def approve_change_request(request_id: str, user: dict = Depends(get_curre
     if not block:
         raise HTTPException(status_code=404, detail="The original class no longer exists")
 
-    if req["type"] == "reschedule":
+    if req["type"] == "reschedule" and req["scope"] == "permanent":
         clash = await _has_overlap(
             user["_id"], req["requested_day_of_week"], req["requested_start_time"], req["requested_end_time"],
             exclude_block_id=req["block_id"],
@@ -2800,30 +3167,66 @@ async def approve_change_request(request_id: str, user: dict = Depends(get_curre
                 status_code=409,
                 detail="That time now overlaps another class — deny this request or ask the student for a different time",
             )
+    elif req["type"] == "reschedule" and req["scope"] == "one_time":
+        requested_dt = _next_occurrence_datetime(
+            req["requested_day_of_week"], req["requested_start_time"], datetime.now(IST),
+        )
+        clash = await _has_dated_clash(
+            user["_id"], requested_dt.date().isoformat(), req["requested_start_time"], req["requested_end_time"],
+        )
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail="That time now clashes with another class or a personal event — deny this request or ask the student for a different time",
+            )
 
-    if req["type"] == "cancel" and req["scope"] == "one_time":
-        await _retire_one_time_occurrence(user["_id"], req, block)
+    if req["scope"] == "one_time":
+        # Only this one dated occurrence changes — the recurring
+        # schedule_blocks pattern (and every other student on a shared
+        # block) is untouched. A student sharing the slot with others just
+        # gets removed from this single date's student list rather than the
+        # whole occurrence being cancelled/moved out from under them.
+        occ = await _find_requested_occurrence(user["_id"], req)
+        if not occ:
+            raise HTTPException(status_code=404, detail="The original class occurrence no longer exists")
+        other_students = [sid for sid in occ.get("student_ids", []) if sid != req["student_id"]]
+        if other_students:
+            # Split: this student peels off into their own detached
+            # occurrence (cancelled, or moved to the new date/time); everyone
+            # else keeps the original occurrence untouched.
+            await db.class_occurrences.update_one(
+                {"_id": occ["_id"]}, {"$set": {"student_ids": other_students}},
+            )
+            if req["type"] == "cancel":
+                await db.class_occurrences.insert_one({
+                    "owner_id": user["_id"], "block_id": occ["block_id"], "date": occ["date"],
+                    "start_time": occ["start_time"], "end_time": occ["end_time"],
+                    "student_ids": [req["student_id"]], "notes": occ.get("notes"),
+                    "status": "cancelled", "origin": "recurring", "moved_from_date": None,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+            else:
+                await db.class_occurrences.insert_one({
+                    "owner_id": user["_id"], "block_id": occ["block_id"],
+                    "date": requested_dt.date().isoformat(),
+                    "start_time": req["requested_start_time"], "end_time": req["requested_end_time"],
+                    "student_ids": [req["student_id"]], "notes": f"Rescheduled from {occ['date']} (student request)",
+                    "status": "scheduled", "origin": "rescheduled", "moved_from_date": occ["date"],
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+        elif req["type"] == "cancel":
+            await db.class_occurrences.update_one({"_id": occ["_id"]}, {"$set": {"status": "cancelled"}})
+        else:
+            await db.class_occurrences.update_one(
+                {"_id": occ["_id"]},
+                {"$set": {
+                    "date": requested_dt.date().isoformat(),
+                    "start_time": req["requested_start_time"], "end_time": req["requested_end_time"],
+                    "origin": "rescheduled", "moved_from_date": occ["date"],
+                }},
+            )
     elif req["type"] == "cancel" and req["scope"] == "permanent":
         await _remove_student_from_block(user["_id"], block, req["student_id"])
-    elif req["type"] == "reschedule" and req["scope"] == "one_time":
-        await _retire_one_time_occurrence(user["_id"], req, block)
-        one_off_doc = {
-            "owner_id": user["_id"],
-            "day_of_week": req["requested_day_of_week"],
-            "start_time": req["requested_start_time"],
-            "end_time": req["requested_end_time"],
-            "student_ids": [req["student_id"]],
-            "notes": f"Rescheduled from {req['occurs_on']} (student request)",
-            "is_one_off": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        one_off_doc["occurs_on"] = _next_occurrence(req["requested_day_of_week"])
-        res = await db.schedule_blocks.insert_one(one_off_doc)
-        one_off_doc["_id"] = res.inserted_id
-        names = await _student_names(user["_id"], one_off_doc["student_ids"])
-        event_id = await calendar_service.sync_block_upsert(user["_id"], one_off_doc, names)
-        if event_id:
-            await db.schedule_blocks.update_one({"_id": one_off_doc["_id"]}, {"$set": {"google_event_id": event_id}})
     elif req["type"] == "reschedule" and req["scope"] == "permanent":
         await _remove_student_from_block(user["_id"], block, req["student_id"])
         new_block = {
@@ -2842,6 +3245,7 @@ async def approve_change_request(request_id: str, user: dict = Depends(get_curre
         event_id = await calendar_service.sync_block_upsert(user["_id"], new_block, names)
         if event_id:
             await db.schedule_blocks.update_one({"_id": new_block["_id"]}, {"$set": {"google_event_id": event_id}})
+        await _generate_occurrences_for_block(user["_id"], new_block)
 
     await db.schedule_change_requests.update_one(
         {"_id": req["_id"]},
@@ -4201,6 +4605,23 @@ async def transcription_cron(secret: str = Query(...)):
             failed += 1
     return {"ok": True, "processed": processed, "failed": failed}
 
+@api_router.post("/calendar/occurrences/cron")
+async def occurrences_cron(secret: str = Query(...)):
+    """Triggered daily by a host cron job — tops up the rolling occurrence
+    horizon (see OCCURRENCE_HORIZON_DAYS) for the single admin account this
+    app serves, and prunes expired one-off schedule_blocks the same way
+    interactive schedule reads do."""
+    expected = os.environ.get("BACKUP_CRON_SECRET")  # reuse the same shared secret
+    if not expected or secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    admin_email = os.environ.get("ADMIN_EMAIL", "").lower()
+    user = await db.users.find_one({"email": admin_email})
+    if not user:
+        raise HTTPException(status_code=404, detail="Admin user not found")
+    await _prune_expired_one_offs(str(user["_id"]))
+    await _top_up_occurrences(str(user["_id"]))
+    return {"ok": True}
+
 # --------------- App wiring -----------------
 app.include_router(api_router)
 
@@ -4266,6 +4687,10 @@ async def on_startup():
     await db.crm_invite_opens.create_index([("owner_id", 1), ("contact_id", 1)])
     await db.announcements.create_index([("owner_id", 1), ("created_at", -1)])
     await db.announcement_reads.create_index([("announcement_id", 1), ("student_id", 1)], unique=True)
+    await db.class_occurrences.create_index([("owner_id", 1), ("date", 1)])
+    await db.class_occurrences.create_index([("block_id", 1), ("date", 1)])
+    await db.class_occurrences.create_index([("owner_id", 1), ("student_ids", 1), ("date", 1)])
+    await db.personal_events.create_index([("owner_id", 1), ("date", 1)])
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()
