@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { studentApi } from "@/lib/api";
+import { fmtDate } from "@/lib/utils";
 import { useTheme } from "@/context/ThemeContext";
 import StudentAudioPlayer from "@/components/student/StudentAudioPlayer";
 import {
@@ -119,7 +120,7 @@ export default function StudentProgressPage() {
           {classes.map((c) => (
             <div key={c.id} className="flex justify-between gap-4 px-6 py-3 text-sm" style={{ borderTop: "1px solid var(--border)" }}>
               <div className="min-w-0">
-                <div>{c.class_date}</div>
+                <div>{fmtDate(c.class_date)}</div>
                 {c.topics && c.topics.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1">
                     {c.topics.map((t) => (

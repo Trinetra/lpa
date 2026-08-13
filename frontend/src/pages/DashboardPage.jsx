@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
+import { fmtDate } from "@/lib/utils";
 import AuthImage from "@/components/AuthImage";
 import {
   IndianRupee, TrendingUp, TrendingDown, Users as UsersIcon, Clock,
@@ -272,7 +273,7 @@ export default function DashboardPage() {
                 <div>
                   <div className="text-sm">{c.student_name}</div>
                   <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                    {c.class_date} · {c.hours}h @ {fmtCur(c.rate, c.currency)}/h
+                    {fmtDate(c.class_date)} · {c.hours}h @ {fmtCur(c.rate, c.currency)}/h
                   </div>
                 </div>
               </div>

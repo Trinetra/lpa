@@ -461,7 +461,7 @@ export default function PaymentsPage() {
           >
             <div className="flex flex-col sm:grid sm:grid-cols-12 sm:items-center gap-2 sm:gap-0">
               <div className="sm:col-span-3 flex sm:block justify-between">
-                <span>{p.paid_on}</span>
+                <span>{fmtDate(p.paid_on)}</span>
                 <span className="sm:hidden font-serif-display" style={{ color: "var(--success)" }}>{fmtCur(p.amount, currency)}</span>
               </div>
               <div className="sm:col-span-3 truncate" style={{ color: "var(--text-muted)" }}>{nameOf(p.student_id)}</div>

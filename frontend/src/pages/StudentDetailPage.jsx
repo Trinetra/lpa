@@ -99,7 +99,7 @@ export default function StudentDetailPage() {
           <div className="flex flex-wrap gap-4 mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
             {student.phone && <span className="flex items-center gap-1"><Phone size={12} /> {student.phone}</span>}
             {student.email && <span className="flex items-center gap-1"><Mail size={12} /> {student.email}</span>}
-            {student.joined_on && <span className="flex items-center gap-1"><Calendar size={12} /> since {student.joined_on}</span>}
+            {student.joined_on && <span className="flex items-center gap-1"><Calendar size={12} /> since {fmtDate(student.joined_on)}</span>}
           </div>
           {student.description && (
             <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>{student.description}</p>
@@ -183,7 +183,7 @@ export default function StudentDetailPage() {
           {payments.map((p) => (
             <div key={p.id} className="flex justify-between px-6 py-3 text-sm" style={{ borderTop: "1px solid var(--border)" }}>
               <div>
-                <div>{p.paid_on}</div>
+                <div>{fmtDate(p.paid_on)}</div>
                 <div className="text-xs" style={{ color: "var(--text-muted)" }}>{p.method}</div>
               </div>
               <div className="font-serif-display" style={{ color: "var(--success)" }}>{fmtCurrency(p.amount, student.currency)}</div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { studentApi } from "@/lib/api";
+import { fmtDate } from "@/lib/utils";
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
@@ -41,7 +42,7 @@ export default function StudentDuesPage() {
           )}
           {outstanding.map((c) => (
             <div key={c.id} className="flex justify-between px-6 py-3 text-sm" style={{ borderTop: "1px solid var(--border)" }}>
-              <div>{c.class_date}</div>
+              <div>{fmtDate(c.class_date)}</div>
               <div className="font-serif-display" style={{ color: "var(--primary)" }}>{fmt(c.outstanding)}</div>
             </div>
           ))}

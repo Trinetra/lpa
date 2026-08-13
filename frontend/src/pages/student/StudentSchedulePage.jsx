@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { studentApi } from "@/lib/api";
+import { fmtDate } from "@/lib/utils";
 import ChangeRequestModal from "@/components/student/ChangeRequestModal";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -63,7 +64,7 @@ export default function StudentSchedulePage() {
               <div className="font-serif-display text-xl">{DAYS[b.day_of_week]}</div>
               <div style={{ color: "var(--text-muted)" }}>
                 {fmt12h(b.start_time)}–{fmt12h(b.end_time)}
-                {b.next_occurrence && ` · next on ${b.next_occurrence}`}
+                {b.next_occurrence && ` · next on ${fmtDate(b.next_occurrence)}`}
               </div>
               {b.notes && <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{b.notes}</div>}
             </div>
