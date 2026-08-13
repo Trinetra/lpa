@@ -19,6 +19,27 @@ const fmtLongDate = (iso) => {
   const d = new Date(`${iso}T00:00:00`);
   return d.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 };
+const fmtShortDate = (iso) => {
+  const d = new Date(`${iso}T00:00:00`);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+};
+
+// Describes what actually changed about a reschedule — a pure time change on
+// the same date reads as "was 2PM–3PM", a date change (same time) as "was
+// Wed, 7 Oct", and a change to both combines them — rather than always
+// implying the date moved.
+function describeReschedule(occ) {
+  if (!occ.moved_from_date) return null;
+  const dateChanged = occ.moved_from_date !== occ.date;
+  const timeChanged = occ.moved_from_start_time !== occ.start_time || occ.moved_from_end_time !== occ.end_time;
+  const oldTime = occ.moved_from_start_time && occ.moved_from_end_time
+    ? `${fmt12h(occ.moved_from_start_time)}–${fmt12h(occ.moved_from_end_time)}` : null;
+  const oldDate = fmtShortDate(occ.moved_from_date);
+  if (dateChanged && timeChanged) return `Was ${oldDate}, ${oldTime}`;
+  if (dateChanged) return `Was ${oldDate}`;
+  if (timeChanged) return `Was ${oldTime}`;
+  return null;
+}
 
 // Monday-first 6-week grid covering the given month, including lead/trail days.
 function buildMonthGrid(year, month) {
@@ -92,10 +113,11 @@ function RescheduleForm({ occurrence, onClose, onDone }) {
   );
 }
 
-function OccurrenceRow({ occ, onCancel, onRestore, onReload }) {
+function OccurrenceRow({ occ, onCancel, onRestore, onUndoReschedule, onReload }) {
   const [rescheduling, setRescheduling] = useState(false);
   const isCancelled = occ.status === "cancelled";
   const isMoved = occ.origin === "rescheduled";
+  const rescheduleNote = isMoved ? describeReschedule(occ) : null;
 
   return (
     <div data-testid={`occ-row-${occ.id}`} className="py-3" style={{ borderTop: "1px solid var(--border)" }}>
@@ -105,9 +127,9 @@ function OccurrenceRow({ occ, onCancel, onRestore, onReload }) {
             <span style={{ textDecoration: isCancelled ? "line-through" : "none" }}>
               {fmt12h(occ.start_time)}–{fmt12h(occ.end_time)}
             </span>
-            {isMoved && (
+            {rescheduleNote && (
               <span className="text-[10px] uppercase tracking-widest flex items-center gap-1" style={{ color: "var(--primary)" }}>
-                <Repeat1 size={10} /> Moved from {occ.moved_from_date}
+                <Repeat1 size={10} /> {rescheduleNote}
               </span>
             )}
             {isCancelled && (
@@ -121,6 +143,12 @@ function OccurrenceRow({ occ, onCancel, onRestore, onReload }) {
         </div>
         {!isCancelled && !rescheduling && (
           <div className="flex items-center gap-2 shrink-0">
+            {isMoved && (
+              <button type="button" onClick={() => onUndoReschedule(occ.id)} className="btn-ghost text-xs flex items-center gap-1"
+                data-testid={`occ-undo-reschedule-btn-${occ.id}`}>
+                <RotateCcw size={12} /> Undo
+              </button>
+            )}
             <button type="button" onClick={() => setRescheduling(true)} className="btn-ghost text-xs"
               data-testid={`occ-reschedule-btn-${occ.id}`}>
               Reschedule
@@ -240,6 +268,16 @@ function DayModal({ date, occurrences, events, onClose, onReload }) {
     }
   };
 
+  const undoReschedule = async (id) => {
+    try {
+      await api.post(`/calendar/occurrences/${id}/undo-reschedule`);
+      toast.success("Reschedule undone");
+      onReload();
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't undo");
+    }
+  };
+
   const removeEvent = async (id) => {
     if (!window.confirm("Remove this event from your calendar?")) return;
     try {
@@ -283,7 +321,8 @@ function DayModal({ date, occurrences, events, onClose, onReload }) {
           ) : (
             <div>
               {dayOccs.map((occ) => (
-                <OccurrenceRow key={occ.id} occ={occ} onCancel={cancel} onRestore={restore} onReload={onReload} />
+                <OccurrenceRow key={occ.id} occ={occ} onCancel={cancel} onRestore={restore}
+                  onUndoReschedule={undoReschedule} onReload={onReload} />
               ))}
             </div>
           )}

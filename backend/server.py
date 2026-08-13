@@ -536,6 +536,8 @@ def ser_occurrence(doc):
         "status": doc.get("status", "scheduled"),
         "origin": doc.get("origin", "recurring"),
         "moved_from_date": doc.get("moved_from_date"),
+        "moved_from_start_time": doc.get("moved_from_start_time"),
+        "moved_from_end_time": doc.get("moved_from_end_time"),
     }
 
 def ser_occurrence_for_student(doc):
@@ -2416,6 +2418,7 @@ async def reschedule_occurrence(occurrence_id: str, body: OccurrenceRescheduleRe
         {"$set": {
             "date": body.date, "start_time": body.start_time, "end_time": body.end_time,
             "origin": "rescheduled", "moved_from_date": occ["date"],
+            "moved_from_start_time": occ["start_time"], "moved_from_end_time": occ["end_time"],
         }},
     )
     updated = await db.class_occurrences.find_one({"_id": occ["_id"]})
@@ -2424,6 +2427,45 @@ async def reschedule_occurrence(occurrence_id: str, body: OccurrenceRescheduleRe
         await push_service.send_push(
             "student", sid,
             "Class rescheduled", f"Your class on {occ['date']} was moved to {when}", "/portal/calendar",
+        )
+    return ser_occurrence(updated)
+
+@api_router.post("/calendar/occurrences/{occurrence_id}/undo-reschedule")
+async def undo_reschedule_occurrence(occurrence_id: str, user: dict = Depends(get_current_user)):
+    """Reverts the most recent reschedule — puts the occurrence back on its
+    moved_from_date/start_time/end_time and clears the "moved" trail. Only
+    one level deep: undoing after two reschedules in a row lands on the
+    state right before the second move, not the original slot, matching
+    what "undo" means for the change the teacher just made."""
+    occ = await db.class_occurrences.find_one({"_id": ObjectId(occurrence_id), "owner_id": user["_id"]})
+    if not occ:
+        raise HTTPException(status_code=404, detail="Occurrence not found")
+    if occ.get("origin") != "rescheduled" or not occ.get("moved_from_date"):
+        raise HTTPException(status_code=400, detail="This class hasn't been rescheduled")
+    prev_date = occ["moved_from_date"]
+    prev_start = occ["moved_from_start_time"]
+    prev_end = occ["moved_from_end_time"]
+
+    clash = await _occurrences_overlap(user["_id"], prev_date, prev_start, prev_end,
+                                        exclude_occurrence_id=occurrence_id)
+    if not clash:
+        clash = await _personal_events_overlap(user["_id"], prev_date, prev_start, prev_end)
+    if clash:
+        raise HTTPException(status_code=409, detail="That original slot is no longer free — something else was scheduled since")
+
+    await db.class_occurrences.update_one(
+        {"_id": occ["_id"]},
+        {"$set": {
+            "date": prev_date, "start_time": prev_start, "end_time": prev_end,
+            "origin": "recurring", "moved_from_date": None,
+            "moved_from_start_time": None, "moved_from_end_time": None,
+        }},
+    )
+    updated = await db.class_occurrences.find_one({"_id": occ["_id"]})
+    for sid in occ.get("student_ids", []):
+        await push_service.send_push(
+            "student", sid,
+            "Class reschedule undone", f"Your class is back to {prev_date} {prev_start}", "/portal/calendar",
         )
     return ser_occurrence(updated)
 
@@ -3212,6 +3254,7 @@ async def approve_change_request(request_id: str, user: dict = Depends(get_curre
                     "start_time": req["requested_start_time"], "end_time": req["requested_end_time"],
                     "student_ids": [req["student_id"]], "notes": f"Rescheduled from {occ['date']} (student request)",
                     "status": "scheduled", "origin": "rescheduled", "moved_from_date": occ["date"],
+                    "moved_from_start_time": occ["start_time"], "moved_from_end_time": occ["end_time"],
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 })
         elif req["type"] == "cancel":
@@ -3223,6 +3266,7 @@ async def approve_change_request(request_id: str, user: dict = Depends(get_curre
                     "date": requested_dt.date().isoformat(),
                     "start_time": req["requested_start_time"], "end_time": req["requested_end_time"],
                     "origin": "rescheduled", "moved_from_date": occ["date"],
+                    "moved_from_start_time": occ["start_time"], "moved_from_end_time": occ["end_time"],
                 }},
             )
     elif req["type"] == "cancel" and req["scope"] == "permanent":
