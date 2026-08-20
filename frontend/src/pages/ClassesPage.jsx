@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { Plus, Trash2, Pencil, X, Video, ChevronDown, Mic } from "lucide-react";
 import { toast } from "sonner";
@@ -285,6 +286,7 @@ function EditClassModal({ item, students, allTopics, onClose, onSaved, onDeleteT
 }
 
 export default function ClassesPage() {
+  const [searchParams] = useSearchParams();
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [allTopics, setAllTopics] = useState([]);
@@ -301,6 +303,7 @@ export default function ClassesPage() {
   const [saving, setSaving] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [pendingAudio, setPendingAudio] = useState(null); // { blob, duration } recorded before the class exists
+  const logFormRef = useRef(null);
 
   const visibleStudents = filterActive(students, showInactive);
   const inactiveCount = inactiveCountOf(students);
@@ -315,6 +318,22 @@ export default function ClassesPage() {
   };
 
   useEffect(load, [filterId]);
+
+  // Prefills the log-class form from a deep link (e.g. the "unlogged
+  // classes" evening email's "Update it" button) — runs once students have
+  // loaded so the student dropdown has something valid to select.
+  useEffect(() => {
+    if (students.length === 0) return;
+    const sid = searchParams.get("student_id");
+    if (!sid || !students.some((s) => s.id === sid)) return;
+    setForm((prev) => ({
+      ...prev,
+      student_id: sid,
+      class_date: searchParams.get("class_date") || prev.class_date,
+      hours: searchParams.get("hours") || prev.hours,
+    }));
+    logFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [students]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (e) => {
     e.preventDefault();
@@ -387,7 +406,7 @@ export default function ClassesPage() {
       </header>
 
       {/* Log form */}
-      <form onSubmit={submit} data-testid="log-class-form" className="surface p-6">
+      <form ref={logFormRef} onSubmit={submit} data-testid="log-class-form" className="surface p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="uppercase-label">Log a class</div>
           <ZoomPicker onPick={(m) => {

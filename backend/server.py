@@ -4795,6 +4795,69 @@ async def occurrences_cron(secret: str = Query(...)):
     await _top_up_occurrences(str(user["_id"]))
     return {"ok": True}
 
+def _fmt_time_12h_for_email(t: str) -> str:
+    h, m = t.split(":")
+    h, m = int(h), int(m)
+    period = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12}:{m:02d} {period}" if m else f"{h12} {period}"
+
+def _class_hours(occ: dict) -> float:
+    minutes = _time_to_minutes(occ["end_time"]) - _time_to_minutes(occ["start_time"])
+    return round(minutes / 60, 2)
+
+@api_router.post("/unlogged-classes/cron")
+async def unlogged_classes_cron(secret: str = Query(...)):
+    """Triggered once daily in the evening by a host cron job — finds every
+    class_occurrences entry for today that's already ended, has never been
+    cancelled, and has no matching classes log entry (same student_id +
+    class_date), and emails Lakshmi one summary nudge listing all of them.
+    A shared occurrence with several students is checked per-student, since
+    each student needs their own logged class row."""
+    expected = os.environ.get("BACKUP_CRON_SECRET")  # reuse the same shared secret
+    if not expected or secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    admin_email = os.environ.get("ADMIN_EMAIL", "").lower()
+    user = await db.users.find_one({"email": admin_email})
+    if not user:
+        raise HTTPException(status_code=404, detail="Admin user not found")
+    owner_id = str(user["_id"])
+
+    today_str = datetime.now(IST).date().isoformat()
+    student_map = {}
+    async for s in db.students.find({"owner_id": owner_id}):
+        student_map[str(s["_id"])] = s.get("name") or "Student"
+
+    app_url = os.environ.get("APP_URL", "").rstrip("/")
+    items = []
+    async for occ in db.class_occurrences.find({
+        "owner_id": owner_id, "date": today_str, "status": "scheduled",
+    }):
+        for sid in occ.get("student_ids", []):
+            logged = await db.classes.find_one({
+                "owner_id": owner_id, "student_id": sid, "class_date": today_str,
+            })
+            if logged:
+                continue
+            link = f"{app_url}/classes?student_id={sid}&class_date={today_str}&hours={_class_hours(occ)}" if app_url else ""
+            items.append({
+                "student_name": student_map.get(sid, "Student"),
+                "date_label": "today",
+                "start_time": _fmt_time_12h_for_email(occ["start_time"]),
+                "link": link,
+            })
+
+    if not items:
+        return {"ok": True, "sent": False, "unlogged": 0}
+
+    teacher_email = user.get("contact_email") or user.get("email")
+    if not teacher_email:
+        return {"ok": True, "sent": False, "unlogged": len(items), "reason": "No teacher email on file"}
+
+    classes_link = f"{app_url}/classes" if app_url else ""
+    await email_service.send_unlogged_classes_email(teacher_email, items, classes_link)
+    return {"ok": True, "sent": True, "unlogged": len(items)}
+
 # --------------- App wiring -----------------
 app.include_router(api_router)
 

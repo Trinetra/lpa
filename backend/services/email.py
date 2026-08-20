@@ -6,6 +6,7 @@ Sends directly via the Resend API. Reads ``RESEND_API_KEY``,
 
 import logging
 import os
+import random
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -236,6 +237,78 @@ async def send_change_request_email(to_email: str, student_name: str, req: dict,
         await dispatch_email(payload)
     except Exception as e:
         logger.error(f"Change request notification email failed: {e}")
+
+
+_GREETINGS = ["beautiful", "gorgeous", "superstar", "lovely"]
+
+
+def _fmt_time_12h_short(t: str) -> str:
+    h, m = t.split(":")
+    h, m = int(h), int(m)
+    period = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12}:{m:02d}{period}"
+
+
+def build_unlogged_classes_html(items: list, classes_link: str) -> str:
+    """items: list of {student_name, date_label, start_time, link} for every
+    class that ended today without a matching logged entry."""
+    greeting = random.choice(_GREETINGS)
+
+    rows_html = ""
+    for item in items:
+        rows_html += f"""
+        <tr>
+          <td style="padding:14px 0;border-top:1px solid #eadfd1;font-size:15px;color:#2c2926;font-family:Arial,sans-serif">
+            <b>{item['student_name']}</b> &middot; {item['date_label']} at {item['start_time']}
+          </td>
+          <td align="right" style="padding:14px 0;border-top:1px solid #eadfd1">
+            <a href="{item['link']}" style="display:inline-block;background:#d48464;color:#1a1816;
+                text-decoration:none;padding:8px 18px;border-radius:999px;font-weight:600;font-size:13px;
+                font-family:Arial,sans-serif;white-space:nowrap">Update it</a>
+          </td>
+        </tr>"""
+
+    return f"""
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5efe8;padding:24px 0;font-family:Arial,sans-serif">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #eadfd1;border-radius:8px;padding:32px">
+      <tr><td>
+        <div style="font-size:12px;letter-spacing:2px;color:#a89886;text-transform:uppercase;margin-bottom:6px">End of day check-in</div>
+        <div style="font-size:22px;color:#d48464;font-weight:700;margin-bottom:16px">Hey {greeting}!</div>
+        <div style="font-size:15px;color:#2c2926;line-height:1.5">
+          Looks like {"a class" if len(items) == 1 else f"{len(items)} classes"} from today {"hasn't" if len(items) == 1 else "haven't"} been logged yet — a quick tap below and you're done.
+        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px">
+          {rows_html}
+        </table>
+        <div style="margin:26px 0 0 0"><a href="{classes_link}" style="display:inline-block;background:#ffffff;color:#2c2926;
+            text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:600;font-size:14px;
+            border:1px solid #eadfd1">Open Classes</a></div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+""".strip()
+
+
+async def send_unlogged_classes_email(to_email: str, items: list, classes_link: str):
+    key = _email_key()
+    if not key:
+        logger.warning(f"Unlogged-classes reminder skipped (no email key). {len(items)} item(s).")
+        return
+    html = build_unlogged_classes_html(items, classes_link)
+    count_label = "a class" if len(items) == 1 else f"{len(items)} classes"
+    payload = {
+        "to": [to_email],
+        "subject": f"Don't forget — {count_label} from today still need logging",
+        "html": html,
+        "from_name": _from_name(),
+    }
+    try:
+        await dispatch_email(payload)
+    except Exception as e:
+        logger.error(f"Unlogged-classes reminder email failed: {e}")
 
 
 async def send_student_invite_email(to_email: str, name: str, teacher_name: str, invite_link: str):
