@@ -239,7 +239,7 @@ async def send_change_request_email(to_email: str, student_name: str, req: dict,
         logger.error(f"Change request notification email failed: {e}")
 
 
-_GREETINGS = ["beautiful", "gorgeous", "superstar", "lovely"]
+_GREETINGS = ["beautiful", "gorgeous", "superstar", "lovely", "Sundari"]
 
 
 def _fmt_time_12h_short(t: str) -> str:
