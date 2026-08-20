@@ -10,7 +10,7 @@ import re
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta, date
-from typing import List, Optional
+from typing import Dict, List, Optional
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -297,6 +297,7 @@ RESERVED_SLUGS = {
     "login", "reset-password", "invoice", "tour", "dashboard", "students",
     "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
     "portal", "requests", "event", "events", "crm", "announcements", "calendar",
+    "outreach",
 }
 
 # Public tour/event links live on the bare root domain, not the app's own
@@ -459,6 +460,21 @@ class AnnouncementUpdate(BaseModel):
     body: Optional[str] = None
     image_path: Optional[str] = None
     force: bool = False  # re-send to contacts already invited to this event
+
+class OutreachTemplateCreate(BaseModel):
+    name: str
+    subject: str
+    html: str
+
+class OutreachTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    subject: Optional[str] = None
+    html: Optional[str] = None
+
+class OutreachSendRequest(BaseModel):
+    to_email: EmailStr
+    reply_to: Optional[EmailStr] = None
+    field_values: Dict[str, str] = Field(default_factory=dict)
 
 # --------------- Serializers -----------------
 def ser_student(doc):
@@ -638,6 +654,31 @@ def ser_announcement(doc):
         "body": doc.get("body"),
         "image_path": doc.get("image_path"),
         "is_retracted": doc.get("is_retracted", False),
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
+    }
+
+# Matches {{Field Name}} tokens in a template's raw HTML — the set of
+# distinct names found is what drives the fill-in form on the frontend, so
+# adding a new {{...}} token to a template's HTML is enough to add a new
+# field, no code change needed.
+_MERGE_FIELD_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+
+def _merge_fields_in(html: str) -> List[str]:
+    seen = []
+    for m in _MERGE_FIELD_RE.finditer(html):
+        name = m.group(1)
+        if name not in seen:
+            seen.append(name)
+    return seen
+
+def ser_outreach_template(doc):
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get("name"),
+        "subject": doc.get("subject"),
+        "html": doc.get("html"),
+        "merge_fields": _merge_fields_in(doc.get("html", "")),
         "created_at": doc.get("created_at"),
         "updated_at": doc.get("updated_at"),
     }
@@ -4404,6 +4445,94 @@ async def crm_track_click(track_token: str):
         else f"{os.environ.get('APP_URL', '').rstrip('/')}/event/{event['share_token']}"
     return RedirectResponse(url=link, status_code=302)
 
+# --------------- Outreach templates -----------------
+# A small library of raw HTML email templates (cold outreach to schools/
+# organizations, not the student-facing announcements/invoices above) that
+# Lakshmi can save, fill in per recipient, and send one at a time. The HTML
+# is stored and sent exactly as authored — table-based email markup is
+# fragile, so this deliberately never parses/rewrites it, only does a
+# literal {{Field}} -> value substitution at send time. Sent via the same
+# Resend transport as every other app email, but with reply_to set to her
+# own address so replies land in her real inbox rather than the app's
+# no-reply sender.
+@api_router.get("/outreach-templates")
+async def list_outreach_templates(user: dict = Depends(get_current_user)):
+    cur = db.outreach_templates.find({"owner_id": user["_id"]}).sort("created_at", -1)
+    return [ser_outreach_template(d) async for d in cur]
+
+@api_router.post("/outreach-templates")
+async def create_outreach_template(body: OutreachTemplateCreate, user: dict = Depends(get_current_user)):
+    doc = body.model_dump()
+    doc["owner_id"] = user["_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    doc["updated_at"] = doc["created_at"]
+    res = await db.outreach_templates.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_outreach_template(doc)
+
+@api_router.get("/outreach-templates/{template_id}")
+async def get_outreach_template(template_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": user["_id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return ser_outreach_template(doc)
+
+@api_router.patch("/outreach-templates/{template_id}")
+async def update_outreach_template(template_id: str, body: OutreachTemplateUpdate, user: dict = Depends(get_current_user)):
+    existing = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": user["_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Template not found")
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.outreach_templates.update_one({"_id": existing["_id"]}, {"$set": updates})
+    doc = await db.outreach_templates.find_one({"_id": existing["_id"]})
+    return ser_outreach_template(doc)
+
+@api_router.delete("/outreach-templates/{template_id}")
+async def delete_outreach_template(template_id: str, user: dict = Depends(get_current_user)):
+    res = await db.outreach_templates.delete_one({"_id": ObjectId(template_id), "owner_id": user["_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"ok": True}
+
+@api_router.post("/outreach-templates/{template_id}/preview")
+async def preview_outreach_template(template_id: str, body: OutreachSendRequest, user: dict = Depends(get_current_user)):
+    """Same merge as an actual send, without dispatching — powers the live
+    preview pane so what she sees is exactly what gets sent."""
+    doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": user["_id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Template not found")
+    html = doc["html"]
+    for name, value in body.field_values.items():
+        html = html.replace(f"{{{{{name}}}}}", value)
+    return {"subject": doc["subject"], "html": html}
+
+@api_router.post("/outreach-templates/{template_id}/send")
+async def send_outreach_template(template_id: str, body: OutreachSendRequest, user: dict = Depends(get_current_user)):
+    doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": user["_id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Template not found")
+    html = doc["html"]
+    for name, value in body.field_values.items():
+        html = html.replace(f"{{{{{name}}}}}", value)
+
+    owner = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    reply_to = body.reply_to or (owner or {}).get("contact_email") or (owner or {}).get("email")
+    payload = {"to": [body.to_email], "subject": doc["subject"], "html": html}
+    if reply_to:
+        payload["contact_email"] = reply_to
+    try:
+        result = await email_service.dispatch_email(payload)
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Outreach send failed: {e.response.status_code} {e.response.text}")
+        raise HTTPException(status_code=502, detail="Failed to send email")
+    except Exception as e:
+        logger.error(f"Outreach send error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send email")
+    return {"ok": True, "to": body.to_email, "email_id": result.get("id")}
+
 # --------------- Public event pages & registration -----------------
 async def _ser_shared_event(event: dict) -> dict:
     owner = await db.users.find_one({"_id": ObjectId(event["owner_id"])}) if event.get("owner_id") else None
@@ -4735,6 +4864,7 @@ async def on_startup():
     await db.class_occurrences.create_index([("block_id", 1), ("date", 1)])
     await db.class_occurrences.create_index([("owner_id", 1), ("student_ids", 1), ("date", 1)])
     await db.personal_events.create_index([("owner_id", 1), ("date", 1)])
+    await db.outreach_templates.create_index([("owner_id", 1), ("created_at", -1)])
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

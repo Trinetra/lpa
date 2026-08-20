@@ -23,6 +23,7 @@ import {
   PartyPopper,
   Contact,
   Megaphone,
+  Mail,
   CalendarDays,
 } from "lucide-react";
 
@@ -80,6 +81,7 @@ export default function AppLayout() {
     { to: "/events", label: "Events", icon: PartyPopper, tid: "nav-events" },
     { to: "/crm", label: "Contacts", icon: Contact, tid: "nav-crm" },
     { to: "/announcements", label: "Announcements", icon: Megaphone, tid: "nav-announcements" },
+    { to: "/outreach", label: "Outreach", icon: Mail, tid: "nav-outreach" },
     { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
     { to: "/requests", label: "Requests", icon: Inbox, tid: "nav-requests" },
     { to: "/settings", label: "Settings", icon: Settings, tid: "nav-settings" },
