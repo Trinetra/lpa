@@ -291,8 +291,15 @@ export default function OutreachPage() {
 
   const duplicate = async (t) => {
     try {
+      const existingNames = new Set(templates.map((x) => x.name));
+      let name = `${t.name} (copy)`;
+      let n = 2;
+      while (existingNames.has(name)) {
+        name = `${t.name} (copy ${n})`;
+        n += 1;
+      }
       await api.post("/outreach-templates", {
-        name: `${t.name} (copy)`, subject: t.subject, html: t.html, default_values: t.default_values || {},
+        name, subject: t.subject, html: t.html, default_values: t.default_values || {},
       });
       toast.success("Duplicated — edit the copy's HTML to make your changes");
       load();
