@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
-import { Plus, Trash2, Send, ArrowLeft, Loader2, Copy } from "lucide-react";
+import { Plus, Trash2, Send, ArrowLeft, Loader2, Copy, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 // Puts the rendered email on the clipboard as rich HTML (not just text) so
@@ -35,18 +35,21 @@ async function copyHtmlToClipboard(html) {
   document.body.removeChild(holder);
 }
 
-function NewTemplateForm({ onClose, onSaved }) {
-  const [name, setName] = useState("");
-  const [subject, setSubject] = useState("");
-  const [html, setHtml] = useState("");
+function TemplateForm({ existing, onClose, onSaved }) {
+  const [name, setName] = useState(existing?.name || "");
+  const [subject, setSubject] = useState(existing?.subject || "");
+  const [html, setHtml] = useState(existing?.html || "");
   const [saving, setSaving] = useState(false);
+  const isEdit = !!existing;
 
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const { data } = await api.post("/outreach-templates", { name, subject, html });
-      toast.success("Template saved");
+      const { data } = isEdit
+        ? await api.patch(`/outreach-templates/${existing.id}`, { name, subject, html })
+        : await api.post("/outreach-templates", { name, subject, html });
+      toast.success(isEdit ? "Template updated" : "Template saved");
       onSaved(data);
       onClose();
     } catch (e2) {
@@ -58,7 +61,7 @@ function NewTemplateForm({ onClose, onSaved }) {
 
   return (
     <form onSubmit={submit} data-testid="outreach-new-template-form" className="surface p-6 space-y-4">
-      <h2 className="font-serif-display text-2xl">New template</h2>
+      <h2 className="font-serif-display text-2xl">{isEdit ? `Edit "${existing.name}"` : "New template"}</h2>
       <label className="block">
         <span className="uppercase-label block mb-1">Name</span>
         <input required value={name} onChange={(e) => setName(e.target.value)}
@@ -93,18 +96,29 @@ function NewTemplateForm({ onClose, onSaved }) {
   );
 }
 
-function SendPanel({ template, onBack, ownerEmail }) {
+function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
   const [toEmail, setToEmail] = useState("");
   const [replyTo, setReplyTo] = useState(ownerEmail || "");
   const [fields, setFields] = useState(() => {
     const init = {};
-    template.merge_fields.forEach((f) => { init[f] = ""; });
+    template.merge_fields.forEach((f) => { init[f.name] = template.default_values?.[f.name] || ""; });
     return init;
   });
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [copying, setCopying] = useState(false);
+
+  const saveDefault = async (fieldName, value) => {
+    try {
+      const nextDefaults = { ...(template.default_values || {}), [fieldName]: value };
+      const { data } = await api.patch(`/outreach-templates/${template.id}`, { default_values: nextDefaults });
+      onTemplateUpdated(data);
+      toast.success(`Saved as the default for "${fieldName}"`);
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't save default");
+    }
+  };
 
   const loadPreview = async () => {
     setPreviewLoading(true);
@@ -182,11 +196,31 @@ function SendPanel({ template, onBack, ownerEmail }) {
             <div className="space-y-3">
               <span className="uppercase-label block">Personalize</span>
               {template.merge_fields.map((f) => (
-                <label key={f} className="block">
-                  <span className="text-xs block mb-1" style={{ color: "var(--text-muted)" }}>{f}</span>
-                  <input value={fields[f] || ""} onChange={(e) => setFields((prev) => ({ ...prev, [f]: e.target.value }))}
-                    data-testid={`outreach-field-input-${f}`}
-                    className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+                <label key={f.name} className="block">
+                  <span className="text-xs block mb-1" style={{ color: "var(--text-muted)" }}>{f.name}</span>
+                  {f.kind === "paragraph" ? (
+                    <>
+                      <textarea rows={6} value={fields[f.name] || ""}
+                        onChange={(e) => setFields((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                        data-testid={`outreach-field-input-${f.name}`}
+                        className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                          Blank line = new paragraph. **bold** and *italic* are supported.
+                        </span>
+                        <button type="button" onClick={() => saveDefault(f.name, fields[f.name] || "")}
+                          className="text-[11px] shrink-0 underline" style={{ color: "var(--text-muted)" }}
+                          data-testid={`outreach-save-default-${f.name}`}>
+                          Save as this template's default
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <input value={fields[f.name] || ""}
+                      onChange={(e) => setFields((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                      data-testid={`outreach-field-input-${f.name}`}
+                      className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+                  )}
                 </label>
               ))}
             </div>
@@ -231,6 +265,7 @@ function SendPanel({ template, onBack, ownerEmail }) {
 export default function OutreachPage() {
   const [templates, setTemplates] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(null);
   const [active, setActive] = useState(null);
   const [ownerEmail, setOwnerEmail] = useState("");
 
@@ -254,10 +289,22 @@ export default function OutreachPage() {
     }
   };
 
+  const duplicate = async (t) => {
+    try {
+      await api.post("/outreach-templates", {
+        name: `${t.name} (copy)`, subject: t.subject, html: t.html, default_values: t.default_values || {},
+      });
+      toast.success("Duplicated — edit the copy's HTML to make your changes");
+      load();
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't duplicate");
+    }
+  };
+
   if (active) {
     return (
       <div data-testid="outreach-page" className="space-y-6">
-        <SendPanel template={active} onBack={() => setActive(null)} ownerEmail={ownerEmail} />
+        <SendPanel template={active} onBack={() => setActive(null)} onTemplateUpdated={setActive} ownerEmail={ownerEmail} />
       </div>
     );
   }
@@ -276,7 +323,10 @@ export default function OutreachPage() {
         )}
       </header>
 
-      {creating && <NewTemplateForm onClose={() => setCreating(false)} onSaved={load} />}
+      {creating && <TemplateForm onClose={() => setCreating(false)} onSaved={load} />}
+      {editingTemplate && (
+        <TemplateForm existing={editingTemplate} onClose={() => setEditingTemplate(null)} onSaved={load} />
+      )}
 
       {templates === null ? (
         <div data-testid="outreach-loading" className="uppercase-label">Loading…</div>
@@ -296,6 +346,14 @@ export default function OutreachPage() {
               <div className="flex items-center gap-3 shrink-0">
                 <button type="button" onClick={() => setActive(t)} className="btn-ghost text-xs" data-testid={`outreach-template-send-${t.id}`}>
                   Open
+                </button>
+                <button type="button" onClick={() => duplicate(t)} className="btn-ghost text-xs flex items-center gap-1"
+                  data-testid={`outreach-template-duplicate-${t.id}`}>
+                  <Copy size={12} /> Duplicate
+                </button>
+                <button type="button" onClick={() => setEditingTemplate(t)} className="btn-ghost text-xs flex items-center gap-1"
+                  data-testid={`outreach-template-edit-${t.id}`}>
+                  <Pencil size={12} /> Edit HTML
                 </button>
                 <button type="button" onClick={() => remove(t.id)} className="btn-ghost text-xs" style={{ color: "var(--error)" }}
                   data-testid={`outreach-template-delete-${t.id}`}>

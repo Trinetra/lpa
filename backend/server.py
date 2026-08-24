@@ -465,11 +465,13 @@ class OutreachTemplateCreate(BaseModel):
     name: str
     subject: str
     html: str
+    default_values: Dict[str, str] = Field(default_factory=dict)
 
 class OutreachTemplateUpdate(BaseModel):
     name: Optional[str] = None
     subject: Optional[str] = None
     html: Optional[str] = None
+    default_values: Optional[Dict[str, str]] = None
 
 class OutreachSendRequest(BaseModel):
     to_email: EmailStr
@@ -662,15 +664,75 @@ def ser_announcement(doc):
 # distinct names found is what drives the fill-in form on the frontend, so
 # adding a new {{...}} token to a template's HTML is enough to add a new
 # field, no code change needed.
+#
+# A token prefixed "para:" (e.g. {{para:Intro}}) is a paragraph-level slot —
+# her fill-in value is plain text (blank line = new paragraph, **bold**/
+# *italic* markdown-style), and merging generates a fresh, fixed-style <p>
+# per paragraph rather than a literal string substitution. This is the only
+# way free text from her ever reaches an outreach email: every tag around
+# it is server-generated from a hardcoded style string, so nothing she
+# types can produce markup Gmail's sanitizer might mangle differently than
+# the rest of the template (the same failure mode that broke this template
+# once already — see the earlier text-align/font-family fix). A bare token
+# with no prefix stays a plain inline word-for-word substitution.
 _MERGE_FIELD_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+PARAGRAPH_FIELD_PREFIX = "para:"
 
-def _merge_fields_in(html: str) -> List[str]:
+# The exact inline style already used on every fixed paragraph in the
+# Bharatanatyam template (and the standard this app now holds every
+# outreach paragraph to) — reused here so a generated paragraph is
+# indistinguishable from a hand-written one.
+_PARAGRAPH_STYLE = (
+    "margin:0 0 16px 0; text-align:left; font-family:Georgia,'Times New Roman',serif; "
+    "font-size:16px; line-height:1.65; color:#3a3a3a;"
+)
+
+def _merge_fields_in(html: str) -> List[dict]:
     seen = []
+    names = []
     for m in _MERGE_FIELD_RE.finditer(html):
-        name = m.group(1)
-        if name not in seen:
-            seen.append(name)
+        raw = m.group(1)
+        if raw in names:
+            continue
+        names.append(raw)
+        if raw.startswith(PARAGRAPH_FIELD_PREFIX):
+            seen.append({"token": raw, "name": raw[len(PARAGRAPH_FIELD_PREFIX):].strip(), "kind": "paragraph"})
+        else:
+            seen.append({"token": raw, "name": raw, "kind": "text"})
     return seen
+
+def _escape_html(text: str) -> str:
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace('"', "&quot;"))
+
+# **bold** / *italic* only — deliberately not full markdown (no links, no
+# lists) so her free text can't introduce anything Gmail's sanitizer might
+# treat inconsistently across paragraphs.
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_ITALIC_RE = re.compile(r"\*(.+?)\*")
+
+def _inline_markdown_to_html(text: str) -> str:
+    escaped = _escape_html(text)
+    escaped = _BOLD_RE.sub(r"<strong>\1</strong>", escaped)
+    escaped = _ITALIC_RE.sub(r"<em>\1</em>", escaped)
+    return escaped
+
+def _render_paragraph_field(plain_text: str) -> str:
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", plain_text.strip()) if p.strip()]
+    return "".join(
+        f'<p style="{_PARAGRAPH_STYLE}">{_inline_markdown_to_html(p)}</p>'
+        for p in paragraphs
+    )
+
+def _merge_outreach_html(html: str, field_values: Dict[str, str]) -> str:
+    for field in _merge_fields_in(html):
+        value = field_values.get(field["name"], "")
+        token_str = "{{" + field["token"] + "}}"
+        if field["kind"] == "paragraph":
+            html = html.replace(token_str, _render_paragraph_field(value))
+        else:
+            html = html.replace(token_str, _escape_html(value))
+    return html
 
 def ser_outreach_template(doc):
     return {
@@ -679,6 +741,7 @@ def ser_outreach_template(doc):
         "subject": doc.get("subject"),
         "html": doc.get("html"),
         "merge_fields": _merge_fields_in(doc.get("html", "")),
+        "default_values": doc.get("default_values", {}),
         "created_at": doc.get("created_at"),
         "updated_at": doc.get("updated_at"),
     }
@@ -4504,9 +4567,7 @@ async def preview_outreach_template(template_id: str, body: OutreachSendRequest,
     doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": user["_id"]})
     if not doc:
         raise HTTPException(status_code=404, detail="Template not found")
-    html = doc["html"]
-    for name, value in body.field_values.items():
-        html = html.replace(f"{{{{{name}}}}}", value)
+    html = _merge_outreach_html(doc["html"], body.field_values)
     return {"subject": doc["subject"], "html": html}
 
 @api_router.post("/outreach-templates/{template_id}/send")
@@ -4514,9 +4575,7 @@ async def send_outreach_template(template_id: str, body: OutreachSendRequest, us
     doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": user["_id"]})
     if not doc:
         raise HTTPException(status_code=404, detail="Template not found")
-    html = doc["html"]
-    for name, value in body.field_values.items():
-        html = html.replace(f"{{{{{name}}}}}", value)
+    html = _merge_outreach_html(doc["html"], body.field_values)
 
     owner = await db.users.find_one({"_id": ObjectId(user["_id"])})
     reply_to = body.reply_to or (owner or {}).get("contact_email") or (owner or {}).get("email")
