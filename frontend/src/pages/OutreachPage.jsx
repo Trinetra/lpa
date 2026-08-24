@@ -354,7 +354,7 @@ export default function OutreachPage() {
                 </button>
                 <button type="button" onClick={() => setEditingTemplate(t)} className="btn-ghost text-xs flex items-center gap-1"
                   data-testid={`outreach-template-edit-${t.id}`}>
-                  <Pencil size={12} /> Edit HTML
+                  <Pencil size={12} /> Edit
                 </button>
                 <button type="button" onClick={() => remove(t.id)} className="btn-ghost text-xs" style={{ color: "var(--error)" }}
                   data-testid={`outreach-template-delete-${t.id}`}>
