@@ -9,6 +9,7 @@ import io
 import re
 import uuid
 import logging
+from html.parser import HTMLParser
 from datetime import datetime, timezone, timedelta, date
 from typing import Dict, List, Optional
 from urllib.parse import quote
@@ -665,27 +666,25 @@ def ser_announcement(doc):
 # adding a new {{...}} token to a template's HTML is enough to add a new
 # field, no code change needed.
 #
-# A token prefixed "para:" (e.g. {{para:Intro}}) is a paragraph-level slot —
-# her fill-in value is plain text (blank line = new paragraph, **bold**/
-# *italic* markdown-style), and merging generates a fresh, fixed-style <p>
-# per paragraph rather than a literal string substitution. This is the only
-# way free text from her ever reaches an outreach email: every tag around
-# it is server-generated from a hardcoded style string, so nothing she
-# types can produce markup Gmail's sanitizer might mangle differently than
-# the rest of the template (the same failure mode that broke this template
-# once already — see the earlier text-align/font-family fix). A bare token
-# with no prefix stays a plain inline word-for-word substitution.
+# A token prefixed "para:" (e.g. {{para:Intro}}) is a rich-text region — her
+# fill-in value is HTML produced by the outreach editor's contenteditable
+# toolbar, sanitized through _sanitize_rich_html before it's ever stored or
+# merged in. This is the only way free text from her ever reaches an
+# outreach email: every tag and style property is checked against a fixed
+# allowlist and every color/size/alignment choice is re-emitted as an
+# explicit inline style, so nothing she types can produce markup Gmail's
+# sanitizer might mangle differently than the rest of the template (the
+# same failure mode that broke this template once already — see the
+# earlier text-align/font-family fix). A bare token with no prefix stays a
+# plain inline word-for-word substitution. A token prefixed "bg:" is a page
+# background color swatch — only ever used inside a fixed
+# style="background-color: {{bg:Name}};" the template itself already
+# authored, so it's rendered with a strict #rrggbb check rather than the
+# general escape used for free text.
 _MERGE_FIELD_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 PARAGRAPH_FIELD_PREFIX = "para:"
-
-# The exact inline style already used on every fixed paragraph in the
-# Bharatanatyam template (and the standard this app now holds every
-# outreach paragraph to) — reused here so a generated paragraph is
-# indistinguishable from a hand-written one.
-_PARAGRAPH_STYLE = (
-    "margin:0 0 16px 0; text-align:left; font-family:Georgia,'Times New Roman',serif; "
-    "font-size:16px; line-height:1.65; color:#3a3a3a;"
-)
+BACKGROUND_FIELD_PREFIX = "bg:"
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 def _merge_fields_in(html: str) -> List[dict]:
     seen = []
@@ -697,6 +696,8 @@ def _merge_fields_in(html: str) -> List[dict]:
         names.append(raw)
         if raw.startswith(PARAGRAPH_FIELD_PREFIX):
             seen.append({"token": raw, "name": raw[len(PARAGRAPH_FIELD_PREFIX):].strip(), "kind": "paragraph"})
+        elif raw.startswith(BACKGROUND_FIELD_PREFIX):
+            seen.append({"token": raw, "name": raw[len(BACKGROUND_FIELD_PREFIX):].strip(), "kind": "color"})
         else:
             seen.append({"token": raw, "name": raw, "kind": "text"})
     return seen
@@ -705,31 +706,123 @@ def _escape_html(text: str) -> str:
     return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 .replace('"', "&quot;"))
 
-# **bold** / *italic* only — deliberately not full markdown (no links, no
-# lists) so her free text can't introduce anything Gmail's sanitizer might
-# treat inconsistently across paragraphs.
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
-_ITALIC_RE = re.compile(r"\*(.+?)\*")
+# --------------- Rich-text sanitizer (outreach editable regions) -----------------
+# Allowlist-based: anything not explicitly permitted is dropped (tag stripped
+# but its text/children kept; disallowed attributes/style properties simply
+# omitted). This is deliberately narrow — exactly the formatting the
+# outreach editor's toolbar can produce (bold/italic/underline, color, font
+# size, alignment, links, images) — not a general HTML sanitizer.
+_RICH_ALLOWED_TAGS = {"p", "span", "strong", "em", "u", "a", "img", "br"}
+_RICH_ALLOWED_STYLE_PROPS = {"color", "font-size", "font-weight", "font-style", "text-decoration", "text-align"}
+_RICH_VOID_TAGS = {"br", "img"}
+_RICH_BASE_FONT = "font-family:Georgia,'Times New Roman',serif;"
 
-def _inline_markdown_to_html(text: str) -> str:
-    escaped = _escape_html(text)
-    escaped = _BOLD_RE.sub(r"<strong>\1</strong>", escaped)
-    escaped = _ITALIC_RE.sub(r"<em>\1</em>", escaped)
-    return escaped
+def _sanitize_style_attr(style: str) -> str:
+    out = []
+    for decl in style.split(";"):
+        if ":" not in decl:
+            continue
+        prop, _, val = decl.partition(":")
+        prop = prop.strip().lower()
+        val = val.strip()
+        if prop in _RICH_ALLOWED_STYLE_PROPS and val and "expression(" not in val.lower() and "javascript:" not in val.lower():
+            out.append(f"{prop}:{val}")
+    return "; ".join(out)
 
-def _render_paragraph_field(plain_text: str) -> str:
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", plain_text.strip()) if p.strip()]
-    return "".join(
-        f'<p style="{_PARAGRAPH_STYLE}">{_inline_markdown_to_html(p)}</p>'
-        for p in paragraphs
-    )
+def _sanitize_url(url: str) -> str:
+    url = url.strip()
+    if url.lower().startswith(("http://", "https://", "mailto:")):
+        return url
+    return ""
+
+class _RichHtmlSanitizer(HTMLParser):
+    """Allowlist HTML -> HTML sanitizer with an explicit open-tag stack, so
+    output can never contain more closing tags than opening ones — a
+    malformed or adversarial input can't emit a stray </p> (or similar)
+    that closes something outside this fragment once it's spliced into the
+    template via string substitution."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out = []
+        self.open_stack = []  # tag names currently open, in the OUTPUT
+
+    def handle_starttag(self, tag, attrs):
+        self._emit(tag, attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        self._emit(tag, attrs, force_void=True)
+
+    def _emit(self, tag, attrs, force_void=False):
+        if tag not in _RICH_ALLOWED_TAGS:
+            return
+        attr_map = dict(attrs)
+        kept = []
+        style = _sanitize_style_attr(attr_map.get("style", ""))
+        if tag == "p":
+            base = f"margin:0 0 16px 0; text-align:left; {_RICH_BASE_FONT} font-size:16px; line-height:1.65; color:#3a3a3a;"
+            style = f"{base} {style}".strip()
+        elif tag == "span" and not style:
+            return  # an empty formatting span carries nothing worth keeping
+        if style:
+            kept.append(f'style="{style}"')
+        if tag == "a":
+            href = _sanitize_url(attr_map.get("href", ""))
+            if not href:
+                tag = "span"  # a link with no safe href is just its text
+                if not style:
+                    return
+            else:
+                kept.append(f'href="{href}"')
+                kept.append('target="_blank"')
+        if tag == "img":
+            src = _sanitize_url(attr_map.get("src", ""))
+            if not src:
+                return
+            kept.append(f'src="{src}"')
+            for a in ("width", "height", "alt"):
+                if attr_map.get(a):
+                    safe = _escape_html(str(attr_map[a]))
+                    kept.append(f'{a}="{safe}"')
+        is_void = force_void or tag in _RICH_VOID_TAGS
+        tag_str = f"<{tag}" + ("".join(" " + k for k in kept)) + (" />" if is_void else ">")
+        self.out.append(tag_str)
+        if not is_void:
+            self.open_stack.append(tag)
+
+    def handle_endtag(self, tag):
+        # Only close what's actually open, and only the innermost matching
+        # tag — anything more (extra closes, closing something never
+        # opened, closing out of order) is silently dropped rather than
+        # trusted from the input.
+        if tag in self.open_stack:
+            while self.open_stack:
+                top = self.open_stack.pop()
+                self.out.append(f"</{top}>")
+                if top == tag:
+                    break
+
+    def handle_data(self, data):
+        self.out.append(_escape_html(data))
+
+    def close(self):
+        super().close()
+        while self.open_stack:
+            self.out.append(f"</{self.open_stack.pop()}>")
+
+def _sanitize_rich_html(raw_html: str) -> str:
+    parser = _RichHtmlSanitizer()
+    parser.feed(raw_html or "")
+    parser.close()
+    return "".join(parser.out)
 
 def _merge_outreach_html(html: str, field_values: Dict[str, str]) -> str:
     for field in _merge_fields_in(html):
         value = field_values.get(field["name"], "")
         token_str = "{{" + field["token"] + "}}"
         if field["kind"] == "paragraph":
-            html = html.replace(token_str, _render_paragraph_field(value))
+            html = html.replace(token_str, _sanitize_rich_html(value))
+        elif field["kind"] == "color":
+            html = html.replace(token_str, value if _HEX_COLOR_RE.match(value or "") else "#ffffff")
         else:
             html = html.replace(token_str, _escape_html(value))
     return html

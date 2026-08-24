@@ -1,6 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
-import { Plus, Trash2, Send, ArrowLeft, Loader2, Copy, Pencil } from "lucide-react";
+import {
+  Plus, Trash2, Send, ArrowLeft, Loader2, Copy, Pencil,
+  Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Link2, Image as ImageIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 // Puts the rendered email on the clipboard as rich HTML (not just text) so
@@ -33,6 +36,140 @@ async function copyHtmlToClipboard(html) {
   document.execCommand("copy");
   sel.removeAllRanges();
   document.body.removeChild(holder);
+}
+
+const RICH_TEXT_COLORS = ["#3a3a3a", "#7a1f2b", "#8a6d3b", "#2b6b3a", "#1a4b8a"];
+// execCommand("fontSize") only accepts the legacy 1-7 <font size> scale, not
+// a CSS px value — this maps to that scale, then a DOM pass afterward
+// rewrites the resulting <font size="n"> back into a real inline
+// font-size in px, which is what the server sanitizer actually looks for.
+const RICH_TEXT_SIZES = [
+  { label: "Small", legacy: "2", px: "13px" },
+  { label: "Normal", legacy: "3", px: "16px" },
+  { label: "Large", legacy: "5", px: "20px" },
+];
+
+// A contenteditable rich-text region with a small fixed toolbar. The
+// browser's own execCommand output (mixed <b>/<font>/<div>/style tags,
+// inconsistent across browsers) is never trusted as-is — the server
+// re-sanitizes into a fixed allowlisted vocabulary before it's ever stored
+// or merged into an outreach email (see _sanitize_rich_html in server.py).
+// This editor only needs to produce *something* reasonable for her to look
+// at; correctness of the final email HTML is enforced server-side.
+function RichTextEditor({ value, onChange }) {
+  const ref = useRef(null);
+  const fileRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    if (ref.current && ref.current.innerHTML !== value) {
+      ref.current.innerHTML = value || "";
+    }
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const emitChange = () => onChange(ref.current?.innerHTML || "");
+
+  const exec = (command, arg) => {
+    ref.current?.focus();
+    document.execCommand(command, false, arg);
+    emitChange();
+  };
+
+  const setFontSize = (legacy, px) => {
+    ref.current?.focus();
+    document.execCommand("fontSize", false, legacy);
+    // Rewrite every <font size="legacy"> the command just produced into a
+    // span with a real px font-size — <font size> never survives the
+    // server sanitizer's allowlist, so leaving it as-is would silently
+    // drop her size choice.
+    ref.current?.querySelectorAll(`font[size="${legacy}"]`).forEach((el) => {
+      const span = document.createElement("span");
+      span.style.fontSize = px;
+      span.innerHTML = el.innerHTML;
+      el.replaceWith(span);
+    });
+    emitChange();
+  };
+
+  const insertLink = () => {
+    const url = window.prompt("Link URL (https://…)");
+    if (!url) return;
+    exec("createLink", url);
+  };
+
+  const insertImage = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const { data } = await api.post("/uploads/photo", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const url = data.path.startsWith("http") ? data.path : `${window.location.origin}${data.path}`;
+      exec("insertImage", url);
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't upload image");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-1 flex-wrap mb-1 p-1 rounded" style={{ border: "1px solid var(--border)" }}>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")}
+          className="btn-ghost p-1.5" title="Bold"><Bold size={13} /></button>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")}
+          className="btn-ghost p-1.5" title="Italic"><Italic size={13} /></button>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("underline")}
+          className="btn-ghost p-1.5" title="Underline"><Underline size={13} /></button>
+        <span style={{ width: 1, background: "var(--border)", alignSelf: "stretch" }} />
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("justifyLeft")}
+          className="btn-ghost p-1.5" title="Align left"><AlignLeft size={13} /></button>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("justifyCenter")}
+          className="btn-ghost p-1.5" title="Align center"><AlignCenter size={13} /></button>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => exec("justifyRight")}
+          className="btn-ghost p-1.5" title="Align right"><AlignRight size={13} /></button>
+        <span style={{ width: 1, background: "var(--border)", alignSelf: "stretch" }} />
+        <select onMouseDown={(e) => e.preventDefault()}
+          onChange={(e) => {
+            const s = RICH_TEXT_SIZES.find((x) => x.px === e.target.value);
+            if (s) setFontSize(s.legacy, s.px);
+            e.target.value = "";
+          }}
+          defaultValue="" className="btn-ghost text-xs" style={{ padding: "4px 6px" }} title="Text size">
+          <option value="" disabled>Size</option>
+          {RICH_TEXT_SIZES.map((s) => <option key={s.px} value={s.px}>{s.label}</option>)}
+        </select>
+        <select onMouseDown={(e) => e.preventDefault()}
+          onChange={(e) => { exec("foreColor", e.target.value); e.target.value = ""; }}
+          defaultValue="" className="btn-ghost text-xs" style={{ padding: "4px 6px" }} title="Text color">
+          <option value="" disabled>Color</option>
+          {RICH_TEXT_COLORS.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <span style={{ width: 1, background: "var(--border)", alignSelf: "stretch" }} />
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={insertLink}
+          className="btn-ghost p-1.5" title="Insert link"><Link2 size={13} /></button>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => fileRef.current?.click()}
+          disabled={uploading} className="btn-ghost p-1.5" title="Insert image">
+          {uploading ? <Loader2 size={13} className="animate-spin" /> : <ImageIcon size={13} />}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" onChange={insertImage} className="hidden" />
+      </div>
+      <div
+        ref={ref}
+        contentEditable
+        onInput={emitChange}
+        onBlur={emitChange}
+        data-testid="outreach-richtext-editor"
+        className="w-full bg-transparent border border-white/10 rounded px-3 py-2 text-sm"
+        style={{ minHeight: 140, outline: "none" }}
+      />
+    </div>
+  );
 }
 
 function TemplateForm({ existing, onClose, onSaved }) {
@@ -101,7 +238,9 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
   const [replyTo, setReplyTo] = useState(ownerEmail || "");
   const [fields, setFields] = useState(() => {
     const init = {};
-    template.merge_fields.forEach((f) => { init[f.name] = template.default_values?.[f.name] || ""; });
+    template.merge_fields.forEach((f) => {
+      init[f.name] = template.default_values?.[f.name] || (f.kind === "color" ? "#ffffff" : "");
+    });
     return init;
   });
   const [preview, setPreview] = useState(null);
@@ -200,14 +339,11 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
                   <span className="text-xs block mb-1" style={{ color: "var(--text-muted)" }}>{f.name}</span>
                   {f.kind === "paragraph" ? (
                     <>
-                      <textarea rows={6} value={fields[f.name] || ""}
-                        onChange={(e) => setFields((prev) => ({ ...prev, [f.name]: e.target.value }))}
-                        data-testid={`outreach-field-input-${f.name}`}
-                        className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                          Blank line = new paragraph. **bold** and *italic* are supported.
-                        </span>
+                      <RichTextEditor
+                        value={fields[f.name] || ""}
+                        onChange={(html) => setFields((prev) => ({ ...prev, [f.name]: html }))}
+                      />
+                      <div className="flex items-center justify-end mt-1">
                         <button type="button" onClick={() => saveDefault(f.name, fields[f.name] || "")}
                           className="text-[11px] shrink-0 underline" style={{ color: "var(--text-muted)" }}
                           data-testid={`outreach-save-default-${f.name}`}>
@@ -215,6 +351,14 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
                         </button>
                       </div>
                     </>
+                  ) : f.kind === "color" ? (
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={fields[f.name] || "#ffffff"}
+                        onChange={(e) => setFields((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                        data-testid={`outreach-field-input-${f.name}`}
+                        className="h-9 w-14 rounded border border-white/10 bg-transparent" />
+                      <span className="text-xs" style={{ color: "var(--text-muted)" }}>{fields[f.name] || "#ffffff"}</span>
+                    </div>
                   ) : (
                     <input value={fields[f.name] || ""}
                       onChange={(e) => setFields((prev) => ({ ...prev, [f.name]: e.target.value }))}
