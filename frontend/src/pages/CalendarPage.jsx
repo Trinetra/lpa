@@ -121,7 +121,7 @@ function OccurrenceRow({ occ, onCancel, onRestore, onUndoReschedule, onReload })
 
   return (
     <div data-testid={`occ-row-${occ.id}`} className="py-3" style={{ borderTop: "1px solid var(--border)" }}>
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm">
             <span style={{ textDecoration: isCancelled ? "line-through" : "none" }}>
@@ -142,7 +142,7 @@ function OccurrenceRow({ occ, onCancel, onRestore, onUndoReschedule, onReload })
           {occ.notes && <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{occ.notes}</div>}
         </div>
         {!isCancelled && !rescheduling && (
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 flex-wrap sm:shrink-0">
             {isMoved && (
               <button type="button" onClick={() => onUndoReschedule(occ.id)} className="btn-ghost text-xs flex items-center gap-1"
                 data-testid={`occ-undo-reschedule-btn-${occ.id}`}>
@@ -160,7 +160,7 @@ function OccurrenceRow({ occ, onCancel, onRestore, onUndoReschedule, onReload })
           </div>
         )}
         {isCancelled && (
-          <button type="button" onClick={() => onRestore(occ.id)} className="btn-ghost text-xs flex items-center gap-1 shrink-0"
+          <button type="button" onClick={() => onRestore(occ.id)} className="btn-ghost text-xs flex items-center gap-1 sm:shrink-0"
             data-testid={`occ-restore-btn-${occ.id}`}>
             <RotateCcw size={12} /> Restore
           </button>

@@ -338,12 +338,13 @@ export default function OutreachPage() {
         <div className="surface">
           {templates.map((t) => (
             <div key={t.id} data-testid={`outreach-template-row-${t.id}`}
-              className="flex items-center justify-between px-6 py-4" style={{ borderTop: "1px solid var(--border)" }}>
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-4"
+              style={{ borderTop: "1px solid var(--border)" }}>
               <button type="button" onClick={() => setActive(t)} className="text-left" data-testid={`outreach-template-open-${t.id}`}>
                 <div className="font-serif-display text-xl">{t.name}</div>
                 <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{t.subject}</div>
               </button>
-              <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-3 flex-wrap sm:shrink-0">
                 <button type="button" onClick={() => setActive(t)} className="btn-ghost text-xs" data-testid={`outreach-template-send-${t.id}`}>
                   Open
                 </button>
