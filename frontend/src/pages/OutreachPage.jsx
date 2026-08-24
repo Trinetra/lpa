@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import {
-  Plus, Trash2, Send, ArrowLeft, Loader2, Copy, Pencil,
+  Plus, Trash2, Send, ArrowLeft, Loader2, Copy, Pencil, Save,
   Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Link2, Image as ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -247,15 +247,22 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
   const [previewLoading, setPreviewLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [savingField, setSavingField] = useState(null);
+  const [savedField, setSavedField] = useState(null);
 
   const saveDefault = async (fieldName, value) => {
+    setSavingField(fieldName);
+    setSavedField(null);
     try {
       const nextDefaults = { ...(template.default_values || {}), [fieldName]: value };
       const { data } = await api.patch(`/outreach-templates/${template.id}`, { default_values: nextDefaults });
       onTemplateUpdated(data);
-      toast.success(`Saved as the default for "${fieldName}"`);
+      setSavedField(fieldName);
+      toast.success(`Saved "${fieldName}" to this template`);
     } catch (e2) {
-      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't save default");
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't save");
+    } finally {
+      setSavingField(null);
     }
   };
 
@@ -341,24 +348,45 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
                     <>
                       <RichTextEditor
                         value={fields[f.name] || ""}
-                        onChange={(html) => setFields((prev) => ({ ...prev, [f.name]: html }))}
+                        onChange={(html) => {
+                          setFields((prev) => ({ ...prev, [f.name]: html }));
+                          setSavedField((prev) => (prev === f.name ? null : prev));
+                        }}
                       />
-                      <div className="flex items-center justify-end mt-1">
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                          {savedField === f.name ? "Saved to this template." : "Not saved yet — only sent with this email until you save it."}
+                        </span>
                         <button type="button" onClick={() => saveDefault(f.name, fields[f.name] || "")}
-                          className="text-[11px] shrink-0 underline" style={{ color: "var(--text-muted)" }}
+                          disabled={savingField === f.name}
+                          className="btn-ghost text-xs flex items-center gap-1 shrink-0"
                           data-testid={`outreach-save-default-${f.name}`}>
-                          Save as this template's default
+                          {savingField === f.name ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save text
                         </button>
                       </div>
                     </>
                   ) : f.kind === "color" ? (
-                    <div className="flex items-center gap-2">
-                      <input type="color" value={fields[f.name] || "#ffffff"}
-                        onChange={(e) => setFields((prev) => ({ ...prev, [f.name]: e.target.value }))}
-                        data-testid={`outreach-field-input-${f.name}`}
-                        className="h-9 w-14 rounded border border-white/10 bg-transparent" />
-                      <span className="text-xs" style={{ color: "var(--text-muted)" }}>{fields[f.name] || "#ffffff"}</span>
-                    </div>
+                    <>
+                      <div className="flex items-center gap-2">
+                        <input type="color" value={fields[f.name] || "#ffffff"}
+                          onChange={(e) => {
+                            setFields((prev) => ({ ...prev, [f.name]: e.target.value }));
+                            setSavedField((prev) => (prev === f.name ? null : prev));
+                          }}
+                          data-testid={`outreach-field-input-${f.name}`}
+                          className="h-9 w-14 rounded border border-white/10 bg-transparent" />
+                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{fields[f.name] || "#ffffff"}</span>
+                        <button type="button" onClick={() => saveDefault(f.name, fields[f.name] || "")}
+                          disabled={savingField === f.name}
+                          className="btn-ghost text-xs flex items-center gap-1 ml-auto"
+                          data-testid={`outreach-save-default-${f.name}`}>
+                          {savingField === f.name ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save color
+                        </button>
+                      </div>
+                      {savedField === f.name && (
+                        <span className="text-[11px] block mt-1" style={{ color: "var(--text-muted)" }}>Saved to this template.</span>
+                      )}
+                    </>
                   ) : (
                     <input value={fields[f.name] || ""}
                       onChange={(e) => setFields((prev) => ({ ...prev, [f.name]: e.target.value }))}
