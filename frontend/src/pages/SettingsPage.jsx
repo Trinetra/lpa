@@ -57,6 +57,8 @@ function BackupCard() {
       <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
         {status.connected
           ? "A daily backup (a restorable database archive plus an Excel workbook with every record, one sheet per type) is uploaded to a \"Backups\" folder in your connected Google Drive."
+          : status.needs_reconnect
+          ? "Backups have stopped — Google disconnected this account on their end. Reconnect Google Calendar above (the same connection is used for both) to resume."
           : "Connect Google Calendar above to enable automatic backups — the same connection is used for both."}
       </p>
 
@@ -181,6 +183,8 @@ function CalendarConnectCard() {
           <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
             {status.connected
               ? `Your weekly schedule syncs to your "${status.calendar_name}" calendar, with reminders 30 minutes before each class.`
+              : status.needs_reconnect
+              ? "Google disconnected this account on their end (an expired or revoked token) — schedule sync and daily backups have stopped. Reconnect to pick back up."
               : "Connect your Google account to automatically keep a calendar in sync with your weekly schedule."}
           </p>
 

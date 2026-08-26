@@ -3623,9 +3623,20 @@ async def student_push_unsubscribe(body: PushUnsubscribeRequest, student: dict =
 @api_router.get("/calendar/status")
 async def calendar_status(user: dict = Depends(get_current_user)):
     full = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    has_token = bool(full and full.get("google_refresh_token"))
+    # A stored refresh token isn't proof the connection still works — Google
+    # can expire/revoke it independently of anything happening in this app.
+    # Actually attempt a refresh (full SCOPES: Calendar + Drive, the same
+    # backup relies on) so "Connected" here means "would work right now",
+    # not just "we still have a token saved from whenever she last connected".
+    working = False
+    if has_token:
+        creds = await calendar_service.get_credentials(user["_id"], scopes=calendar_service.SCOPES)
+        working = creds is not None
     return {
         "configured": calendar_service.is_configured(),
-        "connected": bool(full and full.get("google_refresh_token")),
+        "connected": working,
+        "needs_reconnect": has_token and not working,
         "calendar_name": (full or {}).get("google_calendar_name") or calendar_service.DEFAULT_CALENDAR_NAME,
     }
 
@@ -4971,8 +4982,17 @@ async def upload_event_registration_proof(event_id: str, reg_id: str, file: Uplo
 @api_router.get("/backup/status")
 async def backup_status(user: dict = Depends(get_current_user)):
     full = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    has_token = bool(full and full.get("google_refresh_token"))
+    # A stored refresh token isn't proof it still works — same live-refresh
+    # check as /calendar/status, so this card doesn't say "connected" (and
+    # offer "Back up now") for a token Google has already killed.
+    working = False
+    if has_token:
+        creds = await calendar_service.get_credentials(user["_id"], scopes=calendar_service.DRIVE_SCOPES)
+        working = creds is not None
     return {
-        "connected": bool(full and full.get("google_refresh_token")),
+        "connected": working,
+        "needs_reconnect": has_token and not working,
         "last_backup_at": (full or {}).get("last_backup_at"),
         "last_backup_ok": (full or {}).get("last_backup_ok"),
     }
