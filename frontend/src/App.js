@@ -30,6 +30,7 @@ import AnnouncementsPage from "@/pages/AnnouncementsPage";
 import OutreachPage from "@/pages/OutreachPage";
 import SharedEventPage from "@/pages/SharedEventPage";
 import PublicSlugResolverPage from "@/pages/PublicSlugResolverPage";
+import PrivacyPolicyPage from "@/pages/PrivacyPolicyPage";
 import PortalActivityPage from "@/pages/PortalActivityPage";
 import StudentLoginPage from "@/pages/student/StudentLoginPage";
 import StudentAcceptInvitePage from "@/pages/student/StudentAcceptInvitePage";
@@ -149,6 +150,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/privacy" element={<PrivacyPolicyPage />} />
       <Route path="/invoice/:token" element={<SharedInvoicePage />} />
       <Route path="/tour/:token" element={<SharedTourPage />} />
       <Route path="/event/:token" element={<SharedEventPage />} />

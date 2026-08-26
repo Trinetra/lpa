@@ -301,7 +301,7 @@ RESERVED_SLUGS = {
     "login", "reset-password", "invoice", "tour", "dashboard", "students",
     "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
     "portal", "requests", "event", "events", "crm", "announcements", "calendar",
-    "outreach",
+    "outreach", "privacy",
 }
 
 # Public tour/event links live on the bare root domain, not the app's own
