@@ -716,6 +716,11 @@ _RICH_ALLOWED_TAGS = {"p", "span", "strong", "em", "u", "a", "img", "br"}
 _RICH_ALLOWED_STYLE_PROPS = {"color", "font-size", "font-weight", "font-style", "text-decoration", "text-align"}
 _RICH_VOID_TAGS = {"br", "img"}
 _RICH_BASE_FONT = "font-family:Georgia,'Times New Roman',serif;"
+# Browsers' execCommand("bold"/"italic") produce legacy <b>/<i> (Chrome,
+# Edge) rather than <strong>/<em> — normalized here so formatting from the
+# outreach editor's toolbar survives the allowlist instead of silently
+# vanishing (looked applied in the editor, disappeared in the preview/send).
+_RICH_TAG_ALIASES = {"b": "strong", "i": "em"}
 
 def _sanitize_style_attr(style: str) -> str:
     out = []
@@ -747,10 +752,10 @@ class _RichHtmlSanitizer(HTMLParser):
         self.open_stack = []  # tag names currently open, in the OUTPUT
 
     def handle_starttag(self, tag, attrs):
-        self._emit(tag, attrs)
+        self._emit(_RICH_TAG_ALIASES.get(tag, tag), attrs)
 
     def handle_startendtag(self, tag, attrs):
-        self._emit(tag, attrs, force_void=True)
+        self._emit(_RICH_TAG_ALIASES.get(tag, tag), attrs, force_void=True)
 
     def _emit(self, tag, attrs, force_void=False):
         if tag not in _RICH_ALLOWED_TAGS:
@@ -794,6 +799,7 @@ class _RichHtmlSanitizer(HTMLParser):
         # tag — anything more (extra closes, closing something never
         # opened, closing out of order) is silently dropped rather than
         # trusted from the input.
+        tag = _RICH_TAG_ALIASES.get(tag, tag)
         if tag in self.open_stack:
             while self.open_stack:
                 top = self.open_stack.pop()
