@@ -56,7 +56,7 @@ const RICH_TEXT_SIZES = [
 // or merged into an outreach email (see _sanitize_rich_html in server.py).
 // This editor only needs to produce *something* reasonable for her to look
 // at; correctness of the final email HTML is enforced server-side.
-function RichTextEditor({ value, onChange }) {
+function RichTextEditor({ value, onChange, apiClient }) {
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
@@ -105,7 +105,7 @@ function RichTextEditor({ value, onChange }) {
     try {
       const form = new FormData();
       form.append("file", file);
-      const { data } = await api.post("/uploads/photo", form, {
+      const { data } = await apiClient.post("/uploads/photo", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       const url = data.path.startsWith("http") ? data.path : `${window.location.origin}${data.path}`;
@@ -172,7 +172,7 @@ function RichTextEditor({ value, onChange }) {
   );
 }
 
-function TemplateForm({ existing, onClose, onSaved }) {
+function TemplateForm({ apiClient, basePath, existing, onClose, onSaved }) {
   const [name, setName] = useState(existing?.name || "");
   const [subject, setSubject] = useState(existing?.subject || "");
   const [html, setHtml] = useState(existing?.html || "");
@@ -184,8 +184,8 @@ function TemplateForm({ existing, onClose, onSaved }) {
     setSaving(true);
     try {
       const { data } = isEdit
-        ? await api.patch(`/outreach-templates/${existing.id}`, { name, subject, html })
-        : await api.post("/outreach-templates", { name, subject, html });
+        ? await apiClient.patch(`${basePath}/${existing.id}`, { name, subject, html })
+        : await apiClient.post(basePath, { name, subject, html });
       toast.success(isEdit ? "Template updated" : "Template saved");
       onSaved(data);
       onClose();
@@ -220,7 +220,8 @@ function TemplateForm({ existing, onClose, onSaved }) {
           data-testid="outreach-template-html-input"
           className="w-full bg-transparent border border-white/10 rounded px-3 py-2 font-mono text-xs" />
         <span className="text-xs mt-1 block" style={{ color: "var(--text-muted)" }}>
-          Any {"{{Field Name}}"} tokens in the HTML become fill-in fields automatically.
+          Any {"{{Field Name}}"} tokens in the HTML become fill-in fields automatically. Use {"{{para:Name}}"} for a
+          rich-text region or {"{{bg:Name}}"} for a page background color.
         </span>
       </label>
       <div className="flex justify-end gap-3">
@@ -233,7 +234,7 @@ function TemplateForm({ existing, onClose, onSaved }) {
   );
 }
 
-function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
+function SendPanel({ apiClient, basePath, template, onBack, onTemplateUpdated, ownerEmail }) {
   const [toEmail, setToEmail] = useState("");
   const [replyTo, setReplyTo] = useState(ownerEmail || "");
   const [fields, setFields] = useState(() => {
@@ -255,7 +256,7 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
     setSavedField(null);
     try {
       const nextDefaults = { ...(template.default_values || {}), [fieldName]: value };
-      const { data } = await api.patch(`/outreach-templates/${template.id}`, { default_values: nextDefaults });
+      const { data } = await apiClient.patch(`${basePath}/${template.id}`, { default_values: nextDefaults });
       onTemplateUpdated(data);
       setSavedField(fieldName);
       toast.success(`Saved "${fieldName}" to this template`);
@@ -269,7 +270,7 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
   const loadPreview = async () => {
     setPreviewLoading(true);
     try {
-      const { data } = await api.post(`/outreach-templates/${template.id}/preview`, {
+      const { data } = await apiClient.post(`${basePath}/${template.id}/preview`, {
         to_email: toEmail || "preview@example.com", reply_to: replyTo || null, field_values: fields,
       });
       setPreview(data);
@@ -291,7 +292,7 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
     e.preventDefault();
     setSending(true);
     try {
-      await api.post(`/outreach-templates/${template.id}/send`, {
+      await apiClient.post(`${basePath}/${template.id}/send`, {
         to_email: toEmail, reply_to: replyTo || null, field_values: fields,
       });
       toast.success(`Sent to ${toEmail}`);
@@ -347,6 +348,7 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
                   {f.kind === "paragraph" ? (
                     <>
                       <RichTextEditor
+                        apiClient={apiClient}
                         value={fields[f.name] || ""}
                         onChange={(html) => {
                           setFields((prev) => ({ ...prev, [f.name]: html }));
@@ -434,26 +436,82 @@ function SendPanel({ template, onBack, onTemplateUpdated, ownerEmail }) {
   );
 }
 
-export default function OutreachPage() {
+const fmtSentAt = (iso) => {
+  const d = new Date(iso);
+  return d.toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+};
+
+function SentLog({ apiClient }) {
+  const [sends, setSends] = useState(null);
+
+  useEffect(() => {
+    apiClient.get("/outreach-sends").then((r) => setSends(r.data)).catch(() => setSends([]));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (sends === null) return <div data-testid="outreach-sent-log-loading" className="uppercase-label">Loading…</div>;
+  if (sends.length === 0) {
+    return (
+      <div className="surface p-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+        No outreach emails sent yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="surface" data-testid="outreach-sent-log">
+      {sends.map((s) => (
+        <div key={s.id} data-testid={`outreach-sent-row-${s.id}`}
+          className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 px-6 py-3"
+          style={{ borderTop: "1px solid var(--border)" }}>
+          <div>
+            <div className="text-sm">{s.to_email}</div>
+            <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{s.template_name} &middot; {s.subject}</div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="text-xs" style={{ color: "var(--text-muted)" }}>{fmtSentAt(s.sent_at)}</div>
+            <div className="text-[10px] uppercase tracking-widest mt-0.5"
+              style={{ color: s.sent_by === "student" ? "var(--primary)" : "var(--text-muted)" }}>
+              {s.sent_by === "student" ? `Sent by ${s.sent_by_name || "student"}` : "Sent by you"}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// apiClient/basePath let this whole page be reused for a student who's been
+// granted delegated Outreach access (see StudentOutreachPage.jsx) — same
+// functionality against the teacher's own template library, minus delete
+// (canDelete=false) and the sent-log tab (showLog=false, since that's a
+// teacher-only oversight view, not something a delegated student needs).
+export default function OutreachPage({
+  apiClient = api,
+  basePath = "/outreach-templates",
+  canDelete = true,
+  showLog = true,
+  profileEndpoint = "/profile",
+}) {
   const [templates, setTemplates] = useState(null);
   const [creating, setCreating] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [active, setActive] = useState(null);
   const [ownerEmail, setOwnerEmail] = useState("");
+  const [tab, setTab] = useState("templates"); // "templates" | "log"
 
   const load = () => {
-    api.get("/outreach-templates").then((r) => setTemplates(r.data)).catch(() => setTemplates([]));
+    apiClient.get(basePath).then((r) => setTemplates(r.data)).catch(() => setTemplates([]));
   };
 
   useEffect(() => {
     load();
-    api.get("/profile").then((r) => setOwnerEmail(r.data.contact_email || r.data.email || "")).catch(() => {});
-  }, []);
+    apiClient.get(profileEndpoint).then((r) => setOwnerEmail(r.data.contact_email || r.data.email || "")).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const remove = async (id) => {
     if (!window.confirm("Delete this template?")) return;
     try {
-      await api.delete(`/outreach-templates/${id}`);
+      await apiClient.delete(`${basePath}/${id}`);
       toast.success("Deleted");
       load();
     } catch (e2) {
@@ -470,7 +528,7 @@ export default function OutreachPage() {
         name = `${t.name} (copy ${n})`;
         n += 1;
       }
-      await api.post("/outreach-templates", {
+      await apiClient.post(basePath, {
         name, subject: t.subject, html: t.html, default_values: t.default_values || {},
       });
       toast.success("Duplicated — edit the copy's HTML to make your changes");
@@ -483,7 +541,8 @@ export default function OutreachPage() {
   if (active) {
     return (
       <div data-testid="outreach-page" className="space-y-6">
-        <SendPanel template={active} onBack={() => setActive(null)} onTemplateUpdated={setActive} ownerEmail={ownerEmail} />
+        <SendPanel apiClient={apiClient} basePath={basePath} template={active} onBack={() => setActive(null)}
+          onTemplateUpdated={setActive} ownerEmail={ownerEmail} />
       </div>
     );
   }
@@ -495,54 +554,76 @@ export default function OutreachPage() {
           <div className="uppercase-label mb-2">Cold outreach</div>
           <h1 className="font-serif-display text-4xl sm:text-5xl">Outreach</h1>
         </div>
-        {!creating && (
+        {tab === "templates" && !creating && (
           <button onClick={() => setCreating(true)} data-testid="outreach-new-template-btn" className="btn-pill flex items-center gap-2">
             <Plus size={16} /> New template
           </button>
         )}
       </header>
 
-      {creating && <TemplateForm onClose={() => setCreating(false)} onSaved={load} />}
-      {editingTemplate && (
-        <TemplateForm existing={editingTemplate} onClose={() => setEditingTemplate(null)} onSaved={load} />
+      {showLog && (
+        <div className="flex gap-2">
+          <button type="button" onClick={() => setTab("templates")} data-testid="outreach-tab-templates"
+            className="btn-ghost text-xs" style={{ color: tab === "templates" ? "var(--primary)" : "var(--text-muted)" }}>
+            Templates
+          </button>
+          <button type="button" onClick={() => setTab("log")} data-testid="outreach-tab-log"
+            className="btn-ghost text-xs" style={{ color: tab === "log" ? "var(--primary)" : "var(--text-muted)" }}>
+            Sent log
+          </button>
+        </div>
       )}
 
-      {templates === null ? (
-        <div data-testid="outreach-loading" className="uppercase-label">Loading…</div>
-      ) : templates.length === 0 && !creating ? (
-        <div className="surface p-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
-          No templates yet — save one to start sending outreach emails from here.
-        </div>
+      {showLog && tab === "log" ? (
+        <SentLog apiClient={apiClient} />
       ) : (
-        <div className="surface">
-          {templates.map((t) => (
-            <div key={t.id} data-testid={`outreach-template-row-${t.id}`}
-              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-4"
-              style={{ borderTop: "1px solid var(--border)" }}>
-              <button type="button" onClick={() => setActive(t)} className="text-left" data-testid={`outreach-template-open-${t.id}`}>
-                <div className="font-serif-display text-xl">{t.name}</div>
-                <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{t.subject}</div>
-              </button>
-              <div className="flex items-center gap-3 flex-wrap sm:shrink-0">
-                <button type="button" onClick={() => setActive(t)} className="btn-ghost text-xs" data-testid={`outreach-template-send-${t.id}`}>
-                  Open
-                </button>
-                <button type="button" onClick={() => duplicate(t)} className="btn-ghost text-xs flex items-center gap-1"
-                  data-testid={`outreach-template-duplicate-${t.id}`}>
-                  <Copy size={12} /> Duplicate
-                </button>
-                <button type="button" onClick={() => setEditingTemplate(t)} className="btn-ghost text-xs flex items-center gap-1"
-                  data-testid={`outreach-template-edit-${t.id}`}>
-                  <Pencil size={12} /> Edit
-                </button>
-                <button type="button" onClick={() => remove(t.id)} className="btn-ghost text-xs" style={{ color: "var(--error)" }}
-                  data-testid={`outreach-template-delete-${t.id}`}>
-                  <Trash2 size={14} />
-                </button>
-              </div>
+        <>
+          {creating && <TemplateForm apiClient={apiClient} basePath={basePath} onClose={() => setCreating(false)} onSaved={load} />}
+          {editingTemplate && (
+            <TemplateForm apiClient={apiClient} basePath={basePath} existing={editingTemplate}
+              onClose={() => setEditingTemplate(null)} onSaved={load} />
+          )}
+
+          {templates === null ? (
+            <div data-testid="outreach-loading" className="uppercase-label">Loading…</div>
+          ) : templates.length === 0 && !creating ? (
+            <div className="surface p-8 text-center text-sm" style={{ color: "var(--text-muted)" }}>
+              No templates yet — save one to start sending outreach emails from here.
             </div>
-          ))}
-        </div>
+          ) : (
+            <div className="surface">
+              {templates.map((t) => (
+                <div key={t.id} data-testid={`outreach-template-row-${t.id}`}
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-4"
+                  style={{ borderTop: "1px solid var(--border)" }}>
+                  <button type="button" onClick={() => setActive(t)} className="text-left" data-testid={`outreach-template-open-${t.id}`}>
+                    <div className="font-serif-display text-xl">{t.name}</div>
+                    <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{t.subject}</div>
+                  </button>
+                  <div className="flex items-center gap-3 flex-wrap sm:shrink-0">
+                    <button type="button" onClick={() => setActive(t)} className="btn-ghost text-xs" data-testid={`outreach-template-send-${t.id}`}>
+                      Open
+                    </button>
+                    <button type="button" onClick={() => duplicate(t)} className="btn-ghost text-xs flex items-center gap-1"
+                      data-testid={`outreach-template-duplicate-${t.id}`}>
+                      <Copy size={12} /> Duplicate
+                    </button>
+                    <button type="button" onClick={() => setEditingTemplate(t)} className="btn-ghost text-xs flex items-center gap-1"
+                      data-testid={`outreach-template-edit-${t.id}`}>
+                      <Pencil size={12} /> Edit
+                    </button>
+                    {canDelete && (
+                      <button type="button" onClick={() => remove(t.id)} className="btn-ghost text-xs" style={{ color: "var(--error)" }}
+                        data-testid={`outreach-template-delete-${t.id}`}>
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

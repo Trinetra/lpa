@@ -16,6 +16,7 @@ import {
   Moon,
   LogOut,
   Megaphone,
+  Mail,
 } from "lucide-react";
 
 export default function StudentPortalLayout() {
@@ -41,6 +42,7 @@ export default function StudentPortalLayout() {
     { to: "/portal/progress", label: "Progress", icon: BookOpenCheck, tid: "portal-nav-progress" },
     { to: "/portal/notes", label: "Notes", icon: NotebookPen, tid: "portal-nav-notes" },
     { to: "/portal/payment-proof", label: "Payment proof", icon: Receipt, tid: "portal-nav-payment-proof" },
+    ...(me?.outreach_access ? [{ to: "/portal/outreach", label: "Outreach", icon: Mail, tid: "portal-nav-outreach" }] : []),
     { to: "/portal/settings", label: "Settings", icon: Settings, tid: "portal-nav-settings" },
   ];
 

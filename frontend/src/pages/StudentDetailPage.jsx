@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
 import { toast } from "sonner";
-import { ArrowLeft, Phone, Mail, Calendar, Send } from "lucide-react";
+import { ArrowLeft, Phone, Mail, Calendar, Send, Megaphone } from "lucide-react";
 import { fmtCurrency } from "@/pages/StudentsPage";
 
 function ordinal(n) {
@@ -27,6 +27,7 @@ export default function StudentDetailPage() {
   const [classes, setClasses] = useState([]);
   const [payments, setPayments] = useState([]);
   const [inviting, setInviting] = useState(false);
+  const [togglingOutreach, setTogglingOutreach] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -75,6 +76,19 @@ export default function StudentDetailPage() {
     }
   };
 
+  const toggleOutreachAccess = async () => {
+    setTogglingOutreach(true);
+    try {
+      const { data } = await api.post(`/students/${id}/outreach-access`, { enabled: !student.outreach_access });
+      setStudent(data);
+      toast.success(data.outreach_access ? "Outreach access granted" : "Outreach access revoked");
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't update access");
+    } finally {
+      setTogglingOutreach(false);
+    }
+  };
+
   return (
     <div data-testid="student-detail-page" className="space-y-8">
       <Link to="/students" className="inline-flex items-center gap-2 text-xs uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
@@ -104,15 +118,27 @@ export default function StudentDetailPage() {
           {student.description && (
             <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>{student.description}</p>
           )}
-          <button
-            type="button"
-            onClick={sendPortalInvite}
-            disabled={inviting}
-            data-testid="send-portal-invite-btn"
-            className="btn-ghost mt-3 flex items-center gap-2 text-xs"
-          >
-            <Send size={12} /> {inviting ? "Sending…" : "Send portal invite"}
-          </button>
+          <div className="flex flex-wrap gap-3 mt-3">
+            <button
+              type="button"
+              onClick={sendPortalInvite}
+              disabled={inviting}
+              data-testid="send-portal-invite-btn"
+              className="btn-ghost flex items-center gap-2 text-xs"
+            >
+              <Send size={12} /> {inviting ? "Sending…" : "Send portal invite"}
+            </button>
+            <button
+              type="button"
+              onClick={toggleOutreachAccess}
+              disabled={togglingOutreach}
+              data-testid="toggle-outreach-access-btn"
+              className="btn-ghost flex items-center gap-2 text-xs"
+              style={{ color: student.outreach_access ? "var(--success)" : "var(--text-muted)" }}
+            >
+              <Megaphone size={12} /> {student.outreach_access ? "Outreach access: on" : "Outreach access: off"}
+            </button>
+          </div>
         </div>
         <div className="text-right shrink-0 hidden md:block">
           <div className="uppercase-label">Rate</div>

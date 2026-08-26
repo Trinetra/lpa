@@ -184,6 +184,9 @@ class StudentCreate(BaseModel):
 class StudentInviteRequest(BaseModel):
     channels: List[str] = Field(default_factory=lambda: ["email"])  # 'email' and/or 'whatsapp'
 
+class OutreachAccessUpdate(BaseModel):
+    enabled: bool
+
 class StudentUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
@@ -495,6 +498,7 @@ def ser_student(doc):
         "is_active": doc.get("is_active", True),
         "created_at": doc.get("created_at"),
         "portal_active": bool(doc.get("password_hash")),
+        "outreach_access": doc.get("outreach_access", False),
     }
 
 def ser_class(doc):
@@ -1253,6 +1257,18 @@ async def deactivate_student(sid: str, user: dict = Depends(get_current_user)):
 async def reactivate_student(sid: str, user: dict = Depends(get_current_user)):
     res = await db.students.update_one(
         {"_id": ObjectId(sid), "owner_id": user["_id"]}, {"$set": {"is_active": True}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return ser_student(await db.students.find_one({"_id": ObjectId(sid)}))
+
+@api_router.post("/students/{sid}/outreach-access")
+async def set_student_outreach_access(sid: str, body: OutreachAccessUpdate, user: dict = Depends(get_current_user)):
+    """Grants or revokes this student's access to the Outreach module — she
+    can then send cold-outreach emails on Lakshmi's behalf using Lakshmi's
+    saved templates, same as Lakshmi herself, minus deleting templates."""
+    res = await db.students.update_one(
+        {"_id": ObjectId(sid), "owner_id": user["_id"]}, {"$set": {"outreach_access": body.enabled}}
     )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Student not found")
@@ -2963,6 +2979,7 @@ async def student_me(student: dict = Depends(get_current_student)):
         "teacher_name": (owner or {}).get("teacher_name") or (owner or {}).get("name"),
         "contact_email": (owner or {}).get("contact_email") or (owner or {}).get("email"),
         "contact_phone": (owner or {}).get("contact_phone"),
+        "outreach_access": student.get("outreach_access", False),
     }
 
 @api_router.patch("/student/me")
@@ -4669,14 +4686,15 @@ async def preview_outreach_template(template_id: str, body: OutreachSendRequest,
     html = _merge_outreach_html(doc["html"], body.field_values)
     return {"subject": doc["subject"], "html": html}
 
-@api_router.post("/outreach-templates/{template_id}/send")
-async def send_outreach_template(template_id: str, body: OutreachSendRequest, user: dict = Depends(get_current_user)):
-    doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": user["_id"]})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Template not found")
+async def _do_outreach_send(owner_id: str, doc: dict, body: "OutreachSendRequest",
+                             sent_by: str, sent_by_name: Optional[str]) -> dict:
+    """Shared by the teacher's own send and a delegated student's send — the
+    outreach_sends log is what lets Lakshmi see who actually sent what, so
+    every path to sending goes through here rather than duplicating the
+    dispatch + logging."""
     html = _merge_outreach_html(doc["html"], body.field_values)
 
-    owner = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    owner = await db.users.find_one({"_id": ObjectId(owner_id)})
     reply_to = body.reply_to or (owner or {}).get("contact_email") or (owner or {}).get("email")
     payload = {"to": [body.to_email], "subject": doc["subject"], "html": html}
     if reply_to:
@@ -4689,7 +4707,108 @@ async def send_outreach_template(template_id: str, body: OutreachSendRequest, us
     except Exception as e:
         logger.error(f"Outreach send error: {e}")
         raise HTTPException(status_code=500, detail="Failed to send email")
+
+    await db.outreach_sends.insert_one({
+        "owner_id": owner_id,
+        "template_id": str(doc["_id"]),
+        "template_name": doc.get("name"),
+        "to_email": body.to_email,
+        "subject": doc["subject"],
+        "sent_by": sent_by,  # "teacher" | "student"
+        "sent_by_name": sent_by_name,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    })
     return {"ok": True, "to": body.to_email, "email_id": result.get("id")}
+
+@api_router.post("/outreach-templates/{template_id}/send")
+async def send_outreach_template(template_id: str, body: OutreachSendRequest, user: dict = Depends(get_current_user)):
+    doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": user["_id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Template not found")
+    teacher_name = user.get("teacher_name") or user.get("name")
+    return await _do_outreach_send(user["_id"], doc, body, "teacher", teacher_name)
+
+def ser_outreach_send(doc):
+    return {
+        "id": str(doc["_id"]),
+        "template_id": doc.get("template_id"),
+        "template_name": doc.get("template_name"),
+        "to_email": doc.get("to_email"),
+        "subject": doc.get("subject"),
+        "sent_by": doc.get("sent_by"),
+        "sent_by_name": doc.get("sent_by_name"),
+        "sent_at": doc.get("sent_at"),
+    }
+
+@api_router.get("/outreach-sends")
+async def list_outreach_sends(user: dict = Depends(get_current_user)):
+    """A log of every outreach email actually sent — Lakshmi's own sends and
+    any sent on her behalf by a student with Outreach access, newest
+    first."""
+    cur = db.outreach_sends.find({"owner_id": user["_id"]}).sort("sent_at", -1).limit(200)
+    return [ser_outreach_send(d) async for d in cur]
+
+# --------------- Outreach templates: student-delegated access -----------------
+# Mirrors the teacher endpoints above for a student Lakshmi has explicitly
+# granted access to (see /students/{sid}/outreach-access) — same
+# functionality (list/create/edit/preview/send templates owned by the
+# teacher), except a student can never delete a template, to guard against
+# an accidental deletion of Lakshmi's own library.
+async def get_current_student_with_outreach_access(request: Request) -> dict:
+    student = await get_current_student(request)
+    if not student.get("outreach_access"):
+        raise HTTPException(status_code=403, detail="Outreach access has not been enabled for this account")
+    return student
+
+@api_router.get("/student/outreach-templates")
+async def list_outreach_templates_student(student: dict = Depends(get_current_student_with_outreach_access)):
+    cur = db.outreach_templates.find({"owner_id": student["owner_id"]}).sort("created_at", -1)
+    return [ser_outreach_template(d) async for d in cur]
+
+@api_router.post("/student/outreach-templates")
+async def create_outreach_template_student(body: OutreachTemplateCreate, student: dict = Depends(get_current_student_with_outreach_access)):
+    doc = body.model_dump()
+    doc["owner_id"] = student["owner_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    doc["updated_at"] = doc["created_at"]
+    res = await db.outreach_templates.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_outreach_template(doc)
+
+@api_router.get("/student/outreach-templates/{template_id}")
+async def get_outreach_template_student(template_id: str, student: dict = Depends(get_current_student_with_outreach_access)):
+    doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": student["owner_id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return ser_outreach_template(doc)
+
+@api_router.patch("/student/outreach-templates/{template_id}")
+async def update_outreach_template_student(template_id: str, body: OutreachTemplateUpdate, student: dict = Depends(get_current_student_with_outreach_access)):
+    existing = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": student["owner_id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Template not found")
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.outreach_templates.update_one({"_id": existing["_id"]}, {"$set": updates})
+    doc = await db.outreach_templates.find_one({"_id": existing["_id"]})
+    return ser_outreach_template(doc)
+
+@api_router.post("/student/outreach-templates/{template_id}/preview")
+async def preview_outreach_template_student(template_id: str, body: OutreachSendRequest, student: dict = Depends(get_current_student_with_outreach_access)):
+    doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": student["owner_id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Template not found")
+    html = _merge_outreach_html(doc["html"], body.field_values)
+    return {"subject": doc["subject"], "html": html}
+
+@api_router.post("/student/outreach-templates/{template_id}/send")
+async def send_outreach_template_student(template_id: str, body: OutreachSendRequest, student: dict = Depends(get_current_student_with_outreach_access)):
+    doc = await db.outreach_templates.find_one({"_id": ObjectId(template_id), "owner_id": student["owner_id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return await _do_outreach_send(student["owner_id"], doc, body, "student", student.get("name"))
 
 # --------------- Public event pages & registration -----------------
 async def _ser_shared_event(event: dict) -> dict:
@@ -5086,6 +5205,7 @@ async def on_startup():
     await db.class_occurrences.create_index([("owner_id", 1), ("student_ids", 1), ("date", 1)])
     await db.personal_events.create_index([("owner_id", 1), ("date", 1)])
     await db.outreach_templates.create_index([("owner_id", 1), ("created_at", -1)])
+    await db.outreach_sends.create_index([("owner_id", 1), ("sent_at", -1)])
 
     # Seed / migrate admin (single-user app)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

@@ -42,6 +42,7 @@ import StudentNotesPage from "@/pages/student/StudentNotesPage";
 import StudentPaymentProofPage from "@/pages/student/StudentPaymentProofPage";
 import StudentSettingsPage from "@/pages/student/StudentSettingsPage";
 import StudentAnnouncementsPage from "@/pages/student/StudentAnnouncementsPage";
+import StudentOutreachPage from "@/pages/student/StudentOutreachPage";
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -135,6 +136,7 @@ function StudentPortalRoutes() {
           <Route path="payment-proof" element={<StudentPaymentProofPage />} />
           <Route path="settings" element={<StudentSettingsPage />} />
           <Route path="announcements" element={<StudentAnnouncementsPage />} />
+          <Route path="outreach" element={<StudentOutreachPage />} />
         </Route>
         <Route path="*" element={<Navigate to="login" replace />} />
       </Routes>
