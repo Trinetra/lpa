@@ -17,6 +17,12 @@ from db import db
 logger = logging.getLogger(__name__)
 
 RESEND_URL = "https://api.resend.com/emails"
+_CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
+
+
+def _fmt_money(n, currency: str = "INR") -> str:
+    symbol = _CURRENCY_SYMBOLS.get(currency, (currency or "") + " ")
+    return f"{symbol}{n}"
 
 
 def _email_key() -> Optional[str]:
@@ -38,6 +44,7 @@ def _backend_url() -> str:
 def build_invoice_email_html(inv: dict, public_link: str, pdf_link: str,
                               teacher_name: str, personal_note: Optional[str]) -> str:
     student = inv.get("student_snapshot", {})
+    currency = student.get("currency", "INR")
     summary = inv.get("summary", {})
     period = f"{inv.get('start_date') or 'All time'} — {inv.get('end_date') or 'today'}"
     note_html = ""
@@ -60,9 +67,9 @@ def build_invoice_email_html(inv: dict, public_link: str, pdf_link: str,
         </div>
         {note_html}
         <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border-top:1px solid #eadfd1;border-bottom:1px solid #eadfd1">
-          <tr><td style="padding:12px 0;font-size:14px;color:#666">Total billed</td><td align="right" style="padding:12px 0;font-size:14px;color:#2c2926">₹ {summary.get("total_billed", 0)}</td></tr>
-          <tr><td style="padding:0 0 12px;font-size:14px;color:#666">Total paid</td><td align="right" style="padding:0 0 12px;font-size:14px;color:#7c9082">₹ {summary.get("total_paid", 0)}</td></tr>
-          <tr><td style="padding:12px 0;font-size:16px;color:#b85c5c;font-weight:700;border-top:1px solid #eadfd1">Balance due</td><td align="right" style="padding:12px 0;font-size:16px;color:#b85c5c;font-weight:700;border-top:1px solid #eadfd1">₹ {summary.get("balance_due", 0)}</td></tr>
+          <tr><td style="padding:12px 0;font-size:14px;color:#666">Total billed</td><td align="right" style="padding:12px 0;font-size:14px;color:#2c2926">{_fmt_money(summary.get("total_billed", 0), currency)}</td></tr>
+          <tr><td style="padding:0 0 12px;font-size:14px;color:#666">Total paid</td><td align="right" style="padding:0 0 12px;font-size:14px;color:#7c9082">{_fmt_money(summary.get("total_paid", 0), currency)}</td></tr>
+          <tr><td style="padding:12px 0;font-size:16px;color:#b85c5c;font-weight:700;border-top:1px solid #eadfd1">Balance due</td><td align="right" style="padding:12px 0;font-size:16px;color:#b85c5c;font-weight:700;border-top:1px solid #eadfd1">{_fmt_money(summary.get("balance_due", 0), currency)}</td></tr>
         </table>
         <table cellpadding="0" cellspacing="0"><tr>
           <td style="padding-right:8px"><a href="{public_link}" style="display:inline-block;background:#d48464;color:#1a1816;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:14px">View invoice</a></td>
@@ -95,9 +102,6 @@ def build_invoice_email_payload(inv: dict, invoice_id: str, to_email: str,
     if reply_to:
         payload["contact_email"] = reply_to
     return payload
-
-
-_CURRENCY_SYMBOLS = {"INR": "₹", "EUR": "€", "USD": "$", "GBP": "£"}
 
 
 def build_tour_invoice_email_html(invoice: dict, teacher_name: str, pdf_link: str) -> str:

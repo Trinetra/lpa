@@ -334,6 +334,7 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
                          studio_contact: Optional[dict] = None,
                          invoice_number: Optional[str] = None,
                          created_at: Optional[str] = None) -> bytes:
+    currency = student.get("currency", "INR")
     styles = _styles()
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
@@ -356,7 +357,7 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
     story.append(Spacer(1, 2.5 * mm))
     class_rows = [[
         _fmt_date(c.get("class_date")), _fmt_hours(c.get("hours", 0)),
-        _fmt_money(c.get("amount", 0)), c.get("notes") or "",
+        _fmt_money(c.get("amount", 0), currency), c.get("notes") or "",
     ] for c in classes]
     story.append(_line_items_table(
         styles, ["Date", "Hours", "Amount", "Notes"],
@@ -368,7 +369,7 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
         story.append(Paragraph("PAYMENTS RECEIVED", styles["sectionHead"]))
         story.append(Spacer(1, 2.5 * mm))
         pay_rows = [[
-            _fmt_date(p.get("paid_on")), p.get("method") or "—", _fmt_money(p.get("amount", 0)), p.get("notes") or "",
+            _fmt_date(p.get("paid_on")), p.get("method") or "—", _fmt_money(p.get("amount", 0), currency), p.get("notes") or "",
         ] for p in payments]
         story.append(_line_items_table(
             styles, ["Date", "Method", "Amount", "Notes"],
@@ -381,21 +382,24 @@ def generate_invoice_pdf(teacher_name: str, student: dict, classes: list,
     balance_due = summary.get("balance_due", 0)
     has_credit = balance_due < 0
 
-    summary_rows = [("Total billed", _fmt_money(total_billed)), ("Total paid", _fmt_money(total_paid))]
+    summary_rows = [("Total billed", _fmt_money(total_billed, currency)), ("Total paid", _fmt_money(total_paid, currency))]
     if has_credit:
-        summary_rows.append(("Credit balance", _fmt_money(abs(balance_due))))
-        summary_rows.append(("Final Amount Due", _fmt_money(0)))
+        summary_rows.append(("Credit balance", _fmt_money(abs(balance_due), currency)))
+        summary_rows.append(("Final Amount Due", _fmt_money(0, currency)))
     else:
-        summary_rows.append(("Final Amount Due", _fmt_money(balance_due)))
+        summary_rows.append(("Final Amount Due", _fmt_money(balance_due, currency)))
 
     summary_tbl = _summary_card(styles, summary_rows, emphasis_index=len(summary_rows) - 1,
                                  emphasis_color=_MAROON)
 
     # UPI QR code — only meaningful for domestic (INR) dance-class invoices;
     # a foreign/tour invoice recipient can't pay via UPI, so this is never
-    # shown there (generate_tour_invoice_pdf doesn't call this at all).
+    # shown there (generate_tour_invoice_pdf doesn't call this at all), and
+    # not for a non-INR student either — the QR always encodes cu=INR, so
+    # showing it against a EUR/USD/GBP balance would silently mis-state the
+    # amount and currency to whoever scans it.
     upi_vpa = (studio_contact or {}).get("contact_upi")
-    qr_bytes = _upi_qr_bytes(upi_vpa, teacher_name, balance_due) if (upi_vpa and balance_due > 0) else None
+    qr_bytes = _upi_qr_bytes(upi_vpa, teacher_name, balance_due) if (upi_vpa and balance_due > 0 and currency == "INR") else None
     if qr_bytes:
         qr_img = RLImage(io.BytesIO(qr_bytes))
         qr_img.drawWidth = 26 * mm

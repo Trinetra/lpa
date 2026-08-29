@@ -4,7 +4,8 @@ import { X, Mail, MessageCircle, CheckCircle2, AlertCircle, Loader2, Send } from
 import { toast } from "sonner";
 import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
 
-const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+const CURRENCY_SYMBOLS = { INR: "₹", EUR: "€", USD: "$", GBP: "£" };
+const fmt = (n, currency) => `${CURRENCY_SYMBOLS[currency] || (currency ? currency + " " : "₹")}${Number(n || 0).toLocaleString("en-IN")}`;
 
 function firstOfThisMonth() {
   const d = new Date();
@@ -107,7 +108,7 @@ export default function BulkSendModal({ onClose, onDone }) {
                   className="flex items-center justify-between py-3">
                   <div className="min-w-0">
                     <div className="truncate">{r.name}</div>
-                    <div className="text-xs" style={{ color: "var(--text-muted)" }}>Due: {fmt(r.balance_due)}</div>
+                    <div className="text-xs" style={{ color: "var(--text-muted)" }}>Due: {fmt(r.balance_due, r.currency)}</div>
                   </div>
                   <div className="flex items-center gap-2">
                     {r.channels?.email && (
@@ -212,7 +213,7 @@ export default function BulkSendModal({ onClose, onDone }) {
                       </div>
                       <div className="text-right shrink-0">
                         <div className="font-serif-display" style={{ color: s.balance_due > 0 ? "var(--error)" : "var(--success)" }}>
-                          {fmt(s.balance_due)}
+                          {fmt(s.balance_due, s.currency)}
                         </div>
                         <div className="uppercase-label">Due</div>
                       </div>

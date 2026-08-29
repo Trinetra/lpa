@@ -9,7 +9,8 @@ const LABEL = "#8A6D3B";
 const RULE = "#E4D9C8";
 const CREAM = "#FBF5EC";
 
-const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+const CURRENCY_SYMBOLS = { INR: "₹", EUR: "€", USD: "$", GBP: "£" };
+const fmt = (n, currency) => `${CURRENCY_SYMBOLS[currency] || (currency ? currency + " " : "₹")}${Number(n || 0).toLocaleString("en-IN")}`;
 const fmtDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "");
 const fmtHours = (h) => {
   const n = Number(h);
@@ -46,12 +47,15 @@ export default function SharedInvoicePage() {
   const studio = inv.studio || {};
   const brandName = studio.studio_name || inv.teacher_name;
   const logoUrl = studio.logo_path ? `${API}/invoices/share/${token}/logo` : null;
+  const currency = inv.student?.currency || "INR";
 
   const totalBilled = inv.summary?.total_billed || 0;
   const totalPaid = inv.summary?.total_paid || 0;
   const balanceDue = inv.summary?.balance_due || 0;
   const hasCredit = balanceDue < 0;
-  const qrUrl = (studio.contact_upi && balanceDue > 0) ? `${API}/invoices/share/${token}/qr` : null;
+  // UPI only ever pays in INR — showing this QR against a foreign-currency
+  // balance would mis-state both the amount and the currency to whoever scans it.
+  const qrUrl = (studio.contact_upi && balanceDue > 0 && currency === "INR") ? `${API}/invoices/share/${token}/qr` : null;
 
   return (
     <div className="min-h-screen py-14 px-6" style={{ background: "#FFFDF9" }}>
@@ -107,7 +111,7 @@ export default function SharedInvoicePage() {
                   <tr key={c.id} style={{ background: i % 2 === 1 ? CREAM : "transparent" }}>
                     <td className="py-2 px-3 text-left">{fmtDate(c.class_date)}</td>
                     <td className="text-left px-3">{fmtHours(c.hours)}</td>
-                    <td className="text-left px-3">{fmt(c.amount)}</td>
+                    <td className="text-left px-3">{fmt(c.amount, currency)}</td>
                     <td className="text-left px-3" style={{ color: LABEL }}>{c.notes || ""}</td>
                   </tr>
                 ))}
@@ -133,7 +137,7 @@ export default function SharedInvoicePage() {
                       <tr key={p.id} style={{ background: i % 2 === 1 ? CREAM : "transparent" }}>
                         <td className="py-2 px-3 text-left">{fmtDate(p.paid_on)}</td>
                         <td className="text-left px-3">{p.method || "—"}</td>
-                        <td className="text-left px-3">{fmt(p.amount)}</td>
+                        <td className="text-left px-3">{fmt(p.amount, currency)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -149,14 +153,14 @@ export default function SharedInvoicePage() {
                 </div>
               ) : <div />}
               <div className="w-full sm:w-auto sm:min-w-[280px] text-sm">
-                <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Total billed</span><span>{fmt(totalBilled)}</span></div>
-                <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Total paid</span><span>{fmt(totalPaid)}</span></div>
+                <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Total billed</span><span>{fmt(totalBilled, currency)}</span></div>
+                <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Total paid</span><span>{fmt(totalPaid, currency)}</span></div>
                 {hasCredit && (
-                  <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Credit balance</span><span>{fmt(Math.abs(balanceDue))}</span></div>
+                  <div className="flex justify-between gap-6 py-1"><span style={{ color: LABEL }}>Credit balance</span><span>{fmt(Math.abs(balanceDue), currency)}</span></div>
                 )}
                 <div className="flex justify-between gap-6 font-serif-display text-lg mt-2 px-3 py-2 rounded"
                   style={{ background: MAROON, color: "white" }}>
-                  <span>Final Amount Due</span><span>{fmt(hasCredit ? 0 : balanceDue)}</span>
+                  <span>Final Amount Due</span><span>{fmt(hasCredit ? 0 : balanceDue, currency)}</span>
                 </div>
               </div>
             </div>

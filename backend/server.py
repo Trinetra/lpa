@@ -2125,6 +2125,7 @@ async def bulk_send(body: BulkSendRequest, user: dict = Depends(get_current_user
             "share_token": doc["share_token"],
             "public_link": f"{origin}/invoice/{doc['share_token']}",
             "balance_due": doc["summary"]["balance_due"],
+            "currency": s.get("currency", "INR"),
             "channels": {},
         }
 
@@ -2155,8 +2156,9 @@ async def bulk_send(body: BulkSendRequest, user: dict = Depends(get_current_user
                 entry["channels"]["whatsapp"] = {"status": "skipped", "reason": "no phone on file"}
             else:
                 teacher = doc.get("studio_snapshot", {}).get("studio_name") or doc.get("teacher_name") or "your teacher"
+                symbol = CURRENCY_SYMBOLS.get(s.get("currency", "INR"), (s.get("currency") or "") + " ")
                 msg = (f"Hi {s.get('name') or ''}, here's your invoice from {teacher} "
-                       f"(₹{doc['summary']['balance_due']} due):\n{entry['public_link']}")
+                       f"({symbol}{doc['summary']['balance_due']} due):\n{entry['public_link']}")
                 entry["channels"]["whatsapp"] = {"status": "ready", "url": _wa_link(s["phone"], msg)}
 
         results.append(entry)

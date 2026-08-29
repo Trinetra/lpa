@@ -6,7 +6,8 @@ import BulkSendModal from "@/components/BulkSendModal";
 import { useAuth } from "@/context/AuthContext";
 import ShowInactiveToggle, { filterActive, inactiveCountOf } from "@/components/ShowInactiveToggle";
 
-const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+const CURRENCY_SYMBOLS = { INR: "₹", EUR: "€", USD: "$", GBP: "£" };
+const fmt = (n, currency) => `${CURRENCY_SYMBOLS[currency] || (currency ? currency + " " : "₹")}${Number(n || 0).toLocaleString("en-IN")}`;
 
 function EmailInvoiceModal({ invoice, studentMap, onClose }) {
   const { user } = useAuth();
@@ -15,7 +16,7 @@ function EmailInvoiceModal({ invoice, studentMap, onClose }) {
   const [to, setTo] = useState(student.email || "");
   const [replyTo, setReplyTo] = useState(user?.email || "");
   const [msg, setMsg] = useState(
-    `Hi ${student.name || "there"}, please find your invoice attached (₹${invoice.summary?.balance_due} due).`
+    `Hi ${student.name || "there"}, please find your invoice attached (${fmt(invoice.summary?.balance_due, student.currency)} due).`
   );
   const [sending, setSending] = useState(false);
 
@@ -143,7 +144,7 @@ export default function InvoicesPage() {
     const link = shareLink(inv);
     const msg =
       `Hi ${s.name || ""}, here's your dance-class invoice ` +
-      `(₹${inv.summary?.balance_due || 0} due):\n${link}`;
+      `(${fmt(inv.summary?.balance_due || 0, s.currency)} due):\n${link}`;
     let phone = (s.phone || "").replace(/\D/g, "");
     if (phone.length === 10) phone = `91${phone}`; // wa.me needs a country code
     const url = phone
@@ -224,7 +225,9 @@ export default function InvoicesPage() {
               No invoices yet.
             </div>
           )}
-          {invoices.map((inv) => (
+          {invoices.map((inv) => {
+            const currency = studentMap[inv.student_id]?.currency;
+            return (
             <div key={inv.invoice_id} data-testid={`invoice-row-${inv.invoice_id}`}
               className="flex flex-wrap items-center justify-between px-6 py-4 gap-4"
               style={{ borderTop: "1px solid var(--border)" }}>
@@ -237,12 +240,12 @@ export default function InvoicesPage() {
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="text-right">
                   <div className="uppercase-label">Billed</div>
-                  <div className="font-serif-display">{fmt(inv.summary?.total_billed)}</div>
+                  <div className="font-serif-display">{fmt(inv.summary?.total_billed, currency)}</div>
                 </div>
                 <div className="text-right">
                   <div className="uppercase-label">Due</div>
                   <div className="font-serif-display" style={{ color: inv.summary?.balance_due > 0 ? "var(--error)" : "var(--success)" }}>
-                    {fmt(inv.summary?.balance_due)}
+                    {fmt(inv.summary?.balance_due, currency)}
                   </div>
                 </div>
                 <div className="flex gap-2 flex-wrap">
@@ -277,7 +280,8 @@ export default function InvoicesPage() {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
