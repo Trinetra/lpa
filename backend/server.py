@@ -180,6 +180,7 @@ class StudentCreate(BaseModel):
     hourly_rate: float = 0.0
     currency: str = "INR"
     photo_path: Optional[str] = None
+    expected_inr_amount: Optional[float] = None
 
 class StudentInviteRequest(BaseModel):
     channels: List[str] = Field(default_factory=lambda: ["email"])  # 'email' and/or 'whatsapp'
@@ -197,6 +198,7 @@ class StudentUpdate(BaseModel):
     hourly_rate: Optional[float] = None
     currency: Optional[str] = None
     photo_path: Optional[str] = None
+    expected_inr_amount: Optional[float] = None
 
 class ClassLogCreate(BaseModel):
     student_id: str
@@ -230,6 +232,13 @@ class PaymentCreate(BaseModel):
     received_currency: Optional[str] = None
     fx_rate: Optional[float] = None  # received_currency -> amount's currency, at recording time
     allocations: List[PaymentAllocation] = Field(default_factory=list)
+    # Set from reconcile-preview's meets_inr_target — a foreign-currency
+    # payment can fully clear every outstanding class (the student sent
+    # enough in their own currency) and still fall short of the INR figure
+    # she personally expects to land in her account, if the bank's real
+    # conversion rate was worse than what she budgeted for. That never shows
+    # up as an outstanding class balance, so it's tracked here instead.
+    meets_inr_target: Optional[bool] = None
 
 class InvoiceRequest(BaseModel):
     student_id: str
@@ -499,6 +508,7 @@ def ser_student(doc):
         "created_at": doc.get("created_at"),
         "portal_active": bool(doc.get("password_hash")),
         "outreach_access": doc.get("outreach_access", False),
+        "expected_inr_amount": doc.get("expected_inr_amount"),
     }
 
 def ser_class(doc):
@@ -530,6 +540,7 @@ def ser_payment(doc):
         "received_amount": doc.get("received_amount"),
         "received_currency": doc.get("received_currency"),
         "fx_rate": doc.get("fx_rate"),
+        "meets_inr_target": doc.get("meets_inr_target"),
         "allocations": doc.get("allocations", []),
         "created_at": doc.get("created_at"),
     }
@@ -1617,6 +1628,7 @@ async def reconcile_preview(sid: str, received_amount: float, received_currency:
         converted_amount = round(received_amount * rate, 2)
 
     outstanding = [c for c in await _outstanding_classes(user["_id"], sid) if c["outstanding"] > 0]
+    total_outstanding = round(sum(c["outstanding"] for c in outstanding), 2)
 
     remaining = converted_amount
     allocations = []
@@ -1629,6 +1641,24 @@ async def reconcile_preview(sid: str, received_amount: float, received_currency:
                              "amount": take})
         remaining -= take
 
+    # Two independent checks, either failing means the payment gets flagged
+    # as a shortfall — see reconcile_preview's docstring context: her bank
+    # only ever pays her out in INR, so received_currency is INR the vast
+    # majority of the time, but the student's own currency can fluctuate
+    # against INR between when she quotes a price and when it's actually
+    # wired. covers_outstanding checks the student actually sent enough in
+    # their own currency; meets_inr_target is a separate check against the
+    # INR figure she personally expects to land in her account, which can
+    # still fall short of her target even when the student sent the full
+    # invoiced amount, if the bank's real conversion rate was worse than
+    # what she budgeted for.
+    covers_outstanding = converted_amount >= total_outstanding - 0.01
+    expected_inr = student.get("expected_inr_amount")
+    meets_inr_target = (
+        expected_inr is None or received_currency != "INR"
+        or received_amount >= expected_inr - 0.01
+    )
+
     return {
         "student_currency": student_currency,
         "received_currency": received_currency,
@@ -1637,6 +1667,11 @@ async def reconcile_preview(sid: str, received_amount: float, received_currency:
         "converted_amount": converted_amount,
         "allocations": allocations,
         "unallocated": round(max(remaining, 0), 2),  # overpayment / credit, if any
+        "total_outstanding": total_outstanding,
+        "covers_outstanding": covers_outstanding,
+        "expected_inr_amount": expected_inr,
+        "meets_inr_target": meets_inr_target,
+        "is_shortfall": not (covers_outstanding and meets_inr_target),
     }
 
 # --------------- Payments endpoints -----------------
@@ -1668,6 +1703,7 @@ async def create_payment(body: PaymentCreate, user: dict = Depends(get_current_u
         "received_amount": body.received_amount,
         "received_currency": body.received_currency,
         "fx_rate": body.fx_rate,
+        "meets_inr_target": body.meets_inr_target,
         "allocations": [a.model_dump() for a in body.allocations],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }

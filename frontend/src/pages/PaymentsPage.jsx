@@ -62,6 +62,7 @@ function ReconcilePaymentModal({ student, onClose, onSaved }) {
         received_amount: preview.received_amount,
         received_currency: preview.received_currency,
         fx_rate: preview.fx_rate,
+        meets_inr_target: preview.meets_inr_target,
         allocations: (editedAllocations || [])
           .filter((a) => Number(a.amount) > 0)
           .map((a) => ({ class_id: a.class_id, amount: Number(a.amount) })),
@@ -130,6 +131,27 @@ function ReconcilePaymentModal({ student, onClose, onSaved }) {
                 Rate: 1 {preview.received_currency} = {preview.fx_rate?.toFixed(4)} {student.currency}
               </div>
             </div>
+
+            {!preview.covers_outstanding && (
+              <div className="text-sm mb-4 px-3 py-2 rounded" style={{ background: "rgba(226,113,105,0.12)", color: "var(--error)" }}
+                data-testid="reconcile-shortfall-outstanding">
+                Short of the invoiced amount — converts to {fmtCur(preview.converted_amount, student.currency)} of{" "}
+                {fmtCur(preview.total_outstanding, student.currency)} outstanding.
+              </div>
+            )}
+            {preview.covers_outstanding && !preview.meets_inr_target && (
+              <div className="text-sm mb-4 px-3 py-2 rounded" style={{ background: "rgba(226,113,105,0.12)", color: "var(--error)" }}
+                data-testid="reconcile-shortfall-inr-target">
+                Covers the invoiced amount, but only {fmtCur(preview.received_amount, "INR")} landed against your{" "}
+                {fmtCur(preview.expected_inr_amount, "INR")} expected for {student.name} — still flagged as a shortfall.
+              </div>
+            )}
+            {preview.covers_outstanding && preview.meets_inr_target && (
+              <div className="text-sm mb-4 px-3 py-2 rounded" style={{ background: "rgba(124,144,130,0.15)", color: "var(--success)" }}
+                data-testid="reconcile-ok-banner">
+                Covers the invoiced amount{preview.expected_inr_amount != null ? " and meets your expected INR total." : "."}
+              </div>
+            )}
 
             <div className="uppercase-label mb-2">Suggested allocation (oldest first)</div>
             <div className="surface divide-y mb-4" style={{ borderColor: "var(--border)" }}>
@@ -487,6 +509,11 @@ export default function PaymentsPage() {
             {p.received_currency && p.received_currency !== currency && (
               <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
                 Received {fmtCur(p.received_amount, p.received_currency)} (converted at 1 {p.received_currency} = {p.fx_rate?.toFixed(4)} {currency})
+              </div>
+            )}
+            {p.meets_inr_target === false && (
+              <div className="text-xs mt-1" style={{ color: "var(--error)" }} data-testid={`payment-inr-shortfall-${p.id}`}>
+                Fell short of the expected ₹ total for {pStudent?.name || "this student"}
               </div>
             )}
             {p.notes && (

@@ -21,6 +21,7 @@ function StudentForm({ initial, onClose, onSaved }) {
   const [description, setDescription] = useState(initial?.description || "");
   const [rate, setRate] = useState(initial?.hourly_rate ?? 0);
   const [currency, setCurrency] = useState(initial?.currency || "INR");
+  const [expectedInr, setExpectedInr] = useState(initial?.expected_inr_amount ?? "");
   const [photoPath, setPhotoPath] = useState(initial?.photo_path || null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -58,6 +59,7 @@ function StudentForm({ initial, onClose, onSaved }) {
         hourly_rate: Number(rate) || 0,
         currency,
         photo_path: photoPath || null,
+        expected_inr_amount: currency !== "INR" && expectedInr !== "" ? Number(expectedInr) : null,
       };
       if (initial?.id) {
         await api.patch(`/students/${initial.id}`, body);
@@ -165,6 +167,18 @@ function StudentForm({ initial, onClose, onSaved }) {
               ))}
             </select>
           </label>
+          {currency !== "INR" && (
+            <label>
+              <span className="uppercase-label block mb-1">Expected ₹ per payment</span>
+              <input type="number" min="0" step="1" value={expectedInr} onChange={(e) => setExpectedInr(e.target.value)}
+                placeholder="e.g. 3000"
+                data-testid="student-expected-inr-input"
+                className="w-full bg-transparent border border-white/10 rounded px-3 py-2 focus:outline-none focus:border-[color:var(--primary)]" />
+              <span className="text-xs mt-1 block" style={{ color: "var(--text-muted)" }}>
+                What you expect to actually receive in your account after the bank converts their payment. If a payment lands short of this, it's flagged even if it covers the invoiced amount.
+              </span>
+            </label>
+          )}
           <label className="sm:col-span-2">
             <span className="uppercase-label block mb-1">Description / notes</span>
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
