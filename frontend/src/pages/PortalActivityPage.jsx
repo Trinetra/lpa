@@ -128,11 +128,22 @@ function PaymentProofsTab() {
   useEffect(() => { load(); }, []);
 
   const view = async (id) => {
+    // Safari (iOS and macOS) only allows window.open() to succeed when it's
+    // called synchronously inside the click handler — one made after an
+    // await (fetching the file as a blob, since this needs the auth token
+    // a plain link can't carry) is treated as a popup, not a user action,
+    // and silently dropped. No error, nothing happens — exactly this bug.
+    // Chrome is lenient about the timing, which is why this worked on
+    // Android. Opening the tab first, then filling in its location once the
+    // blob is ready, keeps it inside the click's own gesture window.
+    const tab = window.open("", "_blank", "noopener,noreferrer");
     try {
       const res = await api.get(`/payment-proofs/${id}/file`, { responseType: "blob" });
       const url = URL.createObjectURL(res.data);
-      window.open(url, "_blank", "noopener,noreferrer");
+      if (tab) tab.location = url;
+      else window.open(url, "_blank", "noopener,noreferrer"); // popup already blocked outright — fall back
     } catch (e) {
+      tab?.close();
       toast.error("Couldn't open that file");
     }
   };
