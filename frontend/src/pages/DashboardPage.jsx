@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "@/lib/api";
+import { api, formatApiErrorDetail } from "@/lib/api";
 import { fmtDate } from "@/lib/utils";
 import AuthImage from "@/components/AuthImage";
+import { toast } from "sonner";
 import {
   IndianRupee, TrendingUp, TrendingDown, Users as UsersIcon, Clock,
-  CalendarClock, ListChecks, ArrowRight, AlertTriangle,
+  CalendarClock, ListChecks, ArrowRight, AlertTriangle, PlaneTakeoff, Loader2,
 } from "lucide-react";
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -41,6 +42,67 @@ function StatCard({ label, value, secondary, icon: Icon, tone, testid }) {
 const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const CURRENCY_SYMBOLS = { INR: "₹", EUR: "€", USD: "$", GBP: "£" };
 const fmtCur = (n, currency) => `${CURRENCY_SYMBOLS[currency] || currency + " "}${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+
+// A deliberate, visible on/off switch for a temporary whole-studio pause —
+// e.g. while she's travelling. While on: the 30-min-before class reminder
+// emails stop going out, and every student's schedule/calendar view and
+// reschedule-request flow show a "classes are paused" state instead of
+// their normal data (nothing is deleted — schedule_blocks and
+// class_occurrences are untouched, so turning it back off just resumes
+// exactly where things left off).
+function SuspensionCard({ suspended, onChanged }) {
+  const [toggling, setToggling] = useState(false);
+
+  const toggle = async () => {
+    const next = !suspended;
+    if (next && !window.confirm("Pause classes for every student? Reminder emails will stop and students won't see their schedule until you turn this back on.")) {
+      return;
+    }
+    setToggling(true);
+    try {
+      const { data } = await api.post("/classes-suspension", { suspended: next });
+      onChanged(data.classes_suspended);
+      toast.success(data.classes_suspended ? "Classes paused" : "Classes resumed");
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Couldn't update that");
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  return (
+    <div
+      data-testid="classes-suspension-card"
+      className="surface p-6 flex items-center justify-between gap-4 flex-wrap"
+      style={suspended ? { borderColor: "var(--error)", borderWidth: 1, borderStyle: "solid" } : undefined}
+    >
+      <div className="flex items-center gap-3">
+        <PlaneTakeoff size={20} strokeWidth={1.5} style={{ color: suspended ? "var(--error)" : "var(--text-muted)" }} />
+        <div>
+          <div className="font-serif-display text-xl">{suspended ? "Classes are paused" : "Classes are running"}</div>
+          <div className="text-sm" style={{ color: "var(--text-muted)" }}>
+            {suspended
+              ? "Reminder emails are off and students can't see their schedule. Turn this off when you're back."
+              : "Pause everything temporarily — e.g. while you're travelling."}
+          </div>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={toggling}
+        data-testid="classes-suspension-toggle"
+        role="switch"
+        aria-checked={suspended}
+        className="btn-pill flex items-center gap-2 shrink-0"
+        style={suspended ? { background: "var(--error)", color: "#fff" } : undefined}
+      >
+        {toggling ? <Loader2 size={14} className="animate-spin" /> : null}
+        {suspended ? "Resume classes" : "Pause classes"}
+      </button>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const [data, setData] = useState(null);
@@ -91,6 +153,11 @@ export default function DashboardPage() {
           Log a class
         </Link>
       </header>
+
+      <SuspensionCard
+        suspended={!!data.classes_suspended}
+        onChanged={(next) => setData((prev) => ({ ...prev, classes_suspended: next }))}
+      />
 
       {(data.shortcuts?.length > 0) && (
         <section data-testid="dashboard-shortcuts">

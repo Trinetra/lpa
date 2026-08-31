@@ -160,6 +160,8 @@ async def send_due_reminders(owner_id: str) -> dict:
     user = await db.users.find_one({"_id": ObjectId(owner_id)})
     if not user:
         return {"ok": False, "reason": "User not found"}
+    if user.get("classes_suspended"):
+        return {"ok": True, "blocks_processed": 0, "results": [], "reason": "Classes suspended"}
 
     now_ist = datetime.now(IST)
     today_ist = now_ist.date()

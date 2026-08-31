@@ -188,6 +188,9 @@ class StudentInviteRequest(BaseModel):
 class OutreachAccessUpdate(BaseModel):
     enabled: bool
 
+class ClassesSuspensionUpdate(BaseModel):
+    suspended: bool
+
 class StudentUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
@@ -1106,6 +1109,8 @@ def _ser_profile(user_doc: dict) -> dict:
         "bank_account_number": user_doc.get("bank_account_number"),
         "bank_ifsc_code": user_doc.get("bank_ifsc_code"),
         "bank_swift_code": user_doc.get("bank_swift_code"),
+        "classes_suspended": user_doc.get("classes_suspended", False),
+        "classes_suspended_at": user_doc.get("classes_suspended_at"),
     }
 
 @api_router.get("/profile")
@@ -1120,6 +1125,21 @@ async def update_profile(body: ProfileUpdate, user: dict = Depends(get_current_u
     updates = {k: (None if isinstance(v, str) and v == "" else v) for k, v in raw.items()}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    await db.users.update_one({"_id": ObjectId(user["_id"])}, {"$set": updates})
+    full = await db.users.find_one({"_id": ObjectId(user["_id"])})
+    return _ser_profile(full)
+
+@api_router.post("/classes-suspension")
+async def set_classes_suspension(body: ClassesSuspensionUpdate, user: dict = Depends(get_current_user)):
+    """A temporary, whole-studio pause — e.g. while Lakshmi is travelling.
+    While suspended: the 30-min-before class reminder cron no-ops entirely
+    (see reminders.send_due_reminders), and every student's schedule/
+    calendar view and reschedule-request flow show a "classes are paused"
+    state instead of their normal data. Nothing is deleted — schedule_blocks
+    and class_occurrences are untouched, so resuming just picks back up
+    exactly where things left off."""
+    updates = {"classes_suspended": body.suspended}
+    updates["classes_suspended_at"] = datetime.now(timezone.utc).isoformat() if body.suspended else None
     await db.users.update_one({"_id": ObjectId(user["_id"])}, {"$set": updates})
     full = await db.users.find_one({"_id": ObjectId(user["_id"])})
     return _ser_profile(full)
@@ -1911,6 +1931,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
         "today_classes": today_classes,
         "todos_due": todos_due,
         "shortcuts": shortcuts,
+        "classes_suspended": bool(user.get("classes_suspended")),
     }
 
 # --------------- Invoice endpoints -----------------
@@ -3018,6 +3039,7 @@ async def student_me(student: dict = Depends(get_current_student)):
         "contact_email": (owner or {}).get("contact_email") or (owner or {}).get("email"),
         "contact_phone": (owner or {}).get("contact_phone"),
         "outreach_access": student.get("outreach_access", False),
+        "classes_suspended": bool((owner or {}).get("classes_suspended")),
     }
 
 @api_router.patch("/student/me")
@@ -3067,8 +3089,14 @@ def _next_occurrence_datetime(day_of_week: int, start_time: str, now_ist: dateti
         candidate_dt += timedelta(days=7)
     return candidate_dt
 
+async def _owner_classes_suspended(owner_id: str) -> bool:
+    owner = await db.users.find_one({"_id": ObjectId(owner_id)}, {"classes_suspended": 1})
+    return bool(owner and owner.get("classes_suspended"))
+
 @api_router.get("/student/schedule")
 async def student_schedule(student: dict = Depends(get_current_student)):
+    if await _owner_classes_suspended(student["owner_id"]):
+        return []
     await _prune_expired_one_offs(student["owner_id"])
     now_ist = datetime.now(IST)
     out = []
@@ -3092,6 +3120,8 @@ async def student_calendar(start: str = Query(...), end: str = Query(...), stude
     same class_occurrences a student is on, materialized ahead by the
     teacher's schedule. No personal-events layer or clash detection here;
     those are Lakshmi-only."""
+    if await _owner_classes_suspended(student["owner_id"]):
+        return []
     await _top_up_occurrences(student["owner_id"])
     cur = db.class_occurrences.find({
         "owner_id": student["owner_id"], "student_ids": student["_id"],
@@ -3241,6 +3271,8 @@ async def _has_dated_clash(owner_id: str, d_str: str, start_time: str, end_time:
 
 @api_router.post("/student/change-requests")
 async def create_change_request(body: ChangeRequestCreate, student: dict = Depends(get_current_student)):
+    if await _owner_classes_suspended(student["owner_id"]):
+        raise HTTPException(status_code=400, detail="Classes are currently paused — there's nothing to reschedule right now")
     if body.type not in CHANGE_REQUEST_TYPES:
         raise HTTPException(status_code=400, detail="type must be 'cancel' or 'reschedule'")
     if body.scope not in CHANGE_REQUEST_SCOPES:

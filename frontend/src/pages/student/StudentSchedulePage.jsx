@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { studentApi } from "@/lib/api";
 import { fmtDate } from "@/lib/utils";
+import { useStudentAuth } from "@/context/StudentAuthContext";
+import { PlaneTakeoff } from "lucide-react";
 import ChangeRequestModal from "@/components/student/ChangeRequestModal";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -19,6 +21,7 @@ const STATUS_COLOR = {
 };
 
 export default function StudentSchedulePage() {
+  const { student } = useStudentAuth();
   const [blocks, setBlocks] = useState([]);
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,10 +53,21 @@ export default function StudentSchedulePage() {
         <h1 className="font-serif-display text-4xl sm:text-5xl">Schedule</h1>
       </header>
 
+      {student?.classes_suspended && (
+        <div className="surface p-6 flex items-center gap-3" data-testid="portal-classes-paused-banner"
+          style={{ borderColor: "var(--error)", borderWidth: 1, borderStyle: "solid" }}>
+          <PlaneTakeoff size={20} strokeWidth={1.5} style={{ color: "var(--error)" }} />
+          <div className="text-sm">
+            <div className="font-serif-display text-lg" style={{ color: "var(--error)" }}>Classes are paused</div>
+            <div style={{ color: "var(--text-muted)" }}>Your teacher has temporarily paused classes. Check back soon.</div>
+          </div>
+        </div>
+      )}
+
       <div className="surface">
         {blocks.length === 0 && (
           <div className="p-6 text-center text-sm" style={{ color: "var(--text-muted)" }}>
-            No classes on your schedule yet.
+            {student?.classes_suspended ? "Nothing to show while classes are paused." : "No classes on your schedule yet."}
           </div>
         )}
         {blocks.map((b) => (

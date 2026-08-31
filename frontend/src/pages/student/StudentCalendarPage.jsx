@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { studentApi } from "@/lib/api";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { useStudentAuth } from "@/context/StudentAuthContext";
+import { ChevronLeft, ChevronRight, X, PlaneTakeoff } from "lucide-react";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
@@ -63,6 +64,7 @@ function DayModal({ date, occurrences, onClose }) {
 }
 
 export default function StudentCalendarPage() {
+  const { student } = useStudentAuth();
   const [cursor, setCursor] = useState(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
@@ -108,6 +110,17 @@ export default function StudentCalendarPage() {
           <button type="button" onClick={goNext} className="btn-ghost" data-testid="portal-calendar-next-btn"><ChevronRight size={18} /></button>
         </div>
       </header>
+
+      {student?.classes_suspended && (
+        <div className="surface p-6 flex items-center gap-3" data-testid="portal-calendar-paused-banner"
+          style={{ borderColor: "var(--error)", borderWidth: 1, borderStyle: "solid" }}>
+          <PlaneTakeoff size={20} strokeWidth={1.5} style={{ color: "var(--error)" }} />
+          <div className="text-sm">
+            <div className="font-serif-display text-lg" style={{ color: "var(--error)" }}>Classes are paused</div>
+            <div style={{ color: "var(--text-muted)" }}>Your teacher has temporarily paused classes. Check back soon.</div>
+          </div>
+        </div>
+      )}
 
       <div className="font-serif-display text-2xl">{MONTH_NAMES[cursor.month]} {cursor.year}</div>
 
