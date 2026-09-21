@@ -5188,6 +5188,8 @@ async def unlogged_classes_cron(secret: str = Query(...)):
     user = await db.users.find_one({"email": admin_email})
     if not user:
         raise HTTPException(status_code=404, detail="Admin user not found")
+    if user.get("classes_suspended"):
+        return {"ok": True, "sent": False, "unlogged": 0, "reason": "Classes suspended"}
     owner_id = str(user["_id"])
 
     today_str = datetime.now(IST).date().isoformat()
