@@ -2,6 +2,10 @@
   base = "frontend"
   publish = "build"
   command = "yarn install --frozen-lockfile && yarn build"
+  # Skip the build (exit 0) unless the app itself changed. Runs from the base
+  # dir (frontend/), so "." is the app and ../netlify.toml is this file —
+  # pushes that only touch website/ or backend/ cost no build minutes.
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- . ../netlify.toml"
 
 [build.environment]
   # CI=false so warnings don't fail the CRA build.
