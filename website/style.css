@@ -46,9 +46,11 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
 .hero-text { position: absolute; left: clamp(16px, 6vw, 80px); bottom: clamp(40px, 10vh, 110px); }
 .hero h1 { font-size: clamp(2.6rem, 7vw, 5.6rem); margin: 0 0 .3em; }
 .roles { color: var(--muted); letter-spacing: .18em; text-transform: uppercase; font-size: .78rem; margin: 0; }
-@media (max-width: 1000px) {
-  .hero img { object-fit: cover; object-position: 50% 30%; }
-  .hero::after { inset: 40% 0 0 0; }
+/* Portrait screens: show the whole photo (cropping cut off her outstretched
+   hands) at the top, with the name in the black space beneath it. */
+@media (max-aspect-ratio: 1/1) {
+  .hero img { object-position: 50% 12%; }
+  .hero::after { inset: 55% 0 0 0; }
 }
 
 /* Split sections */
