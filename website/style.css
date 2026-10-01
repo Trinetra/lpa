@@ -6,8 +6,8 @@
   --line: #2a221d;
   --accent: #c98a3a;
   --maroon: #7a1f2b;
-  --serif: "Cormorant Garamond", Georgia, serif;
-  --sans: "Jost", "Helvetica Neue", Arial, sans-serif;
+  --serif: "Marcellus", Georgia, serif;
+  --sans: "Hanken Grotesk", "Helvetica Neue", Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -18,7 +18,8 @@ a { color: inherit; }
 h1, h2, h3 { font-family: var(--serif); font-weight: 400; line-height: 1.15; margin: 0 0 .6em; }
 h2 { font-size: clamp(2rem, 4vw, 2.8rem); }
 h3 { font-size: 1.6rem; }
-h3 em { color: var(--muted); }
+/* Marcellus has no italic, so subtitles use the sans italic instead of a faux one. */
+h3 em { color: var(--muted); font-family: var(--sans); font-weight: 300; font-size: .72em; }
 section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 auto; }
 .center { text-align: center; }
 .muted { color: var(--muted); }
@@ -88,7 +89,7 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
 /* Press */
 .quotes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 48px 64px; max-width: 1000px; margin: 24px auto 0; }
 blockquote { margin: 0; }
-blockquote p { font-family: var(--serif); font-style: italic; font-size: 1.45rem; line-height: 1.4; margin: 0 0 .8em; }
+blockquote p { font-family: var(--serif); font-size: 1.3rem; line-height: 1.4; margin: 0 0 .8em; }
 cite { font-style: normal; color: var(--muted); font-size: .85rem; letter-spacing: .04em; }
 .honours { margin: clamp(72px, 10vw, 120px) auto 0; max-width: 760px; }
 .honours ul { list-style: none; padding: 0; margin: 0; }
