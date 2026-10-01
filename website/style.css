@@ -1,3 +1,7 @@
+/* Marcellus (OFL) with IAST letters (ṛ ṇ ḥ ṅ ṭ ṣ …) added for Sanskrit titles;
+   renamed because "Marcellus" is an OFL Reserved Font Name. See fonts/OFL.txt. */
+@font-face { font-family: "Pravaaha Display"; src: url("fonts/PravaahaDisplay.woff2") format("woff2"); font-display: swap; }
+
 :root {
   --bg: #0b0908;
   --bg-2: #14100e;
@@ -6,7 +10,7 @@
   --line: #2a221d;
   --accent: #c98a3a;
   --maroon: #7a1f2b;
-  --serif: "Marcellus", Georgia, serif;
+  --serif: "Pravaaha Display", Georgia, serif;
   --sans: "Hanken Grotesk", "Helvetica Neue", Arial, sans-serif;
 }
 
