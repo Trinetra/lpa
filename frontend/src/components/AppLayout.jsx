@@ -25,6 +25,7 @@ import {
   Megaphone,
   Mail,
   CalendarDays,
+  MessageSquare,
 } from "lucide-react";
 
 export default function AppLayout() {
@@ -35,6 +36,7 @@ export default function AppLayout() {
   const [profile, setProfile] = useState(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => { setMoreOpen(false); }, [location.pathname]);
 
@@ -46,6 +48,9 @@ export default function AppLayout() {
       api.get("/payment-proofs", { params: { status: "pending" } }),
     ])
       .then(([cr, pp]) => setPendingCount(cr.data.length + pp.data.length))
+      .catch(() => {});
+    api.get("/contact-messages/unread-count")
+      .then((r) => setUnreadMessages(r.data.count))
       .catch(() => {});
   }, [location.pathname]);
 
@@ -84,6 +89,7 @@ export default function AppLayout() {
     { to: "/outreach", label: "Outreach", icon: Mail, tid: "nav-outreach" },
     { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
     { to: "/requests", label: "Requests", icon: Inbox, tid: "nav-requests" },
+    { to: "/messages", label: "Website messages", icon: MessageSquare, tid: "nav-messages" },
     { to: "/settings", label: "Settings", icon: Settings, tid: "nav-settings" },
   ];
 
@@ -94,6 +100,7 @@ export default function AppLayout() {
     ["/dashboard", "/students", "/classes", "/payments"].includes(l.to)
   );
   const overflowLinks = links.filter((l) => !primaryLinks.includes(l));
+  const badgeCounts = { "/requests": pendingCount, "/messages": unreadMessages };
   const overflowHasActive = overflowLinks.some((l) => location.pathname.startsWith(l.to));
 
   return (
@@ -131,8 +138,8 @@ export default function AppLayout() {
             >
               <l.icon size={18} strokeWidth={1.5} />
               <span className="flex-1">{l.label}</span>
-              {l.to === "/requests" && pendingCount > 0 && (
-                <RequestsBadge count={pendingCount} testid="requests-badge" />
+              {badgeCounts[l.to] > 0 && (
+                <RequestsBadge count={badgeCounts[l.to]} testid={`${l.tid}-badge`} />
               )}
             </NavLink>
           ))}
@@ -214,8 +221,8 @@ export default function AppLayout() {
                 >
                   <l.icon size={18} strokeWidth={1.5} />
                   <span className="flex-1">{l.label}</span>
-                  {l.to === "/requests" && pendingCount > 0 && (
-                    <RequestsBadge count={pendingCount} testid="m-requests-badge" />
+                  {badgeCounts[l.to] > 0 && (
+                    <RequestsBadge count={badgeCounts[l.to]} testid={`m-${l.tid}-badge`} />
                   )}
                 </NavLink>
               ))}
@@ -257,7 +264,7 @@ export default function AppLayout() {
           >
             <MoreHorizontal size={18} strokeWidth={1.5} />
             <span>More</span>
-            {pendingCount > 0 && (
+            {pendingCount + unreadMessages > 0 && (
               <span
                 data-testid="m-more-badge"
                 className="absolute top-0 right-1 rounded-full"

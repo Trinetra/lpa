@@ -313,7 +313,7 @@ RESERVED_SLUGS = {
     "login", "reset-password", "invoice", "tour", "dashboard", "students",
     "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
     "portal", "requests", "event", "events", "crm", "announcements", "calendar",
-    "outreach", "privacy",
+    "outreach", "privacy", "messages",
 }
 
 # Public tour/event links live on the bare root domain, not the app's own
@@ -4304,12 +4304,14 @@ async def public_contact(body: ContactMessageCreate, request: Request):
         raise HTTPException(status_code=503, detail="Contact form is unavailable right now.")
 
     doc = {
+        "owner_id": str(admin["_id"]),
         "name": body.name.strip(),
         "email": body.email.lower().strip(),
         "message": body.message.strip(),
         "ip": ip,
         "created_at": now.isoformat(),
         "emailed": False,
+        "read": False,
     }
     res = await db.contact_messages.insert_one(doc)
 
@@ -4331,6 +4333,38 @@ async def public_contact(body: ContactMessageCreate, request: Request):
         await db.contact_messages.update_one({"_id": res.inserted_id}, {"$set": {"emailed": True}})
     except Exception as e:
         logger.error(f"Contact form email failed (message {res.inserted_id} saved): {e}")
+    return {"ok": True}
+
+# The app's "Website messages" inbox for those same messages.
+def ser_contact_message(d: dict) -> dict:
+    return {
+        "id": str(d["_id"]),
+        "name": d.get("name"),
+        "email": d.get("email"),
+        "message": d.get("message"),
+        "created_at": d.get("created_at"),
+        "read": d.get("read", False),
+    }
+
+@api_router.get("/contact-messages")
+async def list_contact_messages(user: dict = Depends(get_current_user)):
+    cur = db.contact_messages.find({"owner_id": user["_id"]}).sort("created_at", -1)
+    return [ser_contact_message(d) async for d in cur]
+
+@api_router.get("/contact-messages/unread-count")
+async def contact_messages_unread_count(user: dict = Depends(get_current_user)):
+    return {"count": await db.contact_messages.count_documents({"owner_id": user["_id"], "read": {"$ne": True}})}
+
+@api_router.post("/contact-messages/mark-read")
+async def mark_contact_messages_read(user: dict = Depends(get_current_user)):
+    await db.contact_messages.update_many({"owner_id": user["_id"], "read": {"$ne": True}}, {"$set": {"read": True}})
+    return {"ok": True}
+
+@api_router.delete("/contact-messages/{message_id}")
+async def delete_contact_message(message_id: str, user: dict = Depends(get_current_user)):
+    res = await db.contact_messages.delete_one({"_id": ObjectId(message_id), "owner_id": user["_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
     return {"ok": True}
 
 # --------------- Events (workshops) -----------------
