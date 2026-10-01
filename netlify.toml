@@ -42,6 +42,15 @@
   to = "/index.html"
   status = 200
 
+# Keep the whole Netlify site out of search results: the app login, plus the
+# tour/event custom links on the bare domain (shared directly, not searched
+# for). Her public website on www is served from the VPS and stays indexable.
+# A header, not robots.txt, so Google can still crawl and see the noindex.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex"
+
 # Long-cache the hashed CRA static assets. index.html stays short-cache.
 [[headers]]
   for = "/static/*"
