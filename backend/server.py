@@ -4273,6 +4273,66 @@ async def get_tour_by_slug(slug: str):
         raise HTTPException(status_code=404, detail="Not found")
     return await _ser_shared_tour(tour)
 
+# --------------- Public website contact form -----------------
+# www.pravaahacfm.com is a static site; its nginx proxies /api/contact here so
+# the form never exposes her email address. Messages are stored first (so one
+# is never lost if Resend fails) and then emailed to the admin account.
+class ContactMessageCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    message: str = Field(min_length=1, max_length=5000)
+    website: Optional[str] = None  # honeypot — hidden field real visitors leave empty
+
+CONTACT_LIMIT_PER_HOUR = 5
+_contact_hits: Dict[str, List[datetime]] = defaultdict(list)
+
+@api_router.post("/public/contact")
+async def public_contact(body: ContactMessageCreate, request: Request):
+    if body.website:
+        return {"ok": True}  # bot filled the hidden field; pretend success, send nothing
+
+    # Behind Cloudflare + nginx, the real visitor IP is in CF-Connecting-IP.
+    ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-real-ip") or request.client.host
+    now = datetime.now(timezone.utc)
+    recent = [t for t in _contact_hits[ip] if now - t < timedelta(hours=1)]
+    if len(recent) >= CONTACT_LIMIT_PER_HOUR:
+        raise HTTPException(status_code=429, detail="Too many messages — please try again later.")
+    _contact_hits[ip] = recent + [now]
+
+    admin = await db.users.find_one({"role": "admin"})
+    if not admin or not admin.get("email"):
+        raise HTTPException(status_code=503, detail="Contact form is unavailable right now.")
+
+    doc = {
+        "name": body.name.strip(),
+        "email": body.email.lower().strip(),
+        "message": body.message.strip(),
+        "ip": ip,
+        "created_at": now.isoformat(),
+        "emailed": False,
+    }
+    res = await db.contact_messages.insert_one(doc)
+
+    name, msg = _escape_html(doc["name"]), _escape_html(doc["message"]).replace("\n", "<br>")
+    html = (
+        '<div style="font-family:Arial,sans-serif;font-size:15px;color:#2c2926;line-height:1.5">'
+        f'<p style="color:#7a1f2b;font-weight:700">New message from www.pravaahacfm.com</p>'
+        f'<p><b>{name}</b> &lt;{_escape_html(doc["email"])}&gt;</p>'
+        f'<p>{msg}</p>'
+        '<p style="font-size:12px;color:#a89886">Reply to this email to answer them directly.</p></div>'
+    )
+    try:
+        await email_service.dispatch_email({
+            "to": [admin["email"]],
+            "subject": f"Website message from {doc['name']}",
+            "html": html,
+            "contact_email": doc["email"],
+        })
+        await db.contact_messages.update_one({"_id": res.inserted_id}, {"$set": {"emailed": True}})
+    except Exception as e:
+        logger.error(f"Contact form email failed (message {res.inserted_id} saved): {e}")
+    return {"ok": True}
+
 # --------------- Events (workshops) -----------------
 async def _get_owned_event(event_id: str, owner_id: str) -> dict:
     event = await db.events.find_one({"_id": ObjectId(event_id), "owner_id": owner_id})

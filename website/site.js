@@ -44,3 +44,31 @@ document.querySelectorAll(".gallery a").forEach((a) =>
 const close = () => { box.hidden = true; boxImg.src = ""; };
 box.addEventListener("click", close);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+
+// Contact form — posts to /api/contact (proxied by nginx to the app backend),
+// so her email address never appears on the page.
+const form = document.getElementById("contact-form");
+const formStatus = form.querySelector(".form-status");
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = form.querySelector("button");
+  btn.disabled = true;
+  formStatus.textContent = "Sending…";
+  try {
+    const res = await fetch("/api/contact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.fromEntries(new FormData(form))),
+    });
+    if (res.ok) {
+      form.reset();
+      formStatus.textContent = "Thank you — your message has been sent.";
+    } else {
+      const data = await res.json().catch(() => ({}));
+      formStatus.textContent = typeof data.detail === "string" ? data.detail : "Please check your details and try again.";
+    }
+  } catch {
+    formStatus.textContent = "Couldn't send right now — please try again.";
+  }
+  btn.disabled = false;
+});
