@@ -33,9 +33,11 @@ document.querySelectorAll(".play-link").forEach((a) =>
 // Gallery lightbox.
 const box = document.getElementById("lightbox");
 const boxImg = box.querySelector("img");
+const sliderMode = window.matchMedia("(max-width: 700px)");
 document.querySelectorAll(".gallery a").forEach((a) =>
   a.addEventListener("click", (e) => {
     e.preventDefault();
+    if (sliderMode.matches) return; // phones swipe the slider instead
     boxImg.src = a.href;
     boxImg.alt = a.querySelector("img").alt;
     box.hidden = false;
@@ -72,3 +74,21 @@ form.addEventListener("submit", async (e) => {
   }
   btn.disabled = false;
 });
+
+// Phone slider: "3 / 9" counter that follows the photo nearest the centre.
+const gallery = document.querySelector(".gallery");
+const count = document.querySelector(".gallery-count");
+const slides = [...gallery.querySelectorAll("a")];
+const updateCount = () => {
+  // Before any swipe (photos may not have loaded or have widths yet) it's simply the first.
+  if (gallery.scrollLeft < 8) { count.textContent = `1 / ${slides.length}  ·  swipe`; return; }
+  const mid = gallery.scrollLeft + gallery.clientWidth / 2;
+  let i = 0, best = Infinity;
+  slides.forEach((s, k) => {
+    const d = Math.abs(s.offsetLeft + s.offsetWidth / 2 - mid);
+    if (d < best) { best = d; i = k; }
+  });
+  count.textContent = `${i + 1} / ${slides.length}  ·  swipe`;
+};
+gallery.addEventListener("scroll", updateCount, { passive: true });
+updateCount();
