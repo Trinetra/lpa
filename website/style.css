@@ -51,6 +51,7 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
 .split.reverse figure { order: 2; }
 .split figure { margin: 0; }
 .prose p { margin: 0 0 1.1em; color: #d8cfc3; }
+.prose .eyebrow { color: var(--accent); }
 @media (max-width: 800px) { .split { grid-template-columns: 1fr; } .split.reverse figure { order: 0; } .split figure { max-width: 420px; } }
 
 /* Works */
