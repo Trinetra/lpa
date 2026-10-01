@@ -17,6 +17,16 @@
   status = 301
   force = true
 
+# The bare domain's homepage goes to her public website (served from
+# /opt/lakshmi/website on the backend server). Only the exact "/" path —
+# every other path on pravaahacfm.com is a tour/event custom link
+# (pravaahacfm.com/tour2026) and must keep falling through to the app.
+[[redirects]]
+  from = "https://pravaahacfm.com/"
+  to = "https://www.pravaahacfm.com/"
+  status = 301
+  force = true
+
 # The student portal's manifest link (see index.html) is relative, so it
 # resolves to /portal/manifest.json on any /portal/* page — rewrite that to
 # the actual student manifest file. Must come before the SPA catch-all below.
