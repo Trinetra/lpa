@@ -4513,6 +4513,154 @@ async def put_website_gallery(body: List[WebsitePhoto], user: dict = Depends(get
             website_service.delete_photo_files(p)
     return result
 
+# --------------- Website past events (archive) -----------------
+# Past performances/workshops with photos and videos, published on
+# www.pravaahacfm.com/past-events. Entries can start from a finished tour stop
+# or event ("Recently finished" suggestions) or be written from scratch.
+class ArchiveVideo(BaseModel):
+    video: str
+    title: str = Field(min_length=1, max_length=200)
+
+class ArchiveEntryIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    date: str  # ISO date
+    end_date: Optional[str] = None
+    city: Optional[str] = Field(default=None, max_length=120)
+    venue: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=3000)
+    published: bool = False
+    videos: List[ArchiveVideo] = []
+    photos: List[WebsitePhoto] = []  # order + descriptions; uploads go through /photos
+    source_type: Optional[str] = None  # "stop" | "event" when created from a suggestion
+    source_id: Optional[str] = None
+
+def ser_archive_entry(d: dict) -> dict:
+    return {
+        "id": str(d["_id"]),
+        **{k: d.get(k) for k in ("title", "date", "end_date", "city", "venue", "description", "source_type", "source_id")},
+        "published": d.get("published", False),
+        "videos": d.get("videos", []),
+        "photos": d.get("photos", []),
+    }
+
+def _valid_iso_date(value: Optional[str], field: str) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{field} must be a date")
+
+async def _rerender_archive(owner_id: str) -> None:
+    cur = db.website_archive.find({"owner_id": owner_id, "published": True}).sort("date", -1)
+    entries = [d async for d in cur]
+    try:
+        website_service.write_archive(entries)
+    except Exception as e:
+        logger.error(f"Past events re-render failed: {e}")
+        raise HTTPException(status_code=500, detail="Saved, but the website couldn't be updated — please tell Prashanth")
+
+async def _get_owned_archive(entry_id: str, owner_id: str) -> dict:
+    try:
+        doc = await db.website_archive.find_one({"_id": ObjectId(entry_id), "owner_id": owner_id})
+    except Exception:
+        doc = None
+    if not doc:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return doc
+
+@api_router.get("/website/archive")
+async def get_website_archive(user: dict = Depends(get_current_user)):
+    owner_id = user["_id"]
+    entries = [ser_archive_entry(d) async for d in db.website_archive.find({"owner_id": owner_id}).sort("date", -1)]
+    taken = {(e["source_type"], e["source_id"]) for e in entries if e.get("source_id")}
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    suggestions = []
+    tours = {str(t["_id"]): t async for t in db.tours.find({"owner_id": owner_id})}
+    async for st in db.tour_stops.find({"owner_id": owner_id, "stop_date": {"$lt": today}}):
+        if ("stop", str(st["_id"])) in taken:
+            continue
+        tour = tours.get(st.get("tour_id"), {})
+        suggestions.append({
+            "source_type": "stop", "source_id": str(st["_id"]),
+            "title": tour.get("name") or "Performance", "date": st.get("stop_date"), "end_date": None,
+            "city": (st.get("city") or "").strip() or None, "venue": (st.get("venue") or "").strip() or None,
+        })
+    async for ev in db.events.find({"owner_id": owner_id, "status": "published", "end_date": {"$lt": today}}):
+        if ("event", str(ev["_id"])) in taken:
+            continue
+        suggestions.append({
+            "source_type": "event", "source_id": str(ev["_id"]),
+            "title": ev.get("name"), "date": ev.get("start_date"),
+            "end_date": ev.get("end_date") if ev.get("end_date") != ev.get("start_date") else None,
+            "city": None, "venue": None,
+        })
+    suggestions.sort(key=lambda x: x["date"] or "", reverse=True)
+    return {"entries": entries, "suggestions": suggestions[:30]}
+
+def _archive_fields(body: ArchiveEntryIn) -> dict:
+    return {
+        "title": body.title.strip(),
+        "date": _valid_iso_date(body.date, "Date"),
+        "end_date": _valid_iso_date(body.end_date, "End date"),
+        "city": (body.city or "").strip() or None,
+        "venue": (body.venue or "").strip() or None,
+        "description": (body.description or "").strip() or None,
+        "published": body.published,
+        "videos": [{"video_id": _video_id_or_400(v.video), "title": v.title.strip()} for v in body.videos],
+    }
+
+@api_router.post("/website/archive")
+async def create_archive_entry(body: ArchiveEntryIn, user: dict = Depends(get_current_user)):
+    doc = {**_archive_fields(body), "owner_id": user["_id"], "photos": [],
+           "source_type": body.source_type if body.source_type in ("stop", "event") else None,
+           "source_id": body.source_id if body.source_type in ("stop", "event") else None,
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    res = await db.website_archive.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    await _rerender_archive(user["_id"])
+    return ser_archive_entry(doc)
+
+@api_router.put("/website/archive/{entry_id}")
+async def update_archive_entry(entry_id: str, body: ArchiveEntryIn, user: dict = Depends(get_current_user)):
+    current = await _get_owned_archive(entry_id, user["_id"])
+    known = {p["src"]: p for p in current.get("photos", [])}
+    photos = []
+    for p in body.photos:
+        if p.src not in known:
+            raise HTTPException(status_code=400, detail="Unknown photo — please reload the page")
+        photos.append({"src": p.src, "src_sm": known[p.src]["src_sm"], "alt": (p.alt or "").strip() or None})
+    await db.website_archive.update_one({"_id": current["_id"]}, {"$set": {**_archive_fields(body), "photos": photos}})
+    await _rerender_archive(user["_id"])
+    kept = {p["src"] for p in photos}
+    for p in current.get("photos", []):
+        if p["src"] not in kept:
+            website_service.delete_photo_files(p)
+    return ser_archive_entry(await db.website_archive.find_one({"_id": current["_id"]}))
+
+@api_router.post("/website/archive/{entry_id}/photos")
+async def upload_archive_photo(entry_id: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    current = await _get_owned_archive(entry_id, user["_id"])
+    data = await file.read()
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="That photo is over 25 MB")
+    try:
+        paths = website_service.save_photo(data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.website_archive.update_one({"_id": current["_id"]}, {"$push": {"photos": {**paths, "alt": None}}})
+    await _rerender_archive(user["_id"])
+    return ser_archive_entry(await db.website_archive.find_one({"_id": current["_id"]}))
+
+@api_router.delete("/website/archive/{entry_id}")
+async def delete_archive_entry(entry_id: str, user: dict = Depends(get_current_user)):
+    current = await _get_owned_archive(entry_id, user["_id"])
+    await db.website_archive.delete_one({"_id": current["_id"]})
+    await _rerender_archive(user["_id"])
+    for p in current.get("photos", []):
+        website_service.delete_photo_files(p)
+    return {"ok": True}
+
 # --------------- Events (workshops) -----------------
 async def _get_owned_event(event_id: str, owner_id: str) -> dict:
     event = await db.events.find_one({"_id": ObjectId(event_id), "owner_id": owner_id})

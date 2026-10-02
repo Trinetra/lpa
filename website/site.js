@@ -1,33 +1,38 @@
 // Nav goes solid once you scroll past the top of the hero.
 const nav = document.querySelector(".nav");
-const onScroll = () => nav.classList.toggle("solid", window.scrollY > 40);
+const onScroll = () => nav.classList.toggle("solid", window.scrollY > 40 || document.body.classList.contains("subpage"));
 window.addEventListener("scroll", onScroll, { passive: true });
 onScroll();
 
-// Video list: YouTube thumbnails as backgrounds; clicking loads the embed
-// into the single player (nothing from YouTube loads until someone clicks).
-const player = document.getElementById("player");
-const frame = player.querySelector(".player-frame");
-const titleEl = player.querySelector(".player-title");
-const buttons = document.querySelectorAll(".videos button");
-
-buttons.forEach((b) => {
-  b.style.setProperty("--thumb", `url(https://i.ytimg.com/vi/${b.dataset.video}/hqdefault.jpg)`);
-  b.addEventListener("click", () => play(b.dataset.video));
-});
-
-function play(id) {
-  const btn = document.querySelector(`.videos button[data-video="${id}"]`);
-  frame.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0" title="${btn ? btn.textContent : "Video"}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
-  titleEl.textContent = btn ? btn.textContent : "";
+// Videos: YouTube thumbnails as backgrounds; clicking loads the embed into
+// the player of the same [data-player-scope] (the homepage Watch section, or
+// one past event). Nothing from YouTube loads until someone clicks.
+function play(scope, id) {
+  const player = scope.querySelector(".player");
+  const buttons = scope.querySelectorAll(".videos button");
+  const btn = scope.querySelector(`.videos button[data-video="${id}"]`);
+  const iframe = document.createElement("iframe");
+  iframe.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+  iframe.title = btn ? btn.textContent : "Video";
+  iframe.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+  iframe.allowFullscreen = true;
+  player.querySelector(".player-frame").replaceChildren(iframe);
+  player.querySelector(".player-title").textContent = btn ? btn.textContent : "";
   buttons.forEach((x) => x.classList.toggle("active", x === btn));
   player.hidden = false;
   player.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-// "Watch excerpt" links in Works jump to the player with that video.
+document.querySelectorAll("[data-player-scope]").forEach((scope) =>
+  scope.querySelectorAll(".videos button").forEach((b) => {
+    b.style.setProperty("--thumb", `url(https://i.ytimg.com/vi/${b.dataset.video}/hqdefault.jpg)`);
+    b.addEventListener("click", () => play(scope, b.dataset.video));
+  })
+);
+
+// "Watch excerpt" links in Works play in the homepage Watch section.
 document.querySelectorAll(".play-link").forEach((a) =>
-  a.addEventListener("click", (e) => { e.preventDefault(); play(a.dataset.video); })
+  a.addEventListener("click", (e) => { e.preventDefault(); play(document.getElementById("watch"), a.dataset.video); })
 );
 
 // Gallery lightbox.
@@ -50,8 +55,8 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); }
 // Contact form — posts to /api/contact (proxied by nginx to the app backend),
 // so her email address never appears on the page.
 const form = document.getElementById("contact-form");
-const formStatus = form.querySelector(".form-status");
-form.addEventListener("submit", async (e) => {
+form?.addEventListener("submit", async (e) => {
+  const formStatus = form.querySelector(".form-status");
   e.preventDefault();
   const btn = form.querySelector("button");
   btn.disabled = true;
@@ -75,29 +80,32 @@ form.addEventListener("submit", async (e) => {
   btn.disabled = false;
 });
 
-// Phone slider: "3 / 9" counter that follows the photo nearest the centre.
-const gallery = document.querySelector(".gallery");
-const count = document.querySelector(".gallery-count");
-const slides = [...gallery.querySelectorAll("a")];
-const updateCount = () => {
-  // Before any swipe (photos may not have loaded or have widths yet) it's simply the first.
-  if (gallery.scrollLeft < 8) { count.textContent = `1 / ${slides.length}  ·  swipe`; return; }
-  const mid = gallery.scrollLeft + gallery.clientWidth / 2;
-  let i = 0, best = Infinity;
-  slides.forEach((s, k) => {
-    const d = Math.abs(s.offsetLeft + s.offsetWidth / 2 - mid);
-    if (d < best) { best = d; i = k; }
-  });
-  count.textContent = `${i + 1} / ${slides.length}  ·  swipe`;
-};
-gallery.addEventListener("scroll", updateCount, { passive: true });
-updateCount();
+// Phone slider: "3 / 9" counter (the .gallery-count right after each
+// .gallery) that follows the photo nearest the centre.
+document.querySelectorAll(".gallery").forEach((gallery) => {
+  const count = gallery.nextElementSibling;
+  if (!count || !count.classList.contains("gallery-count")) return;
+  const slides = [...gallery.querySelectorAll("a")];
+  const updateCount = () => {
+    // Before any swipe (photos may not have loaded or have widths yet) it's simply the first.
+    if (gallery.scrollLeft < 8) { count.textContent = `1 / ${slides.length}  ·  swipe`; return; }
+    const mid = gallery.scrollLeft + gallery.clientWidth / 2;
+    let i = 0, best = Infinity;
+    slides.forEach((s, k) => {
+      const d = Math.abs(s.offsetLeft + s.offsetWidth / 2 - mid);
+      if (d < best) { best = d; i = k; }
+    });
+    count.textContent = `${i + 1} / ${slides.length}  ·  swipe`;
+  };
+  gallery.addEventListener("scroll", updateCount, { passive: true });
+  updateCount();
+});
 
 // Upcoming: performances and workshops from the app, via /api/schedule
 // (nginx -> backend). Built with textContent only — the data is hers, but
 // it still never gets interpreted as HTML.
 const fmtDay = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-fetch("/api/schedule")
+if (document.querySelector(".upcoming")) fetch("/api/schedule")
   .then((r) => (r.ok ? r.json() : []))
   .then((items) => {
     if (!items.length) return;

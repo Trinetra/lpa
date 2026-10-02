@@ -14,6 +14,7 @@ import io
 import os
 import re
 import secrets
+from datetime import date
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -64,22 +65,70 @@ def render_gallery(photos: list) -> str:
     )
 
 
-def write_sections(content: dict) -> None:
-    """Re-renders the three marked sections of index.html in place (atomic replace)."""
-    index = WEBSITE_DIR / "index.html"
-    page = index.read_text(encoding="utf-8")
-    for name, body in (
-        ("works", render_works(content.get("productions", []))),
-        ("videos", render_videos(content.get("videos", []))),
-        ("gallery", render_gallery(content.get("gallery", []))),
-    ):
-        pattern = re.compile(rf"(<!-- cms:{name}\b[^>]*-->\n).*?(\n<!-- /cms:{name} -->)", re.S)
+def _write_marked(filename: str, sections: dict) -> None:
+    """Replaces each <!-- cms:NAME --> section of a site page (atomic replace)."""
+    path = WEBSITE_DIR / filename
+    page = path.read_text(encoding="utf-8")
+    for name, body in sections.items():
+        pattern = re.compile(rf"(<!-- cms:{name}\b[^>]*-->\n).*?(\n?<!-- /cms:{name} -->)", re.S)
         if not pattern.search(page):
-            raise RuntimeError(f"index.html is missing the cms:{name} markers")
-        page = pattern.sub(lambda m: m.group(1) + body + m.group(2), page, count=1)
-    tmp = index.with_suffix(".html.tmp")
+            raise RuntimeError(f"{filename} is missing the cms:{name} markers")
+        page = pattern.sub(lambda m: m.group(1) + body + ("\n" if body else "") + m.group(2).lstrip("\n"), page, count=1)
+    tmp = path.with_suffix(".html.tmp")
     tmp.write_text(page, encoding="utf-8")
-    os.replace(tmp, index)
+    os.replace(tmp, path)
+
+
+def write_sections(content: dict) -> None:
+    """Re-renders the homepage's Works, Watch and Gallery sections."""
+    _write_marked("index.html", {
+        "works": render_works(content.get("productions", [])),
+        "videos": render_videos(content.get("videos", [])),
+        "gallery": render_gallery(content.get("gallery", [])),
+    })
+
+
+def _fmt_date(iso: str | None) -> str:
+    try:
+        d = date.fromisoformat(iso)
+        return f"{d.day} {d.strftime('%B %Y')}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def render_archive(entries: list) -> str:
+    """Past events page: published entries, newest first. Each gets its own
+    video player scope and its own photo slider."""
+    out = []
+    for e in entries:
+        when = _fmt_date(e.get("date"))
+        if e.get("end_date") and e["end_date"] != e.get("date"):
+            when = f"{when} – {_fmt_date(e['end_date'])}"
+        where = ", ".join(x for x in (e.get("venue"), e.get("city")) if x)
+        lines = ['  <article class="past" data-player-scope>', f'    <p class="eyebrow">{_e(when)}</p>',
+                 f'    <h2>{_e(e.get("title"))}</h2>']
+        if where:
+            lines.append(f'    <p class="where">{_e(where)}</p>')
+        if e.get("description"):
+            lines.append(f'    <p class="prose-text">{_e(e["description"])}</p>')
+        if e.get("photos"):
+            lines.append('    <div class="gallery">')
+            lines.append(render_gallery(e["photos"]))
+            lines.append('    </div>')
+            lines.append('    <p class="gallery-count" aria-hidden="true"></p>')
+        if e.get("videos"):
+            lines += ['    <div class="player" hidden>', '      <div class="player-frame"></div>',
+                      '      <p class="player-title"></p>', '    </div>', '    <ul class="videos">',
+                      render_videos(e["videos"]), '    </ul>']
+        lines.append('  </article>')
+        out.append("\n".join(lines))
+    if not out:
+        return '  <p class="center past-empty">Nothing here yet.</p>'
+    return "\n".join(out)
+
+
+def write_archive(entries: list) -> None:
+    _write_marked("past-events.html", {"archive": render_archive(entries)})
 
 
 def save_photo(data: bytes) -> dict:
