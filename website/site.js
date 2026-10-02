@@ -147,12 +147,19 @@ function upcomingRow(it, inTour) {
     what = it.venue || it.city || (inTour ? "Venue to be announced" : it.title);
     where = [it.venue ? it.city : null, it.time].filter(Boolean).join(" · ");
   }
-  body.append(el("div", "what", what));
-  if (where) body.append(el("div", "where", where));
+  const text = el("div");
+  text.append(el("div", "what", what));
+  if (where) text.append(el("div", "where", where));
+  if (it.image) {
+    const img = el("img", "poster"); img.src = it.image; img.alt = `${it.title} poster`; img.loading = "lazy";
+    body.className = "with-poster"; body.append(img, text);
+  } else body.append(text);
   li.append(body);
-  if (it.link) li.append(link("register", "Details & register", it.link));
-  else if (it.map_url) li.append(link("register", "Map", it.map_url));
-  else li.append(el("span"));
+  const actions = el("div", "actions");
+  if (it.link) actions.append(link("register", "Details & register", it.link));
+  else if (it.map_url) actions.append(link("register", "Map", it.map_url));
+  if (it.instagram) actions.append(link("register", "Instagram", it.instagram));
+  li.append(actions);
   return li;
 }
 
@@ -190,3 +197,30 @@ const ONES = ["", "-one", "-two", "-three", "-four", "-five", "-six", "-seven", 
 const TENS = { 4: "forty", 5: "fifty", 6: "sixty", 7: "seventy" };
 const yearsWord = TENS[Math.floor(yearsInForm / 10)] ? TENS[Math.floor(yearsInForm / 10)] + ONES[yearsInForm % 10] : String(yearsInForm);
 document.querySelectorAll("[data-years]").forEach((el) => { el.textContent = yearsWord; });
+
+// Instagram posts (past events): official embeds, loaded only when a card
+// scrolls near the viewport, so nothing from Meta loads for visitors who
+// never get there. Until then — or if Instagram is blocked — it's a link.
+const instaCards = document.querySelectorAll(".insta-card[data-insta]");
+if (instaCards.length) {
+  let scriptLoading = null;
+  const loadScript = () => scriptLoading || (scriptLoading = new Promise((resolve) => {
+    const s = document.createElement("script");
+    s.src = "https://www.instagram.com/embed.js"; s.async = true; s.onload = resolve;
+    document.body.append(s);
+  }));
+  const embed = (card) => {
+    const q = document.createElement("blockquote");
+    q.className = "instagram-media";
+    q.dataset.instgrmPermalink = card.dataset.insta;
+    q.dataset.instgrmVersion = "14";
+    q.setAttribute("data-instgrm-captioned", "");
+    q.append(card.querySelector("a"));
+    card.replaceChildren(q);
+    loadScript().then(() => window.instgrm && window.instgrm.Embeds.process());
+  };
+  const io = new IntersectionObserver((entries) => entries.forEach((e) => {
+    if (e.isIntersecting) { io.unobserve(e.target); embed(e.target); }
+  }), { rootMargin: "400px 0px" });
+  instaCards.forEach((c) => io.observe(c));
+}

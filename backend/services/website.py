@@ -32,6 +32,19 @@ def youtube_id(value: str) -> str | None:
     return (m.group(1) or m.group(2)) if m else None
 
 
+_IG = re.compile(r"instagram\.com/(?:[A-Za-z0-9_.]+/)?(p|reel|reels|tv)/([A-Za-z0-9_-]+)")
+
+
+def instagram_url(value: str) -> str | None:
+    """Normalises an Instagram post/reel link (any share-link variant, e.g.
+    ?img_index=1 or ?igsh=…) to its canonical permalink, or None."""
+    m = _IG.search((value or "").strip())
+    if not m:
+        return None
+    kind = "reel" if m.group(1) in ("reel", "reels") else m.group(1)
+    return f"https://www.instagram.com/{kind}/{m.group(2)}/"
+
+
 def _e(text) -> str:
     return html.escape(text or "", quote=True)
 
@@ -116,6 +129,13 @@ def render_archive(entries: list) -> str:
             lines.append(render_gallery(e["photos"]))
             lines.append('    </div>')
             lines.append('    <p class="gallery-count" aria-hidden="true"></p>')
+        if e.get("instagram"):
+            # Official Instagram embeds, loaded by site.js only when scrolled
+            # near — until then (or if Instagram is blocked) it's a plain link.
+            lines.append('    <div class="insta-row">')
+            for url in e["instagram"]:
+                lines.append(f'      <div class="insta-card" data-insta="{_e(url)}"><a href="{_e(url)}" target="_blank" rel="noopener">View on Instagram</a></div>')
+            lines.append('    </div>')
         if e.get("videos"):
             lines += ['    <div class="player" hidden>', '      <div class="player-frame"></div>',
                       '      <p class="player-title"></p>', '    </div>', '    <ul class="videos">',

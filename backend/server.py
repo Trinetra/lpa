@@ -4426,6 +4426,9 @@ async def public_schedule():
             "city": None,
             "venue": None,
             "link": link,
+            # Poster via the existing public event-image endpoint (published events only).
+            "image": f"{os.environ.get('BACKEND_URL', '').rstrip('/')}/api/events/{ev['_id']}/image" if ev.get("image_path") else None,
+            "instagram": website_service.instagram_url(ev.get("social_instagram") or ""),
         })
 
     items.sort(key=lambda i: (i["date"] or "", i["time"] or ""))
@@ -4542,6 +4545,7 @@ class ArchiveEntryIn(BaseModel):
     description: Optional[str] = Field(default=None, max_length=3000)
     published: bool = False
     videos: List[ArchiveVideo] = []
+    instagram: List[str] = []  # post/reel links, embedded on the page
     photos: List[WebsitePhoto] = []  # order + descriptions; uploads go through /photos
     source_type: Optional[str] = None  # "stop" | "event" when created from a suggestion
     source_id: Optional[str] = None
@@ -4552,8 +4556,15 @@ def ser_archive_entry(d: dict) -> dict:
         **{k: d.get(k) for k in ("title", "date", "end_date", "city", "venue", "description", "source_type", "source_id")},
         "published": d.get("published", False),
         "videos": d.get("videos", []),
+        "instagram": d.get("instagram", []),
         "photos": d.get("photos", []),
     }
+
+def _instagram_or_400(value: str) -> str:
+    url = website_service.instagram_url(value)
+    if not url:
+        raise HTTPException(status_code=400, detail=f'"{value}" doesn\'t look like an Instagram post or reel link')
+    return url
 
 def _valid_iso_date(value: Optional[str], field: str) -> Optional[str]:
     if not value:
@@ -4620,6 +4631,7 @@ def _archive_fields(body: ArchiveEntryIn) -> dict:
         "description": (body.description or "").strip() or None,
         "published": body.published,
         "videos": [{"video_id": _video_id_or_400(v.video), "title": v.title.strip()} for v in body.videos],
+        "instagram": [_instagram_or_400(u) for u in body.instagram if u.strip()],
     }
 
 @api_router.post("/website/archive")

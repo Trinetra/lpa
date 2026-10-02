@@ -245,6 +245,7 @@ function ArchiveEditor({ entry, onDone, onChanged }) {
   const [e, setE] = useState(() => ({
     ...entry,
     videos: (entry.videos || []).map((v) => ({ video: ytLink(v.video_id), title: v.title })),
+    instagram: entry.instagram || [],
     photos: entry.photos || [],
   }));
   const [saving, setSaving] = useState(false);
@@ -253,7 +254,7 @@ function ArchiveEditor({ entry, onDone, onChanged }) {
 
   const payload = () => ({
     title: e.title, date: e.date, end_date: e.end_date || null, city: e.city, venue: e.venue,
-    description: e.description, published: !!e.published, videos: e.videos, photos: e.photos,
+    description: e.description, published: !!e.published, videos: e.videos, instagram: e.instagram, photos: e.photos,
     source_type: e.source_type || null, source_id: e.source_id || null,
   });
 
@@ -339,6 +340,23 @@ function ArchiveEditor({ entry, onDone, onChanged }) {
         <Plus size={12} /> Add video
       </button>
 
+      <div className="uppercase-label pt-2">Instagram posts</div>
+      {e.instagram.map((u, i) => (
+        <div key={i} className="space-y-2 rounded p-3" style={{ border: "1px solid var(--border)" }}>
+          <div className="flex justify-end">
+            <RowControls i={i} count={e.instagram.length} testid="archive-insta" onMove={(a, d) => set("instagram", move(e.instagram, a, d))}
+              onRemove={(a) => set("instagram", e.instagram.filter((_, j) => j !== a))} />
+          </div>
+          <Field label="Instagram link" hint="In Instagram, tap ⋯ or the share arrow → Copy link, then paste it here. Posts and reels both work; it must be a public post.">
+            <input className={inputCls} value={u} placeholder="https://www.instagram.com/p/…"
+              onChange={(x) => set("instagram", e.instagram.map((y, j) => (j === i ? x.target.value : y)))} />
+          </Field>
+        </div>
+      ))}
+      <button type="button" className="btn-ghost text-xs flex items-center gap-1" onClick={() => set("instagram", [...e.instagram, ""])}>
+        <Plus size={12} /> Add Instagram post
+      </button>
+
       <div className="uppercase-label pt-2">Photos</div>
       {!e.id ? (
         <div className="text-xs" style={{ color: "var(--text-muted)" }}>Save this entry once, then you can add photos.</div>
@@ -408,7 +426,7 @@ function PastEventsTab() {
               <ExternalLink size={12} /> View page
             </a>
             <button type="button" className="btn-ghost text-sm flex items-center gap-1" data-testid="archive-new"
-              onClick={() => setEditing({ title: "", date: "", published: false, videos: [], photos: [] })}>
+              onClick={() => setEditing({ title: "", date: "", published: false, videos: [], instagram: [], photos: [] })}>
               <Plus size={14} /> New entry
             </button>
           </div>
@@ -426,7 +444,7 @@ function PastEventsTab() {
               <div className="min-w-0">
                 <div className="font-serif-display text-lg truncate">{en.title}</div>
                 <div style={{ color: "var(--text-muted)" }}>
-                  {fmtDay(en.date)}{en.city ? ` · ${en.city}` : ""} · {en.photos.length} photos · {en.videos.length} videos
+                  {fmtDay(en.date)}{en.city ? ` · ${en.city}` : ""} · {en.photos.length} photos · {en.videos.length} videos{(en.instagram || []).length ? ` · ${en.instagram.length} Instagram` : ""}
                 </div>
               </div>
               <span className="uppercase-label shrink-0" style={{ color: en.published ? "var(--success)" : "var(--text-muted)" }}>
@@ -453,7 +471,7 @@ function PastEventsTab() {
                 <button type="button" className="btn-ghost text-xs flex items-center gap-1 shrink-0" data-testid={`archive-suggest-${i}`}
                   onClick={() => setEditing({
                     title: sg.venue ? `${sg.title} — ${sg.venue}` : sg.title, date: sg.date, end_date: sg.end_date,
-                    city: sg.city, venue: sg.venue, published: false, videos: [], photos: [],
+                    city: sg.city, venue: sg.venue, published: false, videos: [], instagram: [], photos: [],
                     source_type: sg.source_type, source_id: sg.source_id,
                   })}>
                   <Plus size={12} /> Add to past events
