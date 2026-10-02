@@ -71,7 +71,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 
@@ -80,6 +80,7 @@
   <nav>
     <a href="#about">About</a>
     <a href="#works">Works</a>
+    <a href="#upcoming" id="nav-upcoming" hidden>Upcoming</a>
     <a href="#watch">Watch</a>
     <a href="#gallery">Gallery</a>
     <a href="#press">Press</a>
@@ -91,7 +92,7 @@
 <main id="top">
 
   <section class="hero">
-    <img src="img/dance8.jpg" alt="Lakshmi in a wide, open-armed pose on a dark stage" fetchpriority="high">
+    <img src="img/dance7.jpg" alt="Lakshmi turning, arms framing her head, on a dark stage" fetchpriority="high">
     <div class="hero-text">
       <p class="eyebrow">Bharatanatyam</p>
       <h1>Lakshmi<br>Parthasarathy<br>Athreya</h1>
@@ -177,6 +178,14 @@
     </ol>
   </section>
 
+  <!-- Filled from the app (tours switched to "Show on website" + published
+       events) by site.js; stays hidden when nothing is upcoming. -->
+  <section id="upcoming" hidden>
+    <p class="eyebrow center">Schedule</p>
+    <h2 class="center">Upcoming</h2>
+    <ol class="upcoming"></ol>
+  </section>
+
   <section id="watch">
     <p class="eyebrow center">Performance</p>
     <h2 class="center">Watch</h2>
@@ -209,7 +218,7 @@
       <a href="img/dance6.jpg"><img src="img/dance6-sm.jpg" alt="Arms raised, one leg lifted, in black and red" loading="lazy"></a>
       <a href="img/dance4.jpg"><img src="img/dance4-sm.jpg" alt="In a green and blue costume, mid-expression" loading="lazy"></a>
       <a href="img/dance5.jpg"><img src="img/dance5-sm.jpg" alt="Deep aramandi in black" loading="lazy"></a>
-      <a href="img/dance7.jpg"><img src="img/dance7-sm.jpg" alt="Arms framing the head, turning" loading="lazy"></a>
+      <a href="img/dance8.jpg"><img src="img/dance8-sm.jpg" alt="Wide, open-armed pose" loading="lazy"></a>
       <a href="img/dance9.jpg"><img src="img/dance9-sm.jpg" alt="Standing, one hand raised above the head" loading="lazy"></a>
       <a href="img/dance1.jpg"><img src="img/dance1-sm.jpg" alt="Seated in yellow and crimson" loading="lazy"></a>
       <a href="img/dance11.jpg"><img src="img/dance11-sm.jpg" alt="Seated low in yellow and pink, smiling" loading="lazy"></a>
@@ -288,6 +297,6 @@
 
 <div class="lightbox" id="lightbox" hidden><img alt=""><button aria-label="Close">&times;</button></div>
 
-<script src="site.js?v=5"></script>
+<script src="site.js?v=6"></script>
 </body>
 </html>

@@ -1170,6 +1170,33 @@ function TodosTab({ tourId }) {
 // itself and the custom slug is meant to be the friendly public-facing URL.
 const ROOT_DOMAIN = "pravaahacfm.com";
 
+// Lists this tour's upcoming stops (date, city, venue — never notes) in the
+// "Upcoming" section of www.pravaahacfm.com. Off by default.
+function WebsiteToggle({ tourId, enabled, onSaved }) {
+  const [saving, setSaving] = useState(false);
+
+  const toggle = async () => {
+    setSaving(true);
+    try {
+      await api.patch(`/tours/${tourId}`, { show_on_website: !enabled });
+      toast.success(!enabled ? "Upcoming stops now show on your website" : "Removed from your website");
+      onSaved();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Couldn't update that");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: enabled ? "var(--primary)" : "var(--text-muted)" }}
+      data-testid="show-on-website-toggle">
+      <input type="checkbox" checked={!!enabled} onChange={toggle} disabled={saving} />
+      Show on website
+    </label>
+  );
+}
+
 function CustomLinkEditor({ tourId, customSlug, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(customSlug || "");
@@ -1279,6 +1306,7 @@ export default function TourDetailPage() {
             <Link2 size={13} /> Copy public schedule link
           </button>
           <CustomLinkEditor tourId={id} customSlug={tour.custom_slug} onSaved={reloadTour} />
+          <WebsiteToggle tourId={id} enabled={tour.show_on_website} onSaved={reloadTour} />
         </div>
       </header>
 

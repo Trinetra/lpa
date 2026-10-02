@@ -304,6 +304,7 @@ class TourUpdate(BaseModel):
     location: Optional[str] = None
     notes: Optional[str] = None
     custom_slug: Optional[str] = None
+    show_on_website: Optional[bool] = None  # lists upcoming stops on www.pravaahacfm.com
 
 # Top-level app routes a custom tour slug must never collide with (see
 # frontend/src/App.js) — the public site resolves an unknown top-level path
@@ -611,6 +612,7 @@ def ser_tour(doc):
         "notes": doc.get("notes"),
         "share_token": doc.get("share_token"),
         "custom_slug": doc.get("custom_slug"),
+        "show_on_website": doc.get("show_on_website", False),
         "created_at": doc.get("created_at"),
     }
 
@@ -4366,6 +4368,55 @@ async def delete_contact_message(message_id: str, user: dict = Depends(get_curre
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Message not found")
     return {"ok": True}
+
+# --------------- Public website schedule -----------------
+# "Upcoming" on www.pravaahacfm.com (nginx proxies /api/schedule here). Only
+# what she has made public: stops of tours switched to "Show on website", and
+# published events. Stop notes are never included.
+@api_router.get("/public/schedule")
+async def public_schedule():
+    admin = await db.users.find_one({"role": "admin"})
+    if not admin:
+        return []
+    owner_id = str(admin["_id"])
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    items = []
+
+    tours = {str(t["_id"]): t async for t in db.tours.find({"owner_id": owner_id, "show_on_website": True})}
+    if tours:
+        cur = db.tour_stops.find({"tour_id": {"$in": list(tours)}, "stop_date": {"$gte": today}})
+        async for st in cur:
+            items.append({
+                "type": "performance",
+                "date": st.get("stop_date"),
+                "end_date": None,
+                "time": st.get("stop_time"),
+                "title": tours[st["tour_id"]].get("name"),
+                "city": (st.get("city") or "").strip() or None,
+                "venue": (st.get("venue") or "").strip() or None,
+                "link": None,
+            })
+
+    async for ev in db.events.find({"owner_id": owner_id, "status": "published", "end_date": {"$gte": today}}):
+        if ev.get("custom_slug"):
+            link = f"https://{PUBLIC_ROOT_DOMAIN}/{ev['custom_slug']}"
+        elif ev.get("share_token"):
+            link = f"{os.environ.get('APP_URL', '').rstrip('/')}/event/{ev['share_token']}"
+        else:
+            link = None
+        items.append({
+            "type": "workshop",
+            "date": ev.get("start_date"),
+            "end_date": ev.get("end_date") if ev.get("end_date") != ev.get("start_date") else None,
+            "time": ev.get("time"),
+            "title": ev.get("name"),
+            "city": None,
+            "venue": None,
+            "link": link,
+        })
+
+    items.sort(key=lambda i: (i["date"] or "", i["time"] or ""))
+    return items
 
 # --------------- Events (workshops) -----------------
 async def _get_owned_event(event_id: str, owner_id: str) -> dict:

@@ -92,3 +92,33 @@ const updateCount = () => {
 };
 gallery.addEventListener("scroll", updateCount, { passive: true });
 updateCount();
+
+// Upcoming: performances and workshops from the app, via /api/schedule
+// (nginx -> backend). Built with textContent only — the data is hers, but
+// it still never gets interpreted as HTML.
+const fmtDay = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+fetch("/api/schedule")
+  .then((r) => (r.ok ? r.json() : []))
+  .then((items) => {
+    if (!items.length) return;
+    const list = document.querySelector(".upcoming");
+    const el = (tag, cls, text) => { const e = document.createElement(tag); e.className = cls; if (text) e.textContent = text; return e; };
+    for (const it of items) {
+      const li = document.createElement("li");
+      li.append(el("span", "when", it.end_date ? `${fmtDay(it.date)} – ${fmtDay(it.end_date)}` : fmtDay(it.date)));
+      const body = el("div", "");
+      body.append(el("div", "what", it.type === "workshop" ? `Workshop · ${it.title}` : (it.venue || it.title)));
+      const where = [it.type === "workshop" ? null : it.city, it.time].filter(Boolean).join(" · ");
+      if (where) body.append(el("div", "where", where));
+      li.append(body);
+      if (it.link) {
+        const a = el("a", "register", "Details & register");
+        a.href = it.link; a.target = "_blank"; a.rel = "noopener";
+        li.append(a);
+      } else li.append(el("span", ""));
+      list.append(li);
+    }
+    document.getElementById("upcoming").hidden = false;
+    document.getElementById("nav-upcoming").hidden = false;
+  })
+  .catch(() => {});
