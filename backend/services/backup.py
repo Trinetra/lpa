@@ -12,6 +12,7 @@ Two formats in one ZIP because they serve different purposes:
 """
 
 import io
+from pathlib import Path
 import logging
 import os
 import re
@@ -166,6 +167,14 @@ async def build_backup_zip(owner_id: str) -> bytes:
         xlsx_buf = io.BytesIO()
         wb.save(xlsx_buf)
         zf.writestr("records.xlsx", xlsx_buf.getvalue())
+
+        # Website gallery uploads (www.pravaahacfm.com) live on disk, not in
+        # the database, so they'd be lost with the server without this.
+        media_dir = Path(os.environ.get("WEBSITE_DIR", "/website")) / "media"
+        media = sorted(media_dir.glob("*.jpg")) if media_dir.is_dir() else []
+        for f in media:
+            zf.write(f, f"website-media/{f.name}")
+        manifest_lines.append(f"website-media/: {len(media)} files (restore into website/media/)")
 
         zf.writestr("MANIFEST.txt", "\n".join(manifest_lines))
 
