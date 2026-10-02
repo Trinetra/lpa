@@ -37,6 +37,7 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
 .nav nav a { text-decoration: none; color: var(--muted); transition: color .2s; }
 .nav nav a:hover { color: var(--ink); }
 .nav-toggle { display: none; }
+.menu-logo { display: none; }
 /* Phones/tablets: section links move into a full-screen menu behind ☰. */
 @media (max-width: 860px) {
   .nav nav { display: none; }
@@ -48,6 +49,7 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
   .nav.open { background: var(--bg); }
   .nav.open nav { display: flex; position: fixed; inset: 0; z-index: 0; flex-direction: column; justify-content: center; align-items: center; gap: 26px; background: var(--bg); font-size: 1rem; letter-spacing: .22em; }
   .nav.open nav a { color: var(--ink); }
+  .nav.open .menu-logo { display: block; width: 88px; height: 88px; border-radius: 50%; margin-bottom: 14px; }
   .nav.open nav a[hidden] { display: none; }
   .nav-mark { position: relative; z-index: 1; }
   body.menu-open { overflow: hidden; }
