@@ -164,3 +164,11 @@ footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 32
 .past-empty { color: var(--muted); }
 .back { padding: 0 16px 64px; }
 .back a { color: var(--accent); text-decoration: none; letter-spacing: .1em; font-size: .85rem; }
+.upcoming .tour-group { display: block; padding: 0; }
+.upcoming .tour-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 28px 0 8px; }
+.upcoming .tour-head h3 { margin: 0; font-size: 1.6rem; }
+.upcoming .tour-dates { color: var(--muted); font-size: .9rem; }
+.upcoming .tour-head .register { margin-left: auto; }
+.upcoming .tour-stops { list-style: none; padding: 0 0 0 0; margin: 0; }
+.upcoming .tour-stops li { border-top: 1px solid var(--line); }
+@media (max-width: 540px) { .upcoming .tour-head .register { margin-left: 0; } }

@@ -4387,15 +4387,27 @@ async def public_schedule():
     if tours:
         cur = db.tour_stops.find({"tour_id": {"$in": list(tours)}, "stop_date": {"$gte": today}})
         async for st in cur:
+            tour = tours[st["tour_id"]]
+            city = (st.get("city") or "").strip() or None
+            venue = (st.get("venue") or "").strip() or None
+            # Exact pin when the app geocoded the venue, else a search by name.
+            if st.get("latitude") is not None and st.get("longitude") is not None:
+                map_q = f"{st['latitude']},{st['longitude']}"
+            else:
+                map_q = ", ".join(x for x in (venue, city) if x)
             items.append({
                 "type": "performance",
                 "date": st.get("stop_date"),
                 "end_date": None,
                 "time": st.get("stop_time"),
-                "title": tours[st["tour_id"]].get("name"),
-                "city": (st.get("city") or "").strip() or None,
-                "venue": (st.get("venue") or "").strip() or None,
+                "title": tour.get("name"),
+                "city": city,
+                "venue": venue,
                 "link": None,
+                "map_url": f"https://www.google.com/maps/search/?api=1&query={quote(map_q)}" if map_q else None,
+                "tour_id": st["tour_id"],
+                "tour_link": f"https://{PUBLIC_ROOT_DOMAIN}/{tour['custom_slug']}" if tour.get("custom_slug")
+                    else (f"{os.environ.get('APP_URL', '').rstrip('/')}/tour/{tour['share_token']}" if tour.get("share_token") else None),
             })
 
     async for ev in db.events.find({"owner_id": owner_id, "status": "published", "end_date": {"$gte": today}}):

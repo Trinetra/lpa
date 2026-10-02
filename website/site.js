@@ -102,29 +102,56 @@ document.querySelectorAll(".gallery").forEach((gallery) => {
 });
 
 // Upcoming: performances and workshops from the app, via /api/schedule
-// (nginx -> backend). Built with textContent only — the data is hers, but
-// it still never gets interpreted as HTML.
+// (nginx -> backend). Tour stops are grouped under their tour's name; each
+// stop links to Google Maps. Built with textContent only — the data is hers,
+// but it still never gets interpreted as HTML.
 const fmtDay = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+const link = (cls, text, href) => { const a = el("a", cls, text); a.href = href; a.target = "_blank"; a.rel = "noopener"; return a; };
+
+function upcomingRow(it, inTour) {
+  const li = document.createElement("li");
+  li.append(el("span", "when", it.end_date ? `${fmtDay(it.date)} – ${fmtDay(it.end_date)}` : fmtDay(it.date)));
+  const body = el("div");
+  let what, where;
+  if (it.type === "workshop") {
+    what = `Workshop · ${it.title}`;
+    where = it.time;
+  } else {
+    what = it.venue || it.city || (inTour ? "Venue to be announced" : it.title);
+    where = [it.venue ? it.city : null, it.time].filter(Boolean).join(" · ");
+  }
+  body.append(el("div", "what", what));
+  if (where) body.append(el("div", "where", where));
+  li.append(body);
+  if (it.link) li.append(link("register", "Details & register", it.link));
+  else if (it.map_url) li.append(link("register", "Map", it.map_url));
+  else li.append(el("span"));
+  return li;
+}
+
 if (document.querySelector(".upcoming")) fetch("/api/schedule")
   .then((r) => (r.ok ? r.json() : []))
   .then((items) => {
     if (!items.length) return;
     const list = document.querySelector(".upcoming");
-    const el = (tag, cls, text) => { const e = document.createElement(tag); e.className = cls; if (text) e.textContent = text; return e; };
+    const tours = new Map(); // tour_id -> its group's stop list, in date order
     for (const it of items) {
-      const li = document.createElement("li");
-      li.append(el("span", "when", it.end_date ? `${fmtDay(it.date)} – ${fmtDay(it.end_date)}` : fmtDay(it.date)));
-      const body = el("div", "");
-      body.append(el("div", "what", it.type === "workshop" ? `Workshop · ${it.title}` : (it.venue || it.title)));
-      const where = [it.type === "workshop" ? null : it.city, it.time].filter(Boolean).join(" · ");
-      if (where) body.append(el("div", "where", where));
-      li.append(body);
-      if (it.link) {
-        const a = el("a", "register", "Details & register");
-        a.href = it.link; a.target = "_blank"; a.rel = "noopener";
-        li.append(a);
-      } else li.append(el("span", ""));
-      list.append(li);
+      if (!it.tour_id) { list.append(upcomingRow(it, false)); continue; }
+      if (!tours.has(it.tour_id)) {
+        const stops = items.filter((x) => x.tour_id === it.tour_id);
+        const group = el("li", "tour-group");
+        const head = el("div", "tour-head");
+        head.append(el("h3", "", it.title));
+        const last = stops[stops.length - 1].date;
+        head.append(el("span", "tour-dates", last !== it.date ? `${fmtDay(it.date)} – ${fmtDay(last)}` : fmtDay(it.date)));
+        if (it.tour_link) head.append(link("register", "Full schedule & map", it.tour_link));
+        const ol = el("ol", "tour-stops");
+        group.append(head, ol);
+        list.append(group);
+        tours.set(it.tour_id, ol);
+      }
+      tours.get(it.tour_id).append(upcomingRow(it, true));
     }
     document.getElementById("upcoming").hidden = false;
     document.getElementById("nav-upcoming").hidden = false;
