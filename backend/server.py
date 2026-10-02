@@ -329,6 +329,7 @@ class TourStopCreate(BaseModel):
     stop_date: str  # ISO date
     stop_time: Optional[str] = None  # "HH:MM", 24h
     notes: Optional[str] = None
+    instagram: Optional[str] = None  # post/reel link, shown with the stop on the website
 
 class TourStopUpdate(BaseModel):
     city: Optional[str] = None
@@ -336,6 +337,7 @@ class TourStopUpdate(BaseModel):
     stop_date: Optional[str] = None
     stop_time: Optional[str] = None
     notes: Optional[str] = None
+    instagram: Optional[str] = None  # "" clears it
 
 class TourExpenseCreate(BaseModel):
     category: str
@@ -875,6 +877,7 @@ def ser_tour_stop(doc):
         "stop_date": doc.get("stop_date"),
         "stop_time": doc.get("stop_time"),
         "notes": doc.get("notes"),
+        "instagram": doc.get("instagram"),
         "latitude": doc.get("latitude"),
         "longitude": doc.get("longitude"),
         "formatted_address": doc.get("formatted_address"),
@@ -3817,6 +3820,7 @@ async def list_tour_stops(tour_id: str, user: dict = Depends(get_current_user)):
 async def create_tour_stop(tour_id: str, body: TourStopCreate, user: dict = Depends(get_current_user)):
     await _get_owned_tour(tour_id, user["_id"])
     doc = body.model_dump()
+    doc["instagram"] = _instagram_or_400(doc["instagram"]) if (doc.get("instagram") or "").strip() else None
     doc["tour_id"] = tour_id
     doc["owner_id"] = user["_id"]
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -3839,6 +3843,8 @@ async def update_tour_stop(tour_id: str, stop_id: str, body: TourStopUpdate,
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "instagram" in updates:
+        updates["instagram"] = _instagram_or_400(updates["instagram"]) if updates["instagram"].strip() else None
     # Only re-geocode if the venue or city actually changed — avoids an
     # unnecessary Nominatim call (and possibly clobbering a good pin) on
     # every unrelated edit like notes or time.
@@ -4405,6 +4411,7 @@ async def public_schedule():
                 "venue": venue,
                 "link": None,
                 "map_url": f"https://www.google.com/maps/search/?api=1&query={quote(map_q)}" if map_q else None,
+                "instagram": st.get("instagram"),
                 "tour_id": st["tour_id"],
                 "tour_link": f"https://{PUBLIC_ROOT_DOMAIN}/{tour['custom_slug']}" if tour.get("custom_slug")
                     else (f"{os.environ.get('APP_URL', '').rstrip('/')}/tour/{tour['share_token']}" if tour.get("share_token") else None),
@@ -4608,6 +4615,7 @@ async def get_website_archive(user: dict = Depends(get_current_user)):
             "source_type": "stop", "source_id": str(st["_id"]),
             "title": tour.get("name") or "Performance", "date": st.get("stop_date"), "end_date": None,
             "city": (st.get("city") or "").strip() or None, "venue": (st.get("venue") or "").strip() or None,
+            "instagram": st.get("instagram"),
         })
     async for ev in db.events.find({"owner_id": owner_id, "status": "published", "end_date": {"$lt": today}}):
         if ("event", str(ev["_id"])) in taken:
@@ -4617,6 +4625,7 @@ async def get_website_archive(user: dict = Depends(get_current_user)):
             "title": ev.get("name"), "date": ev.get("start_date"),
             "end_date": ev.get("end_date") if ev.get("end_date") != ev.get("start_date") else None,
             "city": None, "venue": None,
+            "instagram": website_service.instagram_url(ev.get("social_instagram") or ""),
         })
     suggestions.sort(key=lambda x: x["date"] or "", reverse=True)
     return {"entries": entries, "suggestions": suggestions[:30]}

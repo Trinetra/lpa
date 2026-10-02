@@ -80,6 +80,10 @@ function ScheduleTab({ tourId }) {
                 </a>
               )}
               {s.notes && <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{s.notes}</div>}
+              {s.instagram && (
+                <a href={s.instagram} target="_blank" rel="noreferrer" className="text-xs mt-1 block hover:text-[color:var(--primary)]"
+                  style={{ color: "var(--text-muted)" }}>Instagram post</a>
+              )}
             </div>
             <button onClick={() => setEditing(s)} data-testid={`edit-stop-${s.id}`} className="btn-ghost text-xs shrink-0">Edit</button>
           </div>
@@ -100,6 +104,7 @@ function StopForm({ tourId, stop, onClose, onSaved }) {
   const [stopDate, setStopDate] = useState(stop.stop_date || "");
   const [stopTime, setStopTime] = useState(stop.stop_time || "");
   const [notes, setNotes] = useState(stop.notes || "");
+  const [instagram, setInstagram] = useState(stop.instagram || "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -107,7 +112,8 @@ function StopForm({ tourId, stop, onClose, onSaved }) {
     e.preventDefault();
     setSaving(true);
     try {
-      const body = { city, venue: venue || null, stop_date: stopDate, stop_time: stopTime || null, notes: notes || null };
+      // instagram is sent as "" (not null) when emptied, so an edit can clear it.
+      const body = { city, venue: venue || null, stop_date: stopDate, stop_time: stopTime || null, notes: notes || null, instagram: instagram.trim() };
       if (isNew) await api.post(`/tours/${tourId}/stops`, body);
       else await api.patch(`/tours/${tourId}/stops/${stop.id}`, body);
       toast.success(isNew ? "Stop added" : "Stop updated");
@@ -162,10 +168,19 @@ function StopForm({ tourId, stop, onClose, onSaved }) {
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
           </label>
         </div>
-        <label className="block mb-6">
+        <label className="block mb-3">
           <span className="uppercase-label block mb-1">Notes (optional)</span>
           <input value={notes} onChange={(e) => setNotes(e.target.value)} data-testid="stop-notes-input"
             className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+        </label>
+        <label className="block mb-6">
+          <span className="uppercase-label block mb-1">Instagram post (optional)</span>
+          <input value={instagram} onChange={(e) => setInstagram(e.target.value)} data-testid="stop-instagram-input"
+            placeholder="https://www.instagram.com/p/…"
+            className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+          <span className="block text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+            The poster or reel for this performance. Linked from the website's Upcoming list, and shown on Past events once you add it there.
+          </span>
         </label>
         <div className="flex justify-between gap-3">
           {!isNew ? (

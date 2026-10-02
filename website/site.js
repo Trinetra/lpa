@@ -158,7 +158,21 @@ function upcomingRow(it, inTour) {
   const actions = el("div", "actions");
   if (it.link) actions.append(link("register", "Details & register", it.link));
   else if (it.map_url) actions.append(link("register", "Map", it.map_url));
-  if (it.instagram) actions.append(link("register", "Instagram", it.instagram));
+  if (it.instagram) {
+    const ig = link("register", "Instagram", it.instagram);
+    ig.setAttribute("aria-expanded", "false");
+    ig.addEventListener("click", (e) => {
+      e.preventDefault();
+      const open = li.querySelector(".insta-panel");
+      if (open) { open.remove(); ig.setAttribute("aria-expanded", "false"); return; }
+      const panel = el("div", "insta-panel insta-card");
+      panel.dataset.insta = it.instagram;
+      li.append(panel);
+      ig.setAttribute("aria-expanded", "true");
+      instaEmbed(panel);
+    });
+    actions.append(ig);
+  }
   li.append(actions);
   return li;
 }
@@ -198,29 +212,33 @@ const TENS = { 4: "forty", 5: "fifty", 6: "sixty", 7: "seventy" };
 const yearsWord = TENS[Math.floor(yearsInForm / 10)] ? TENS[Math.floor(yearsInForm / 10)] + ONES[yearsInForm % 10] : String(yearsInForm);
 document.querySelectorAll("[data-years]").forEach((el) => { el.textContent = yearsWord; });
 
-// Instagram posts (past events): official embeds, loaded only when a card
-// scrolls near the viewport, so nothing from Meta loads for visitors who
-// never get there. Until then — or if Instagram is blocked — it's a link.
-const instaCards = document.querySelectorAll(".insta-card[data-insta]");
-if (instaCards.length) {
-  let scriptLoading = null;
-  const loadScript = () => scriptLoading || (scriptLoading = new Promise((resolve) => {
+// Instagram: official embeds, loaded only on demand — Past events cards when
+// they scroll near, Upcoming posts when tapped — so nothing from Meta loads
+// for visitors who never get there. Until then (or if Instagram is blocked)
+// each one is a plain link.
+let instaScript = null;
+function instaEmbed(card) {
+  const q = document.createElement("blockquote");
+  q.className = "instagram-media";
+  q.dataset.instgrmPermalink = card.dataset.insta;
+  q.dataset.instgrmVersion = "14";
+  q.setAttribute("data-instgrm-captioned", "");
+  const a = document.createElement("a");
+  a.href = card.dataset.insta; a.target = "_blank"; a.rel = "noopener"; a.textContent = "View on Instagram";
+  q.append(a);
+  card.replaceChildren(q);
+  instaScript = instaScript || new Promise((resolve) => {
     const s = document.createElement("script");
     s.src = "https://www.instagram.com/embed.js"; s.async = true; s.onload = resolve;
     document.body.append(s);
-  }));
-  const embed = (card) => {
-    const q = document.createElement("blockquote");
-    q.className = "instagram-media";
-    q.dataset.instgrmPermalink = card.dataset.insta;
-    q.dataset.instgrmVersion = "14";
-    q.setAttribute("data-instgrm-captioned", "");
-    q.append(card.querySelector("a"));
-    card.replaceChildren(q);
-    loadScript().then(() => window.instgrm && window.instgrm.Embeds.process());
-  };
+  });
+  instaScript.then(() => window.instgrm && window.instgrm.Embeds.process());
+}
+
+const instaCards = document.querySelectorAll(".insta-card[data-insta]");
+if (instaCards.length) {
   const io = new IntersectionObserver((entries) => entries.forEach((e) => {
-    if (e.isIntersecting) { io.unobserve(e.target); embed(e.target); }
+    if (e.isIntersecting) { io.unobserve(e.target); instaEmbed(e.target); }
   }), { rootMargin: "400px 0px" });
   instaCards.forEach((c) => io.observe(c));
 }

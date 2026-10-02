@@ -471,7 +471,7 @@ function PastEventsTab() {
                 <button type="button" className="btn-ghost text-xs flex items-center gap-1 shrink-0" data-testid={`archive-suggest-${i}`}
                   onClick={() => setEditing({
                     title: sg.venue ? `${sg.title} — ${sg.venue}` : sg.title, date: sg.date, end_date: sg.end_date,
-                    city: sg.city, venue: sg.venue, published: false, videos: [], instagram: [], photos: [],
+                    city: sg.city, venue: sg.venue, published: false, videos: [], instagram: sg.instagram ? [sg.instagram] : [], photos: [],
                     source_type: sg.source_type, source_id: sg.source_id,
                   })}>
                   <Plus size={12} /> Add to past events
