@@ -31,6 +31,21 @@ function RowControls({ i, count, onMove, onRemove, testid }) {
   );
 }
 
+// Label above, optional one-line hint below — placeholders alone vanish once
+// she starts typing, which left the video fields unexplained on her phone.
+function Field({ label, hint, children, className = "" }) {
+  return (
+    <label className={`block space-y-1 ${className}`}>
+      <span className="uppercase-label">{label}</span>
+      {children}
+      {hint && <span className="block text-xs" style={{ color: "var(--text-muted)" }}>{hint}</span>}
+    </label>
+  );
+}
+
+const LINK_HINT = "On YouTube, tap Share → Copy link, then paste it here.";
+const PHOTO_DESC_HINT = "Optional. Not shown on the website — it's read by Google and by screen readers for blind visitors.";
+
 function SaveBar({ dirty, saving, onSave, testid }) {
   return (
     <div className="flex items-center gap-3">
@@ -82,18 +97,29 @@ function ProductionsTab({ initial, onSaved }) {
       <p className="text-xs" style={{ color: "var(--text-muted)" }}>Shown on the website in this order — newest first.</p>
       <div className="surface">
         {list.map((p, i) => (
-          <div key={i} className="px-6 py-4 space-y-2" style={{ borderTop: i ? "1px solid var(--border)" : "none" }} data-testid={`production-${i}`}>
-            <div className="flex gap-2 items-start">
-              <input className={inputCls} style={{ maxWidth: 90 }} value={p.year || ""} placeholder="Year" onChange={(e) => set(i, "year", e.target.value)} />
-              <input className={inputCls} value={p.title || ""} placeholder="Title (e.g. Rāvaṇa)" onChange={(e) => set(i, "title", e.target.value)} />
+          <div key={i} className="px-4 sm:px-6 py-5 space-y-3" style={{ borderTop: i ? "1px solid var(--border)" : "none" }} data-testid={`production-${i}`}>
+            <div className="flex justify-between items-center gap-2">
+              <span className="font-serif-display text-lg truncate">{p.title || "New production"}</span>
               <RowControls i={i} count={list.length} testid="production" onMove={(a, d) => update(move(list, a, d))}
                 onRemove={(a) => window.confirm(`Remove "${list[a].title || "this production"}"?`) && update(list.filter((_, j) => j !== a))} />
             </div>
-            <input className={inputCls} value={p.subtitle || ""} placeholder="Subtitle (optional, e.g. the dot that moved)" onChange={(e) => set(i, "subtitle", e.target.value)} />
-            <textarea className={inputCls} rows={2} value={p.description || ""} placeholder="Description (optional)" onChange={(e) => set(i, "description", e.target.value)} />
-            <div className="flex gap-2">
-              <input className={inputCls} value={p.video || ""} placeholder="YouTube link (optional)" onChange={(e) => set(i, "video", e.target.value)} />
-              <input className={inputCls} style={{ maxWidth: 170 }} value={p.video_label || ""} placeholder="Watch excerpt" onChange={(e) => set(i, "video_label", e.target.value)} />
+            <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr] gap-3">
+              <Field label="Year"><input className={inputCls} value={p.year || ""} placeholder="2026" onChange={(e) => set(i, "year", e.target.value)} /></Field>
+              <Field label="Title"><input className={inputCls} value={p.title || ""} placeholder="e.g. Rāvaṇa" onChange={(e) => set(i, "title", e.target.value)} /></Field>
+            </div>
+            <Field label="Subtitle" hint="Optional — shown after the title, e.g. “the dot that moved”.">
+              <input className={inputCls} value={p.subtitle || ""} onChange={(e) => set(i, "subtitle", e.target.value)} />
+            </Field>
+            <Field label="Description" hint="Optional — one or two sentences.">
+              <textarea className={inputCls} rows={2} value={p.description || ""} onChange={(e) => set(i, "description", e.target.value)} />
+            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px] gap-3">
+              <Field label="YouTube link" hint={`Optional. ${LINK_HINT}`}>
+                <input className={inputCls} value={p.video || ""} placeholder="https://youtu.be/…" onChange={(e) => set(i, "video", e.target.value)} />
+              </Field>
+              <Field label="Link text" hint="Default: Watch excerpt">
+                <input className={inputCls} value={p.video_label || ""} placeholder="Watch excerpt" onChange={(e) => set(i, "video_label", e.target.value)} />
+              </Field>
             </div>
           </div>
         ))}
@@ -118,23 +144,27 @@ function VideosTab({ initial, onSaved }) {
     <div className="space-y-4">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <button type="button" className="btn-ghost text-sm flex items-center gap-1" data-testid="add-video"
-          onClick={() => update([...list, { video: "", title: "" }])}>
+          onClick={() => update([{ video: "", title: "" }, ...list])}>
           <Plus size={14} /> Add video
         </button>
         <SaveBar dirty={dirty} saving={saving} onSave={() => save(list)} testid="save-videos" />
       </div>
       <div className="surface">
         {list.map((v, i) => (
-          <div key={i} className="px-6 py-4 flex gap-3 items-start" style={{ borderTop: i ? "1px solid var(--border)" : "none" }} data-testid={`video-${i}`}>
-            <div className="shrink-0 rounded overflow-hidden" style={{ width: 96, height: 54, background: "#000" }}>
-              {thumb(v.video) && <img src={thumb(v.video)} alt="" style={{ width: 96, height: 54, objectFit: "cover" }} />}
+          <div key={i} className="px-4 sm:px-6 py-5 space-y-3" style={{ borderTop: i ? "1px solid var(--border)" : "none" }} data-testid={`video-${i}`}>
+            <div className="flex justify-between items-center gap-3">
+              <div className="shrink-0 rounded overflow-hidden" style={{ width: 128, height: 72, background: "#000" }}>
+                {thumb(v.video) && <img src={thumb(v.video)} alt="" style={{ width: 128, height: 72, objectFit: "cover" }} />}
+              </div>
+              <RowControls i={i} count={list.length} testid="video" onMove={(a, d) => update(move(list, a, d))}
+                onRemove={(a) => update(list.filter((_, j) => j !== a))} />
             </div>
-            <div className="flex-1 space-y-2 min-w-0">
-              <input className={inputCls} value={v.title} placeholder="Title shown on the website" onChange={(e) => set(i, "title", e.target.value)} />
-              <input className={inputCls} value={v.video} placeholder="YouTube link" onChange={(e) => set(i, "video", e.target.value)} />
-            </div>
-            <RowControls i={i} count={list.length} testid="video" onMove={(a, d) => update(move(list, a, d))}
-              onRemove={(a) => update(list.filter((_, j) => j !== a))} />
+            <Field label="YouTube link" hint={LINK_HINT}>
+              <input className={inputCls} value={v.video} placeholder="https://youtu.be/…" onChange={(e) => set(i, "video", e.target.value)} />
+            </Field>
+            <Field label="Title" hint="Shown under the video on the website, e.g. “Rāvaṇa — the dot that moved”.">
+              <input className={inputCls} value={v.title} onChange={(e) => set(i, "title", e.target.value)} />
+            </Field>
           </div>
         ))}
       </div>
@@ -186,12 +216,16 @@ function GalleryTab({ initial, onSaved }) {
       </p>
       <div className="surface">
         {list.map((p, i) => (
-          <div key={p.src} className="px-6 py-4 flex gap-3 items-center" style={{ borderTop: i ? "1px solid var(--border)" : "none" }} data-testid={`photo-${i}`}>
-            <img src={`${SITE}/${p.src_sm}`} alt="" className="shrink-0 rounded" style={{ width: 64, height: 80, objectFit: "cover" }} />
-            <input className={inputCls} value={p.alt || ""} placeholder="Short description (for search engines and screen readers)"
-              onChange={(e) => update(list.map((x, j) => (j === i ? { ...x, alt: e.target.value } : x)))} />
-            <RowControls i={i} count={list.length} testid="photo" onMove={(a, d) => update(move(list, a, d))}
-              onRemove={(a) => window.confirm("Remove this photo from the website?") && update(list.filter((_, j) => j !== a))} />
+          <div key={p.src} className="px-4 sm:px-6 py-4 flex gap-3 items-start" style={{ borderTop: i ? "1px solid var(--border)" : "none" }} data-testid={`photo-${i}`}>
+            <img src={`${SITE}/${p.src_sm}`} alt="" className="shrink-0 rounded" style={{ width: 72, height: 90, objectFit: "cover" }} />
+            <div className="flex-1 min-w-0 space-y-2">
+              <RowControls i={i} count={list.length} testid="photo" onMove={(a, d) => update(move(list, a, d))}
+                onRemove={(a) => window.confirm("Remove this photo from the website?") && update(list.filter((_, j) => j !== a))} />
+              <Field label="Hidden description" hint={PHOTO_DESC_HINT}>
+                <input className={inputCls} value={p.alt || ""} placeholder="e.g. Lakshmi in a red and black costume, arms raised"
+                  onChange={(e) => update(list.map((x, j) => (j === i ? { ...x, alt: e.target.value } : x)))} />
+              </Field>
+            </div>
           </div>
         ))}
       </div>
@@ -268,29 +302,37 @@ function ArchiveEditor({ entry, onDone, onChanged }) {
 
   return (
     <div className="px-6 py-5 space-y-3" data-testid="archive-editor">
-      <input className={inputCls} value={e.title || ""} placeholder="Title (e.g. Rāvaṇa — Nehru Centre, London)" onChange={(x) => set("title", x.target.value)} />
+      <Field label="Title"><input className={inputCls} value={e.title || ""} placeholder="e.g. Rāvaṇa — Nehru Centre, London" onChange={(x) => set("title", x.target.value)} /></Field>
       <div className="flex gap-2 flex-wrap">
         <label className="text-xs" style={{ color: "var(--text-muted)" }}>Date
           <input type="date" className={inputCls} value={e.date || ""} onChange={(x) => set("date", x.target.value)} /></label>
         <label className="text-xs" style={{ color: "var(--text-muted)" }}>End date (optional)
           <input type="date" className={inputCls} value={e.end_date || ""} onChange={(x) => set("end_date", x.target.value)} /></label>
       </div>
-      <div className="flex gap-2">
-        <input className={inputCls} value={e.venue || ""} placeholder="Venue" onChange={(x) => set("venue", x.target.value)} />
-        <input className={inputCls} value={e.city || ""} placeholder="City" onChange={(x) => set("city", x.target.value)} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Venue"><input className={inputCls} value={e.venue || ""} onChange={(x) => set("venue", x.target.value)} /></Field>
+        <Field label="City"><input className={inputCls} value={e.city || ""} onChange={(x) => set("city", x.target.value)} /></Field>
       </div>
-      <textarea className={inputCls} rows={4} value={e.description || ""} placeholder="A few lines about the event" onChange={(x) => set("description", x.target.value)} />
+      <Field label="About the event" hint="A few lines for the website — what was performed, who you danced with, how it went.">
+        <textarea className={inputCls} rows={4} value={e.description || ""} onChange={(x) => set("description", x.target.value)} />
+      </Field>
 
       <div className="uppercase-label pt-2">Videos</div>
       {e.videos.map((v, i) => (
-        <div key={i} className="flex gap-2 items-center">
-          <div className="shrink-0 rounded overflow-hidden" style={{ width: 72, height: 40, background: "#000" }}>
-            {ytId(v.video) && <img src={`https://i.ytimg.com/vi/${ytId(v.video)}/mqdefault.jpg`} alt="" style={{ width: 72, height: 40, objectFit: "cover" }} />}
+        <div key={i} className="space-y-3 rounded p-3" style={{ border: "1px solid var(--border)" }}>
+          <div className="flex justify-between items-center gap-3">
+            <div className="shrink-0 rounded overflow-hidden" style={{ width: 96, height: 54, background: "#000" }}>
+              {ytId(v.video) && <img src={`https://i.ytimg.com/vi/${ytId(v.video)}/mqdefault.jpg`} alt="" style={{ width: 96, height: 54, objectFit: "cover" }} />}
+            </div>
+            <RowControls i={i} count={e.videos.length} testid="archive-video" onMove={(a, d) => set("videos", move(e.videos, a, d))}
+              onRemove={(a) => set("videos", e.videos.filter((_, j) => j !== a))} />
           </div>
-          <input className={inputCls} value={v.title} placeholder="Title" onChange={(x) => set("videos", e.videos.map((y, j) => (j === i ? { ...y, title: x.target.value } : y)))} />
-          <input className={inputCls} value={v.video} placeholder="YouTube link" onChange={(x) => set("videos", e.videos.map((y, j) => (j === i ? { ...y, video: x.target.value } : y)))} />
-          <RowControls i={i} count={e.videos.length} testid="archive-video" onMove={(a, d) => set("videos", move(e.videos, a, d))}
-            onRemove={(a) => set("videos", e.videos.filter((_, j) => j !== a))} />
+          <Field label="YouTube link" hint={LINK_HINT}>
+            <input className={inputCls} value={v.video} placeholder="https://youtu.be/…" onChange={(x) => set("videos", e.videos.map((y, j) => (j === i ? { ...y, video: x.target.value } : y)))} />
+          </Field>
+          <Field label="Title" hint="Shown under the video on the website.">
+            <input className={inputCls} value={v.title} onChange={(x) => set("videos", e.videos.map((y, j) => (j === i ? { ...y, title: x.target.value } : y)))} />
+          </Field>
         </div>
       ))}
       <button type="button" className="btn-ghost text-xs flex items-center gap-1" onClick={() => set("videos", [...e.videos, { video: "", title: "" }])}>
@@ -303,12 +345,16 @@ function ArchiveEditor({ entry, onDone, onChanged }) {
       ) : (
         <>
           {e.photos.map((p, i) => (
-            <div key={p.src} className="flex gap-2 items-center">
-              <img src={`${SITE}/${p.src_sm}`} alt="" className="shrink-0 rounded" style={{ width: 48, height: 60, objectFit: "cover" }} />
-              <input className={inputCls} value={p.alt || ""} placeholder="Short description"
-                onChange={(x) => set("photos", e.photos.map((y, j) => (j === i ? { ...y, alt: x.target.value } : y)))} />
-              <RowControls i={i} count={e.photos.length} testid="archive-photo" onMove={(a, d) => set("photos", move(e.photos, a, d))}
-                onRemove={(a) => set("photos", e.photos.filter((_, j) => j !== a))} />
+            <div key={p.src} className="flex gap-3 items-start rounded p-3" style={{ border: "1px solid var(--border)" }}>
+              <img src={`${SITE}/${p.src_sm}`} alt="" className="shrink-0 rounded" style={{ width: 64, height: 80, objectFit: "cover" }} />
+              <div className="flex-1 min-w-0 space-y-2">
+                <RowControls i={i} count={e.photos.length} testid="archive-photo" onMove={(a, d) => set("photos", move(e.photos, a, d))}
+                  onRemove={(a) => set("photos", e.photos.filter((_, j) => j !== a))} />
+                <Field label="Hidden description" hint={PHOTO_DESC_HINT}>
+                  <input className={inputCls} value={p.alt || ""}
+                    onChange={(x) => set("photos", e.photos.map((y, j) => (j === i ? { ...y, alt: x.target.value } : y)))} />
+                </Field>
+              </div>
             </div>
           ))}
           <label className="btn-ghost text-xs flex items-center gap-1 cursor-pointer w-fit" data-testid="archive-upload">
