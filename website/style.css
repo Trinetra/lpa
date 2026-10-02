@@ -10,9 +10,25 @@
   --line: #2a221d;
   --accent: #c98a3a;
   --maroon: #7a1f2b;
+  --prose: #d8cfc3;
+  --bg-glass: rgba(11,9,8,.94);
   --serif: "Pravaaha Display", Georgia, serif;
   --sans: "Hanken Grotesk", "Helvetica Neue", Arial, sans-serif;
 }
+/* Light mode (dark is the default; the choice is remembered per device). */
+:root[data-theme="light"] {
+  --bg: #f6f1e9;
+  --bg-2: #ece4d6;
+  --ink: #1d1814;
+  --muted: #6e6255;
+  --line: #ddd2c1;
+  --accent: #9b5a17;
+  --prose: #3b332c;
+  --bg-glass: rgba(246,241,233,.94);
+}
+/* The hero is a black stage in both modes (all her photos are shot on black),
+   and so is the menu bar while it floats over it. */
+.hero, .nav:not(.solid):not(.open) { --bg: #0b0908; --ink: #efe7dc; --muted: #a39686; --accent: #c98a3a; color: var(--ink); }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 64px; }
@@ -31,12 +47,19 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
 
 /* Nav */
 .nav { position: fixed; inset: 0 0 auto 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 14px clamp(16px, 4vw, 40px); background: linear-gradient(var(--bg), rgba(11,9,8,0)); transition: background .3s; }
-.nav.solid { background: rgba(11,9,8,.94); border-bottom: 1px solid var(--line); }
-.nav-mark { font-family: var(--serif); font-size: 1.15rem; text-decoration: none; white-space: nowrap; }
+.nav.solid { background: var(--bg-glass); border-bottom: 1px solid var(--line); }
+.nav-mark { font-family: var(--serif); font-size: 1.15rem; text-decoration: none; white-space: nowrap; color: var(--ink); }
 .nav nav { display: flex; gap: clamp(14px, 2vw, 28px); font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; }
 .nav nav a { text-decoration: none; color: var(--muted); transition: color .2s; }
 .nav nav a:hover { color: var(--ink); }
 .nav-toggle { display: none; }
+/* Theme switch: an icon at the end of the desktop bar, a labelled item in the phone menu. */
+.theme-toggle { display: inline-flex; align-items: center; gap: 10px; background: none; border: 0; padding: 0; cursor: pointer; color: var(--muted); font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.theme-toggle:hover { color: var(--ink); }
+.theme-toggle svg { width: 16px; height: 16px; }
+.theme-toggle .to-dark, :root[data-theme="light"] .theme-toggle .to-light { display: none; }
+:root[data-theme="light"] .theme-toggle .to-dark { display: inline; }
+.theme-label { display: none; }
 .menu-logo { display: none; }
 /* Phones/tablets: section links move into a full-screen menu behind ☰. */
 @media (max-width: 860px) {
@@ -49,6 +72,8 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
   .nav.open { background: var(--bg); }
   .nav.open nav { display: flex; position: fixed; inset: 0; z-index: 0; flex-direction: column; justify-content: center; align-items: center; gap: 26px; background: var(--bg); font-size: 1rem; letter-spacing: .22em; }
   .nav.open nav a { color: var(--ink); }
+  .nav.open .theme-toggle { color: var(--ink); margin-top: 10px; }
+  .nav.open .theme-label { display: inline; }
   .nav.open .menu-logo { display: block; width: 88px; height: 88px; border-radius: 50%; margin-bottom: 14px; }
   .nav.open nav a[hidden] { display: none; }
   .nav-mark { position: relative; z-index: 1; }
@@ -74,7 +99,7 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
 .split { display: grid; grid-template-columns: 5fr 6fr; gap: clamp(32px, 6vw, 96px); align-items: center; }
 .split.reverse figure { order: 2; }
 .split figure { margin: 0; }
-.prose p { margin: 0 0 1.1em; color: #d8cfc3; }
+.prose p { margin: 0 0 1.1em; color: var(--prose); }
 .prose .eyebrow { color: var(--accent); }
 @media (max-width: 800px) { .split { grid-template-columns: 1fr; } .split.reverse figure { order: 0; } .split figure { max-width: 420px; } }
 
@@ -84,7 +109,7 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
 .works li > *:not(.year) { grid-column: 2; }
 .works .year { grid-row: 1 / span 3; color: var(--accent); font-family: var(--serif); font-size: 1.3rem; padding-top: .2em; }
 .works h3 { margin-bottom: .3em; }
-.works p { margin: 0 0 .6em; color: #d8cfc3; }
+.works p { margin: 0 0 .6em; color: var(--prose); }
 .play-link { font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); text-decoration: none; }
 .play-link::before { content: "\25B6\00a0\00a0"; font-size: .7em; }
 @media (max-width: 540px) { .works li { grid-template-columns: 1fr; } .works li > * { grid-column: 1 !important; } .works .year { grid-row: auto; } }
@@ -150,7 +175,7 @@ footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 32
 .lightbox { position: fixed; inset: 0; z-index: 20; background: rgba(5,4,4,.96); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .lightbox[hidden] { display: none; }
 .lightbox img { max-height: 100%; max-width: 100%; object-fit: contain; }
-.lightbox button { position: absolute; top: 12px; right: 16px; background: none; border: 0; color: var(--ink); font-size: 2.4rem; cursor: pointer; line-height: 1; }
+.lightbox button { position: absolute; top: 12px; right: 16px; background: none; border: 0; color: #efe7dc; font-size: 2.4rem; cursor: pointer; line-height: 1; }
 
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
 
@@ -176,13 +201,13 @@ footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 32
 @media (max-width: 540px) { .upcoming li { grid-template-columns: 1fr; row-gap: 4px; } }
 
 /* Past events page */
-.past-intro { padding-bottom: 0; }
+.past-intro { padding-top: clamp(112px, 14vw, 160px); padding-bottom: 0; }
 .past-intro h1 { font-size: clamp(2.4rem, 5vw, 3.6rem); }
 .past { max-width: 960px; margin: 0 auto; padding: clamp(48px, 8vw, 80px) 16px; border-top: 1px solid var(--line); }
 .past:first-of-type { border-top: 0; }
 .past h2 { margin-bottom: .2em; }
 .past .where { color: var(--muted); margin: 0 0 1.2em; }
-.past .prose-text { color: #d8cfc3; max-width: 720px; white-space: pre-line; }
+.past .prose-text { color: var(--prose); max-width: 720px; white-space: pre-line; }
 .past .gallery { margin-top: 32px; }
 .past .videos { margin-top: 32px; }
 .past-empty { color: var(--muted); }

@@ -10,6 +10,22 @@ const setMenu = (open) => {
 navToggle.addEventListener("click", () => setMenu(!nav.classList.contains("open")));
 nav.querySelectorAll("nav a").forEach((a) => a.addEventListener("click", () => setMenu(false)));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMenu(false); });
+
+// Light / dark switch. Dark is the default; the choice is remembered on this
+// device (the inline script in <head> applies it before first paint).
+const themeBtn = document.querySelector(".theme-toggle");
+const themeMeta = document.querySelector('meta[name="theme-color"]');
+const applyTheme = (light) => {
+  if (light) document.documentElement.dataset.theme = "light";
+  else delete document.documentElement.dataset.theme;
+  const next = light ? "dark" : "light";
+  themeBtn.setAttribute("aria-label", `Switch to ${next} mode`);
+  themeBtn.querySelector(".theme-label").textContent = `${next[0].toUpperCase()}${next.slice(1)} mode`;
+  themeMeta.content = light ? "#f6f1e9" : "#0b0908";
+  try { localStorage.setItem("theme", light ? "light" : "dark"); } catch (e) {}
+};
+applyTheme(document.documentElement.dataset.theme === "light");
+themeBtn.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme !== "light"));
 const onScroll = () => nav.classList.toggle("solid", window.scrollY > 40 || document.body.classList.contains("subpage"));
 window.addEventListener("scroll", onScroll, { passive: true });
 onScroll();
