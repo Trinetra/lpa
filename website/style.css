@@ -36,7 +36,22 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
 .nav nav { display: flex; gap: clamp(14px, 2vw, 28px); font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; }
 .nav nav a { text-decoration: none; color: var(--muted); transition: color .2s; }
 .nav nav a:hover { color: var(--ink); }
-@media (max-width: 860px) { .nav nav { display: none; } }
+.nav-toggle { display: none; }
+/* Phones/tablets: section links move into a full-screen menu behind ☰. */
+@media (max-width: 860px) {
+  .nav nav { display: none; }
+  .nav-toggle { display: flex; flex-direction: column; justify-content: center; gap: 5px; width: 40px; height: 40px; padding: 8px; margin-right: -8px; background: none; border: 0; cursor: pointer; position: relative; z-index: 1; }
+  .nav-toggle span { display: block; height: 1.5px; background: var(--ink); transition: transform .25s, opacity .2s; }
+  .nav.open .nav-toggle span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
+  .nav.open .nav-toggle span:nth-child(2) { opacity: 0; }
+  .nav.open .nav-toggle span:nth-child(3) { transform: translateY(-6.5px) rotate(-45deg); }
+  .nav.open { background: var(--bg); }
+  .nav.open nav { display: flex; position: fixed; inset: 0; z-index: 0; flex-direction: column; justify-content: center; align-items: center; gap: 26px; background: var(--bg); font-size: 1rem; letter-spacing: .22em; }
+  .nav.open nav a { color: var(--ink); }
+  .nav.open nav a[hidden] { display: none; }
+  .nav-mark { position: relative; z-index: 1; }
+  body.menu-open { overflow: hidden; }
+}
 
 /* Hero */
 .hero { position: relative; max-width: none; padding: 0; height: 100vh; height: 100svh; min-height: 520px; overflow: hidden; background: #000; }
@@ -83,6 +98,13 @@ section { padding: clamp(72px, 12vw, 140px) 16px; max-width: 1180px; margin: 0 a
 .videos button:hover::before, .videos button:focus-visible::before, .videos button.active::before { filter: none; }
 .videos button:focus-visible { outline: 1px solid var(--accent); outline-offset: 4px; }
 .videos button.active { color: var(--accent); }
+@media (max-width: 700px) {
+  /* Phones: videos become a swipe row like the gallery, one at a time. */
+  .videos { position: relative; display: flex; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 32px -16px 0; padding: 0 16px;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .videos::-webkit-scrollbar { display: none; }
+  .videos li { flex: 0 0 84%; scroll-snap-align: center; }
+}
 .more { margin-top: 48px; }
 .more a, .social a { text-decoration: none; color: var(--accent); letter-spacing: .12em; text-transform: uppercase; font-size: .8rem; }
 

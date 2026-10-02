@@ -71,13 +71,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
 <header class="nav">
   <a href="#top" class="nav-mark">Lakshmi Parthasarathy Athreya</a>
-  <nav>
+  <nav id="site-nav">
     <a href="#about">About</a>
     <a href="#works">Works</a>
     <a href="#upcoming" id="nav-upcoming" hidden>Upcoming</a>
@@ -88,6 +88,7 @@
     <a href="past-events">Past events</a>
     <a href="#contact">Contact</a>
   </nav>
+  <button class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><span></span><span></span><span></span></button>
 </header>
 
 <main id="top">
@@ -211,6 +212,7 @@
       <li><button data-video="XJOse-u1bQc">Prabodhan — trailer</button></li>
 <!-- /cms:videos -->
     </ul>
+    <p class="gallery-count" aria-hidden="true"></p>
     <p class="center more"><a href="https://www.youtube.com/user/lpathreya/videos" target="_blank" rel="noopener">More on YouTube &rarr;</a></p>
   </section>
 
@@ -305,6 +307,6 @@
 
 <div class="lightbox" id="lightbox" hidden><img alt=""><button aria-label="Close">&times;</button></div>
 
-<script src="site.js?v=10"></script>
+<script src="site.js?v=11"></script>
 </body>
 </html>

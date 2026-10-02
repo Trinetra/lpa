@@ -119,7 +119,8 @@ def render_archive(entries: list) -> str:
         if e.get("videos"):
             lines += ['    <div class="player" hidden>', '      <div class="player-frame"></div>',
                       '      <p class="player-title"></p>', '    </div>', '    <ul class="videos">',
-                      render_videos(e["videos"]), '    </ul>']
+                      render_videos(e["videos"]), '    </ul>',
+                      '    <p class="gallery-count" aria-hidden="true"></p>']
         lines.append('  </article>')
         out.append("\n".join(lines))
     if not out:

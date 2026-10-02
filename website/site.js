@@ -1,5 +1,15 @@
 // Nav goes solid once you scroll past the top of the hero.
 const nav = document.querySelector(".nav");
+// ☰ menu on phones: opens the section links full-screen; picking one closes it.
+const navToggle = nav.querySelector(".nav-toggle");
+const setMenu = (open) => {
+  nav.classList.toggle("open", open);
+  document.body.classList.toggle("menu-open", open);
+  navToggle.setAttribute("aria-expanded", String(open));
+};
+navToggle.addEventListener("click", () => setMenu(!nav.classList.contains("open")));
+nav.querySelectorAll("nav a").forEach((a) => a.addEventListener("click", () => setMenu(false)));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMenu(false); });
 const onScroll = () => nav.classList.toggle("solid", window.scrollY > 40 || document.body.classList.contains("subpage"));
 window.addEventListener("scroll", onScroll, { passive: true });
 onScroll();
@@ -80,16 +90,16 @@ form?.addEventListener("submit", async (e) => {
   btn.disabled = false;
 });
 
-// Phone slider: "3 / 9" counter (the .gallery-count right after each
-// .gallery) that follows the photo nearest the centre.
-document.querySelectorAll(".gallery").forEach((gallery) => {
-  const count = gallery.nextElementSibling;
+// Phone sliders (photo galleries and video rows): a "3 / 9" counter in the
+// .gallery-count right after each, following the item nearest the centre.
+document.querySelectorAll(".gallery, .videos").forEach((row) => {
+  const count = row.nextElementSibling;
   if (!count || !count.classList.contains("gallery-count")) return;
-  const slides = [...gallery.querySelectorAll("a")];
+  const slides = [...row.children];
   const updateCount = () => {
     // Before any swipe (photos may not have loaded or have widths yet) it's simply the first.
-    if (gallery.scrollLeft < 8) { count.textContent = `1 / ${slides.length}  ·  swipe`; return; }
-    const mid = gallery.scrollLeft + gallery.clientWidth / 2;
+    if (row.scrollLeft < 8) { count.textContent = `1 / ${slides.length}  ·  swipe`; return; }
+    const mid = row.scrollLeft + row.clientWidth / 2;
     let i = 0, best = Infinity;
     slides.forEach((s, k) => {
       const d = Math.abs(s.offsetLeft + s.offsetWidth / 2 - mid);
@@ -97,7 +107,7 @@ document.querySelectorAll(".gallery").forEach((gallery) => {
     });
     count.textContent = `${i + 1} / ${slides.length}  ·  swipe`;
   };
-  gallery.addEventListener("scroll", updateCount, { passive: true });
+  row.addEventListener("scroll", updateCount, { passive: true });
   updateCount();
 });
 
