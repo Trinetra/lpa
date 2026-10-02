@@ -122,3 +122,10 @@ fetch("/api/schedule")
     document.getElementById("nav-upcoming").hidden = false;
   })
   .catch(() => {});
+
+// "Over forty years": 40 in 2026, one more each year after, spelled out.
+const yearsInForm = 40 + (new Date().getFullYear() - 2026);
+const ONES = ["", "-one", "-two", "-three", "-four", "-five", "-six", "-seven", "-eight", "-nine"];
+const TENS = { 4: "forty", 5: "fifty", 6: "sixty", 7: "seventy" };
+const yearsWord = TENS[Math.floor(yearsInForm / 10)] ? TENS[Math.floor(yearsInForm / 10)] + ONES[yearsInForm % 10] : String(yearsInForm);
+document.querySelectorAll("[data-years]").forEach((el) => { el.textContent = yearsWord; });

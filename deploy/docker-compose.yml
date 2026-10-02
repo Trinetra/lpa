@@ -52,6 +52,7 @@ services:
       # Storage: 'local' uses the mounted volume below.
       STORAGE_BACKEND: "local"
       LOCAL_UPLOAD_DIR: "/data/uploads"
+      WEBSITE_DIR: "/website"
       # Email: direct Resend when RESEND_API_KEY is set.
       RESEND_API_KEY: "${RESEND_API_KEY:-}"
       RESEND_FROM: "${RESEND_FROM:-onboarding@resend.dev}"
@@ -86,6 +87,10 @@ services:
       VAPID_SUBJECT: "${VAPID_SUBJECT:-}"
     volumes:
       - ./data/uploads:/data/uploads
+      # Public website (www.pravaahacfm.com, served by host nginx). The app's
+      # Website page re-renders sections of its index.html and adds photos
+      # to website/media/ — see backend/services/website.py.
+      - ../website:/website
     ports:
       # Loopback-only — nginx on the host reverse-proxies to this.
       - "127.0.0.1:8001:8001"

@@ -26,6 +26,7 @@ import {
   Mail,
   CalendarDays,
   MessageSquare,
+  Globe,
 } from "lucide-react";
 
 export default function AppLayout() {
@@ -90,6 +91,7 @@ export default function AppLayout() {
     { to: "/charts", label: "Charts", icon: BarChart3, tid: "nav-charts" },
     { to: "/requests", label: "Requests", icon: Inbox, tid: "nav-requests" },
     { to: "/messages", label: "Website messages", icon: MessageSquare, tid: "nav-messages" },
+    { to: "/website", label: "Website", icon: Globe, tid: "nav-website" },
     { to: "/settings", label: "Settings", icon: Settings, tid: "nav-settings" },
   ];
 

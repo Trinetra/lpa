@@ -41,6 +41,7 @@ from services import fx as fx_service
 from services import push as push_service
 from services import geocoding as geocoding_service
 from services import transcription as transcription_service
+from services import website as website_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
@@ -314,7 +315,7 @@ RESERVED_SLUGS = {
     "login", "reset-password", "invoice", "tour", "dashboard", "students",
     "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
     "portal", "requests", "event", "events", "crm", "announcements", "calendar",
-    "outreach", "privacy", "messages",
+    "outreach", "privacy", "messages", "website",
 }
 
 # Public tour/event links live on the bare root domain, not the app's own
@@ -4417,6 +4418,100 @@ async def public_schedule():
 
     items.sort(key=lambda i: (i["date"] or "", i["time"] or ""))
     return items
+
+# --------------- Website content (Website page in the app) -----------------
+# Productions, videos and gallery for www.pravaahacfm.com. Stored as one
+# website_content doc per owner; every save re-renders those sections of the
+# static site (see services/website.py).
+class WebsiteProduction(BaseModel):
+    year: str = Field(max_length=20)
+    title: str = Field(min_length=1, max_length=200)
+    subtitle: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    video: Optional[str] = None  # YouTube URL or id
+    video_label: Optional[str] = Field(default=None, max_length=40)
+
+class WebsiteVideo(BaseModel):
+    video: str  # YouTube URL or id
+    title: str = Field(min_length=1, max_length=200)
+
+class WebsitePhoto(BaseModel):
+    src: str
+    src_sm: str
+    alt: Optional[str] = Field(default=None, max_length=300)
+
+async def _website_content(owner_id: str) -> dict:
+    doc = await db.website_content.find_one({"owner_id": owner_id})
+    return doc or {"owner_id": owner_id, "productions": [], "videos": [], "gallery": []}
+
+async def _save_website_content(owner_id: str, field: str, value: list) -> dict:
+    await db.website_content.update_one({"owner_id": owner_id}, {"$set": {field: value}}, upsert=True)
+    content = await _website_content(owner_id)
+    try:
+        website_service.write_sections(content)
+    except Exception as e:
+        logger.error(f"Website re-render failed: {e}")
+        raise HTTPException(status_code=500, detail="Saved, but the website couldn't be updated — please tell Prashanth")
+    return _ser_website_content(content)
+
+def _ser_website_content(doc: dict) -> dict:
+    return {k: doc.get(k, []) for k in ("productions", "videos", "gallery")}
+
+def _video_id_or_400(value: str) -> str:
+    vid = website_service.youtube_id(value)
+    if not vid:
+        raise HTTPException(status_code=400, detail=f'"{value}" doesn\'t look like a YouTube link')
+    return vid
+
+@api_router.get("/website/content")
+async def get_website_content(user: dict = Depends(get_current_user)):
+    return _ser_website_content(await _website_content(user["_id"]))
+
+@api_router.put("/website/productions")
+async def put_website_productions(body: List[WebsiteProduction], user: dict = Depends(get_current_user)):
+    items = []
+    for p in body:
+        d = p.model_dump()
+        video = d.pop("video", None)
+        d["video_id"] = _video_id_or_400(video) if video and video.strip() else None
+        items.append({k: (v.strip() if isinstance(v, str) else v) or None for k, v in d.items()})
+    return await _save_website_content(user["_id"], "productions", items)
+
+@api_router.put("/website/videos")
+async def put_website_videos(body: List[WebsiteVideo], user: dict = Depends(get_current_user)):
+    items = [{"video_id": _video_id_or_400(v.video), "title": v.title.strip()} for v in body]
+    return await _save_website_content(user["_id"], "videos", items)
+
+@api_router.post("/website/gallery")
+async def upload_website_photo(file: UploadFile = File(...), alt: str = Form(""), user: dict = Depends(get_current_user)):
+    data = await file.read()
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="That photo is over 25 MB")
+    try:
+        paths = website_service.save_photo(data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    content = await _website_content(user["_id"])
+    gallery = content.get("gallery", []) + [{**paths, "alt": alt.strip()[:300] or None}]
+    return await _save_website_content(user["_id"], "gallery", gallery)
+
+@api_router.put("/website/gallery")
+async def put_website_gallery(body: List[WebsitePhoto], user: dict = Depends(get_current_user)):
+    """Reorder, edit descriptions, or remove photos. Only photos already in the
+    gallery are accepted; uploaded files of removed photos are deleted."""
+    current = (await _website_content(user["_id"])).get("gallery", [])
+    known = {p["src"]: p for p in current}
+    items = []
+    for p in body:
+        if p.src not in known:
+            raise HTTPException(status_code=400, detail="Unknown photo — please reload the page")
+        items.append({"src": p.src, "src_sm": known[p.src]["src_sm"], "alt": (p.alt or "").strip() or None})
+    kept = {p["src"] for p in items}
+    result = await _save_website_content(user["_id"], "gallery", items)
+    for p in current:
+        if p["src"] not in kept:
+            website_service.delete_photo_files(p)
+    return result
 
 # --------------- Events (workshops) -----------------
 async def _get_owned_event(event_id: str, owner_id: str) -> dict:

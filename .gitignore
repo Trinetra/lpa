@@ -98,3 +98,5 @@ credentials.json
 
 # VPS-local runtime data (uploaded files bind-mount, never part of the repo)
 /deploy/data/
+website/media/
+website/*.tmp

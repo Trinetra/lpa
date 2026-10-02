@@ -33,6 +33,7 @@ import PublicSlugResolverPage from "@/pages/PublicSlugResolverPage";
 import PrivacyPolicyPage from "@/pages/PrivacyPolicyPage";
 import PortalActivityPage from "@/pages/PortalActivityPage";
 import MessagesPage from "@/pages/MessagesPage";
+import WebsitePage from "@/pages/WebsitePage";
 import StudentLoginPage from "@/pages/student/StudentLoginPage";
 import StudentAcceptInvitePage from "@/pages/student/StudentAcceptInvitePage";
 import StudentSetPasswordPage from "@/pages/student/StudentSetPasswordPage";
@@ -182,6 +183,7 @@ function AppRoutes() {
         <Route path="/charts" element={<ChartsPage />} />
         <Route path="/requests" element={<PortalActivityPage />} />
         <Route path="/messages" element={<MessagesPage />} />
+        <Route path="/website" element={<WebsitePage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       {/* Custom public links (e.g. pravaahacfm.com/tour2026 or /workshop2026)
