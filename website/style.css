@@ -235,3 +235,4 @@ footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 32
 .insta-card .instagram-media { margin: 0 !important; min-width: 0 !important; width: 100% !important; }
 .upcoming .insta-panel { grid-column: 1 / -1; max-width: 480px; margin-top: 16px; }
 footer .made-with { display: block; margin-top: 10px; font-size: .68rem; letter-spacing: .1em; opacity: .7; }
+footer .made-with .heart { color: var(--muted); }
