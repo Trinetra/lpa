@@ -4461,6 +4461,7 @@ class WebsitePhoto(BaseModel):
     src: str
     src_sm: str
     alt: Optional[str] = Field(default=None, max_length=300)
+    hidden: bool = False  # kept in the app, left off the website
 
 async def _website_content(owner_id: str) -> dict:
     doc = await db.website_content.find_one({"owner_id": owner_id})
@@ -4527,7 +4528,7 @@ async def put_website_gallery(body: List[WebsitePhoto], user: dict = Depends(get
     for p in body:
         if p.src not in known:
             raise HTTPException(status_code=400, detail="Unknown photo — please reload the page")
-        items.append({"src": p.src, "src_sm": known[p.src]["src_sm"], "alt": (p.alt or "").strip() or None})
+        items.append({"src": p.src, "src_sm": known[p.src]["src_sm"], "alt": (p.alt or "").strip() or None, "hidden": p.hidden})
     kept = {p["src"] for p in items}
     result = await _save_website_content(user["_id"], "gallery", items)
     for p in current:

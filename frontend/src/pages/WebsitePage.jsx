@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
-import { ArrowUp, ArrowDown, Trash2, Plus, ExternalLink, Upload } from "lucide-react";
+import { ArrowUp, ArrowDown, Trash2, Plus, ExternalLink, Upload, Eye, EyeOff } from "lucide-react";
 
 // Edits the Works, Watch and Gallery sections of www.pravaahacfm.com. Each tab
 // edits a local copy and saves the whole list; the backend re-renders that
@@ -212,15 +212,23 @@ function GalleryTab({ initial, onSaved }) {
         <SaveBar dirty={dirty} saving={saving} onSave={() => save(list)} testid="save-gallery" />
       </div>
       <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-        New photos are added at the end and go live straight away. Use the arrows to reorder, then save.
+        New photos are added at the end and go live straight away. Reorder with the arrows, or Hide a photo to take it off the website without deleting it — then Save.
       </p>
       <div className="surface">
         {list.map((p, i) => (
           <div key={p.src} className="px-4 sm:px-6 py-4 flex gap-3 items-start" style={{ borderTop: i ? "1px solid var(--border)" : "none" }} data-testid={`photo-${i}`}>
-            <img src={`${SITE}/${p.src_sm}`} alt="" className="shrink-0 rounded" style={{ width: 72, height: 90, objectFit: "cover" }} />
+            <img src={`${SITE}/${p.src_sm}`} alt="" className="shrink-0 rounded" style={{ width: 72, height: 90, objectFit: "cover", opacity: p.hidden ? 0.35 : 1 }} />
             <div className="flex-1 min-w-0 space-y-2">
-              <RowControls i={i} count={list.length} testid="photo" onMove={(a, d) => update(move(list, a, d))}
-                onRemove={(a) => window.confirm("Remove this photo from the website?") && update(list.filter((_, j) => j !== a))} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <RowControls i={i} count={list.length} testid="photo" onMove={(a, d) => update(move(list, a, d))}
+                  onRemove={(a) => window.confirm("Delete this photo? (Use Hide instead to keep it for later.)") && update(list.filter((_, j) => j !== a))} />
+                <button type="button" className="btn-ghost text-xs flex items-center gap-1 px-3 py-2" data-testid={`photo-hide-${i}`}
+                  onClick={() => update(list.map((x, j) => (j === i ? { ...x, hidden: !x.hidden } : x)))}
+                  title={p.hidden ? "Show on the website" : "Hide from the website (keeps the photo)"}>
+                  {p.hidden ? <><Eye size={14} /> Show</> : <><EyeOff size={14} /> Hide</>}
+                </button>
+                {p.hidden && <span className="uppercase-label" style={{ color: "var(--text-muted)" }}>Hidden from website</span>}
+              </div>
               <Field label="Hidden description" hint={PHOTO_DESC_HINT}>
                 <input className={inputCls} value={p.alt || ""} placeholder="e.g. Lakshmi in a red and black costume, arms raised"
                   onChange={(e) => update(list.map((x, j) => (j === i ? { ...x, alt: e.target.value } : x)))} />

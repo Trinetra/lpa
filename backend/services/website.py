@@ -74,7 +74,7 @@ def render_videos(videos: list) -> str:
 def render_gallery(photos: list) -> str:
     return "\n".join(
         f'      <a href="{_e(p["src"])}"><img src="{_e(p["src_sm"])}" alt="{_e(p.get("alt"))}" loading="lazy"></a>'
-        for p in photos
+        for p in photos if not p.get("hidden")
     )
 
 
