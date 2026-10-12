@@ -157,11 +157,21 @@ function upcomingRow(it, inTour) {
   if (it.image) {
     const img = el("img", "poster"); img.src = it.image; img.alt = `${it.title} poster`; img.loading = "lazy";
     body.className = "with-poster"; body.append(img, text);
+  } else if (it.posters && it.posters.length) {
+    // One-off performance posters: thumbnails, each opening the full-size image.
+    const wrap = el("div", "posters");
+    for (const p of it.posters) {
+      const a = link("", "", p.src);
+      const img = el("img", "poster"); img.src = p.src_sm; img.alt = `${it.title} poster`; img.loading = "lazy";
+      a.append(img); wrap.append(a);
+    }
+    body.className = it.posters.length > 1 ? "with-poster many" : "with-poster"; body.append(wrap, text);
   } else body.append(text);
   li.append(body);
   const actions = el("div", "actions");
   if (it.link) actions.append(link("register", "Details & register", it.link));
-  else if (it.map_url) actions.append(link("register", "Map", it.map_url));
+  if (it.booking_url) actions.append(link("register", "Book tickets", it.booking_url));
+  if (!it.link && it.map_url) actions.append(link("register", "Map", it.map_url));
   if (it.instagram) {
     const ig = link("register", "Instagram", it.instagram);
     ig.setAttribute("aria-expanded", "false");

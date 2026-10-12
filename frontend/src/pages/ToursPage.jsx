@@ -1,8 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
-import { Plus, X, MapPin, Trash2, Globe } from "lucide-react";
+import { Plus, X, MapPin, Trash2, Globe, Upload } from "lucide-react";
 import { toast } from "sonner";
+
+// Posters live in the website's media/ folder, served by www.
+const SITE = "https://www.pravaahacfm.com";
+const MAX_POSTERS = 3;
 
 const fmtDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "");
 
@@ -81,7 +85,7 @@ function TourForm({ onClose, onSaved }) {
 // One-off performance: a single show, not part of a multi-stop tour. Shown
 // in Upcoming on www.pravaahacfm.com when "Show on website" is on, and
 // suggested for Past events (Website page) once its date has passed.
-function PerformanceForm({ perf, onClose, onSaved }) {
+function PerformanceForm({ perf, onClose, onSaved, onPostersChanged }) {
   const isNew = !perf.id;
   const [title, setTitle] = useState(perf.title || "");
   const [city, setCity] = useState(perf.city || "");
@@ -90,18 +94,69 @@ function PerformanceForm({ perf, onClose, onSaved }) {
   const [time, setTime] = useState(perf.time || "");
   const [notes, setNotes] = useState(perf.notes || "");
   const [instagram, setInstagram] = useState(perf.instagram || "");
+  const [bookingUrl, setBookingUrl] = useState(perf.booking_url || "");
+  const [posters, setPosters] = useState(perf.posters || []);
+  const [pendingFiles, setPendingFiles] = useState([]); // new performance: uploaded after it's created
+  const [uploading, setUploading] = useState(0);
+  const fileRef = useRef(null);
   const [showOnWebsite, setShowOnWebsite] = useState(!!perf.show_on_website);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  const uploadPoster = async (perfId, file) => {
+    const form = new FormData();
+    form.append("file", file);
+    const r = await api.post(`/performances/${perfId}/posters`, form, { headers: { "Content-Type": "multipart/form-data" } });
+    return r.data;
+  };
+
+  const addPosters = async (files) => {
+    if (fileRef.current) fileRef.current.value = "";
+    const room = MAX_POSTERS - posters.length - pendingFiles.length;
+    if (files.length > room) toast.error(`Up to ${MAX_POSTERS} posters — ${room > 0 ? `adding the first ${room}` : "remove one first"}`);
+    files = files.slice(0, Math.max(room, 0));
+    if (isNew) { setPendingFiles((f) => [...f, ...files]); return; }
+    for (const file of files) {
+      setUploading((n) => n + 1);
+      try {
+        const data = await uploadPoster(perf.id, file);
+        setPosters(data.posters);
+        onPostersChanged();
+      } catch (e2) {
+        toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || `Couldn't upload ${file.name}`);
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    }
+  };
+
+  const removePoster = async (src) => {
+    if (!window.confirm("Remove this poster?")) return;
+    try {
+      const r = await api.delete(`/performances/${perf.id}/posters`, { params: { src } });
+      setPosters(r.data.posters);
+      onPostersChanged();
+    } catch (e2) {
+      toast.error(formatApiErrorDetail(e2?.response?.data?.detail) || "Couldn't remove that poster");
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
       const body = { title, city, venue: venue || null, date, time: time || null, notes: notes || null,
-        instagram: instagram.trim(), show_on_website: showOnWebsite };
-      if (isNew) await api.post("/performances", body);
-      else await api.patch(`/performances/${perf.id}`, body);
+        instagram: instagram.trim(), booking_url: bookingUrl.trim(), show_on_website: showOnWebsite };
+      if (isNew) {
+        const r = await api.post("/performances", body);
+        for (const file of pendingFiles) {
+          try {
+            await uploadPoster(r.data.id, file);
+          } catch (e3) {
+            toast.error(formatApiErrorDetail(e3?.response?.data?.detail) || `Couldn't upload ${file.name}`);
+          }
+        }
+      } else await api.patch(`/performances/${perf.id}`, body);
       toast.success(isNew ? "Performance added" : "Performance updated");
       onSaved();
     } catch (e2) {
@@ -166,6 +221,42 @@ function PerformanceForm({ perf, onClose, onSaved }) {
           <input value={instagram} onChange={(e) => setInstagram(e.target.value)} data-testid="performance-instagram-input"
             placeholder="https://www.instagram.com/p/…" className={input} />
         </label>
+        <label className="block mb-4">
+          <span className="uppercase-label block mb-1">Booking link (optional)</span>
+          <input value={bookingUrl} onChange={(e) => setBookingUrl(e.target.value)} data-testid="performance-booking-input"
+            placeholder="https://in.bookmyshow.com/…" className={input} />
+        </label>
+        <div className="mb-4">
+          <span className="uppercase-label block mb-2">Posters (optional, up to {MAX_POSTERS})</span>
+          <div className="flex flex-wrap gap-2 items-start">
+            {posters.map((p) => (
+              <div key={p.src} className="relative">
+                <img src={`${SITE}/${p.src_sm}`} alt="" className="rounded" style={{ width: 64, height: 80, objectFit: "cover" }} />
+                <button type="button" onClick={() => removePoster(p.src)} aria-label="Remove poster"
+                  className="absolute -top-2 -right-2 rounded-full p-0.5" style={{ background: "var(--error)", color: "#fff" }}>
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+            {pendingFiles.map((f, i) => (
+              <div key={i} className="relative rounded border border-white/10 text-xs p-1 flex items-center justify-center text-center break-all"
+                style={{ width: 64, height: 80, color: "var(--text-muted)" }}>
+                {f.name}
+                <button type="button" onClick={() => setPendingFiles((l) => l.filter((_, j) => j !== i))} aria-label="Remove poster"
+                  className="absolute -top-2 -right-2 rounded-full p-0.5" style={{ background: "var(--error)", color: "#fff" }}>
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+            {posters.length + pendingFiles.length < MAX_POSTERS && (
+              <label className="btn-ghost text-sm flex items-center gap-1 cursor-pointer" data-testid="performance-poster-upload">
+                <Upload size={14} /> {uploading ? `Uploading ${uploading}…` : "Add poster"}
+                <input ref={fileRef} type="file" accept="image/*" multiple hidden disabled={!!uploading}
+                  onChange={(e) => e.target.files.length && addPosters([...e.target.files])} />
+              </label>
+            )}
+          </div>
+        </div>
         <label className="flex items-center gap-2 text-sm mb-6 cursor-pointer">
           <input type="checkbox" checked={showOnWebsite} onChange={(e) => setShowOnWebsite(e.target.checked)}
             data-testid="performance-website-toggle" />
@@ -251,7 +342,8 @@ function PerformancesSection() {
         </>
       )}
       {editing && (
-        <PerformanceForm perf={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />
+        <PerformanceForm perf={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }}
+          onPostersChanged={load} />
       )}
     </section>
   );

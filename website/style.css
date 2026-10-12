@@ -225,6 +225,8 @@ footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 32
 /* Upcoming: workshop posters and action links */
 .upcoming .with-poster { display: flex; gap: 14px; align-items: flex-start; }
 .upcoming .poster { width: 64px; height: 80px; object-fit: cover; flex: 0 0 auto; }
+.upcoming .posters { display: flex; gap: 6px; flex: 0 0 auto; }
+@media (max-width: 540px) { .upcoming .with-poster.many { flex-direction: column; gap: 10px; } }
 .upcoming .actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 @media (max-width: 540px) { .upcoming .actions { flex-direction: row; gap: 18px; align-items: baseline; } }
 

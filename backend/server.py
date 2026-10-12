@@ -350,6 +350,7 @@ class PerformanceCreate(BaseModel):
     time: Optional[str] = None  # "HH:MM", 24h
     notes: Optional[str] = None  # private, never on the website
     instagram: Optional[str] = None
+    booking_url: Optional[str] = None  # tickets/booking page, shown as a button on the website
     show_on_website: bool = False
 
 class PerformanceUpdate(BaseModel):
@@ -360,7 +361,10 @@ class PerformanceUpdate(BaseModel):
     time: Optional[str] = None
     notes: Optional[str] = None
     instagram: Optional[str] = None  # "" clears it
+    booking_url: Optional[str] = None  # "" clears it
     show_on_website: Optional[bool] = None
+
+MAX_PERFORMANCE_POSTERS = 3
 
 class TourExpenseCreate(BaseModel):
     category: str
@@ -910,9 +914,10 @@ def ser_tour_stop(doc):
 def ser_performance(doc):
     return {
         "id": str(doc["_id"]),
-        **{k: doc.get(k) for k in ("title", "city", "venue", "date", "time", "notes", "instagram",
+        **{k: doc.get(k) for k in ("title", "city", "venue", "date", "time", "notes", "instagram", "booking_url",
                                     "latitude", "longitude", "formatted_address", "created_at")},
         "show_on_website": doc.get("show_on_website", False),
+        "posters": doc.get("posters", []),
     }
 
 def ser_tour_expense(doc):
@@ -3929,6 +3934,13 @@ def _clean_performance_fields(fields: dict) -> dict:
         fields["date"] = _valid_iso_date(fields["date"], "Date")
     if "instagram" in fields:
         fields["instagram"] = _instagram_or_400(fields["instagram"]) if (fields["instagram"] or "").strip() else None
+    if "booking_url" in fields:
+        url = (fields["booking_url"] or "").strip()
+        if url and not re.match(r"^https?://", url, re.I):
+            url = "https://" + url  # pasted as "bookmyshow.com/..."
+        if url and not re.match(r"^https?://[^\s/]+\.[^\s/]+\S*$", url, re.I):
+            raise HTTPException(status_code=400, detail=f'"{fields["booking_url"]}" doesn\'t look like a web link')
+        fields["booking_url"] = url or None
     return fields
 
 @api_router.get("/performances")
@@ -3939,6 +3951,7 @@ async def list_performances(user: dict = Depends(get_current_user)):
 @api_router.post("/performances")
 async def create_performance(body: PerformanceCreate, user: dict = Depends(get_current_user)):
     doc = _clean_performance_fields(body.model_dump())
+    doc["posters"] = []
     doc["owner_id"] = user["_id"]
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     # Best-effort, same as tour stops — saves even if the venue doesn't geocode.
@@ -3968,7 +3981,36 @@ async def update_performance(perf_id: str, body: PerformanceUpdate, user: dict =
 async def delete_performance(perf_id: str, user: dict = Depends(get_current_user)):
     existing = await _get_owned_performance(perf_id, user["_id"])
     await db.performances.delete_one({"_id": existing["_id"]})
+    for p in existing.get("posters", []):
+        website_service.delete_photo_files(p)
     return {"ok": True}
+
+# Posters are resized into the website's media/ folder (same as gallery and
+# past-events photos) so www serves them directly.
+@api_router.post("/performances/{perf_id}/posters")
+async def upload_performance_poster(perf_id: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    existing = await _get_owned_performance(perf_id, user["_id"])
+    if len(existing.get("posters", [])) >= MAX_PERFORMANCE_POSTERS:
+        raise HTTPException(status_code=400, detail=f"Up to {MAX_PERFORMANCE_POSTERS} posters per performance")
+    data = await file.read()
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="That photo is over 25 MB")
+    try:
+        paths = website_service.save_photo(data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.performances.update_one({"_id": existing["_id"]}, {"$push": {"posters": paths}})
+    return ser_performance(await db.performances.find_one({"_id": existing["_id"]}))
+
+@api_router.delete("/performances/{perf_id}/posters")
+async def delete_performance_poster(perf_id: str, src: str, user: dict = Depends(get_current_user)):
+    existing = await _get_owned_performance(perf_id, user["_id"])
+    poster = next((p for p in existing.get("posters", []) if p["src"] == src), None)
+    if not poster:
+        raise HTTPException(status_code=404, detail="Poster not found")
+    await db.performances.update_one({"_id": existing["_id"]}, {"$pull": {"posters": {"src": src}}})
+    website_service.delete_photo_files(poster)
+    return ser_performance(await db.performances.find_one({"_id": existing["_id"]}))
 
 # --------------- Tour expenses -----------------
 @api_router.get("/tours/{tour_id}/expenses")
@@ -4527,6 +4569,9 @@ async def public_schedule():
             "link": None,
             "map_url": f"https://www.google.com/maps/search/?api=1&query={quote(map_q)}" if map_q else None,
             "instagram": pf.get("instagram"),
+            "booking_url": pf.get("booking_url"),
+            # Relative to www, which serves media/ itself.
+            "posters": [{"src": p["src"], "src_sm": p["src_sm"]} for p in pf.get("posters", [])],
             "tour_id": None,
         })
 
