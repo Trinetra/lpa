@@ -44,7 +44,7 @@ BACKUP_FOLDER_NAME = "Lakshmi Studio Ledger — Backups"
 _RECORD_COLLECTIONS = [
     "students", "classes", "payments", "invoices",
     "schedule_blocks",
-    "tours", "tour_stops", "tour_expenses", "tour_invoices",
+    "tours", "tour_stops", "tour_expenses", "tour_invoices", "performances",
     "tour_contacts", "tour_todos", "tour_checkins",
 ]
 

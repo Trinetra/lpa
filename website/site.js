@@ -143,9 +143,13 @@ function upcomingRow(it, inTour) {
   if (it.type === "workshop") {
     what = `Workshop · ${it.title}`;
     where = it.time;
-  } else {
-    what = it.venue || it.city || (inTour ? "Venue to be announced" : it.title);
+  } else if (inTour) {
+    what = it.venue || it.city || "Venue to be announced";
     where = [it.venue ? it.city : null, it.time].filter(Boolean).join(" · ");
+  } else {
+    // One-off performance: its own title, then where and when.
+    what = it.title;
+    where = [it.venue, it.city, it.time].filter(Boolean).join(" · ");
   }
   const text = el("div");
   text.append(el("div", "what", what));

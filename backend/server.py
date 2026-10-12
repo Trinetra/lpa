@@ -339,6 +339,29 @@ class TourStopUpdate(BaseModel):
     notes: Optional[str] = None
     instagram: Optional[str] = None  # "" clears it
 
+# One-off performances: a single show that isn't part of a multi-stop tour.
+# Published (show_on_website) like a tour, and suggested for Past events
+# once the date has passed, like a tour stop.
+class PerformanceCreate(BaseModel):
+    title: str
+    city: str
+    venue: Optional[str] = None
+    date: str  # ISO date
+    time: Optional[str] = None  # "HH:MM", 24h
+    notes: Optional[str] = None  # private, never on the website
+    instagram: Optional[str] = None
+    show_on_website: bool = False
+
+class PerformanceUpdate(BaseModel):
+    title: Optional[str] = None
+    city: Optional[str] = None
+    venue: Optional[str] = None
+    date: Optional[str] = None
+    time: Optional[str] = None
+    notes: Optional[str] = None
+    instagram: Optional[str] = None  # "" clears it
+    show_on_website: Optional[bool] = None
+
 class TourExpenseCreate(BaseModel):
     category: str
     amount: float
@@ -882,6 +905,14 @@ def ser_tour_stop(doc):
         "longitude": doc.get("longitude"),
         "formatted_address": doc.get("formatted_address"),
         "created_at": doc.get("created_at"),
+    }
+
+def ser_performance(doc):
+    return {
+        "id": str(doc["_id"]),
+        **{k: doc.get(k) for k in ("title", "city", "venue", "date", "time", "notes", "instagram",
+                                    "latitude", "longitude", "formatted_address", "created_at")},
+        "show_on_website": doc.get("show_on_website", False),
     }
 
 def ser_tour_expense(doc):
@@ -3877,6 +3908,68 @@ async def delete_tour_stop(tour_id: str, stop_id: str, user: dict = Depends(get_
         raise HTTPException(status_code=404, detail="Stop not found")
     return {"ok": True}
 
+# --------------- One-off performances -----------------
+async def _get_owned_performance(perf_id: str, owner_id: str) -> dict:
+    try:
+        doc = await db.performances.find_one({"_id": ObjectId(perf_id), "owner_id": owner_id})
+    except Exception:
+        doc = None
+    if not doc:
+        raise HTTPException(status_code=404, detail="Performance not found")
+    return doc
+
+def _clean_performance_fields(fields: dict) -> dict:
+    for k in ("title", "city", "date"):
+        if k in fields and not (fields[k] or "").strip():
+            raise HTTPException(status_code=400, detail=f"{k.title()} is required")
+    for k in ("title", "city", "venue", "time", "notes"):
+        if k in fields:
+            fields[k] = (fields[k] or "").strip() or None
+    if "date" in fields:
+        fields["date"] = _valid_iso_date(fields["date"], "Date")
+    if "instagram" in fields:
+        fields["instagram"] = _instagram_or_400(fields["instagram"]) if (fields["instagram"] or "").strip() else None
+    return fields
+
+@api_router.get("/performances")
+async def list_performances(user: dict = Depends(get_current_user)):
+    cur = db.performances.find({"owner_id": user["_id"]}).sort("date", -1)
+    return [ser_performance(d) async for d in cur]
+
+@api_router.post("/performances")
+async def create_performance(body: PerformanceCreate, user: dict = Depends(get_current_user)):
+    doc = _clean_performance_fields(body.model_dump())
+    doc["owner_id"] = user["_id"]
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    # Best-effort, same as tour stops — saves even if the venue doesn't geocode.
+    geo = await geocoding_service.geocode_venue(doc.get("venue"), doc["city"])
+    if geo:
+        doc.update(geo)
+    res = await db.performances.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_performance(doc)
+
+@api_router.patch("/performances/{perf_id}")
+async def update_performance(perf_id: str, body: PerformanceUpdate, user: dict = Depends(get_current_user)):
+    existing = await _get_owned_performance(perf_id, user["_id"])
+    updates = _clean_performance_fields(body.model_dump(exclude_unset=True))
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    if ("venue" in updates and updates["venue"] != existing.get("venue")) or \
+       ("city" in updates and updates["city"] != existing.get("city")):
+        geo = await geocoding_service.geocode_venue(updates.get("venue", existing.get("venue")),
+                                                    updates.get("city", existing.get("city")))
+        # Clear a stale pin rather than leave it pointing at the old venue.
+        updates.update(geo or {"latitude": None, "longitude": None, "formatted_address": None})
+    await db.performances.update_one({"_id": existing["_id"]}, {"$set": updates})
+    return ser_performance(await db.performances.find_one({"_id": existing["_id"]}))
+
+@api_router.delete("/performances/{perf_id}")
+async def delete_performance(perf_id: str, user: dict = Depends(get_current_user)):
+    existing = await _get_owned_performance(perf_id, user["_id"])
+    await db.performances.delete_one({"_id": existing["_id"]})
+    return {"ok": True}
+
 # --------------- Tour expenses -----------------
 @api_router.get("/tours/{tour_id}/expenses")
 async def list_tour_expenses(tour_id: str, user: dict = Depends(get_current_user)):
@@ -4378,8 +4471,8 @@ async def delete_contact_message(message_id: str, user: dict = Depends(get_curre
 
 # --------------- Public website schedule -----------------
 # "Upcoming" on www.pravaahacfm.com (nginx proxies /api/schedule here). Only
-# what she has made public: stops of tours switched to "Show on website", and
-# published events. Stop notes are never included.
+# what she has made public: stops of tours switched to "Show on website",
+# one-off performances switched to it, and published events. Notes are never included.
 @api_router.get("/public/schedule")
 async def public_schedule():
     admin = await db.users.find_one({"role": "admin"})
@@ -4416,6 +4509,26 @@ async def public_schedule():
                 "tour_link": f"https://{PUBLIC_ROOT_DOMAIN}/{tour['custom_slug']}" if tour.get("custom_slug")
                     else (f"{os.environ.get('APP_URL', '').rstrip('/')}/tour/{tour['share_token']}" if tour.get("share_token") else None),
             })
+
+    async for pf in db.performances.find({"owner_id": owner_id, "show_on_website": True, "date": {"$gte": today}}):
+        city, venue = pf.get("city"), pf.get("venue")
+        if pf.get("latitude") is not None and pf.get("longitude") is not None:
+            map_q = f"{pf['latitude']},{pf['longitude']}"
+        else:
+            map_q = ", ".join(x for x in (venue, city) if x)
+        items.append({
+            "type": "performance",
+            "date": pf.get("date"),
+            "end_date": None,
+            "time": pf.get("time"),
+            "title": pf.get("title"),
+            "city": city,
+            "venue": venue,
+            "link": None,
+            "map_url": f"https://www.google.com/maps/search/?api=1&query={quote(map_q)}" if map_q else None,
+            "instagram": pf.get("instagram"),
+            "tour_id": None,
+        })
 
     async for ev in db.events.find({"owner_id": owner_id, "status": "published", "end_date": {"$gte": today}}):
         if ev.get("custom_slug"):
@@ -4555,7 +4668,7 @@ class ArchiveEntryIn(BaseModel):
     videos: List[ArchiveVideo] = []
     instagram: List[str] = []  # post/reel links, embedded on the page
     photos: List[WebsitePhoto] = []  # order + descriptions; uploads go through /photos
-    source_type: Optional[str] = None  # "stop" | "event" when created from a suggestion
+    source_type: Optional[str] = None  # "stop" | "event" | "performance" when created from a suggestion
     source_id: Optional[str] = None
 
 def ser_archive_entry(d: dict) -> dict:
@@ -4618,6 +4731,14 @@ async def get_website_archive(user: dict = Depends(get_current_user)):
             "city": (st.get("city") or "").strip() or None, "venue": (st.get("venue") or "").strip() or None,
             "instagram": st.get("instagram"),
         })
+    async for pf in db.performances.find({"owner_id": owner_id, "date": {"$lt": today}}):
+        if ("performance", str(pf["_id"])) in taken:
+            continue
+        suggestions.append({
+            "source_type": "performance", "source_id": str(pf["_id"]),
+            "title": pf.get("title") or "Performance", "date": pf.get("date"), "end_date": None,
+            "city": pf.get("city"), "venue": pf.get("venue"), "instagram": pf.get("instagram"),
+        })
     async for ev in db.events.find({"owner_id": owner_id, "status": "published", "end_date": {"$lt": today}}):
         if ("event", str(ev["_id"])) in taken:
             continue
@@ -4647,8 +4768,8 @@ def _archive_fields(body: ArchiveEntryIn) -> dict:
 @api_router.post("/website/archive")
 async def create_archive_entry(body: ArchiveEntryIn, user: dict = Depends(get_current_user)):
     doc = {**_archive_fields(body), "owner_id": user["_id"], "photos": [],
-           "source_type": body.source_type if body.source_type in ("stop", "event") else None,
-           "source_id": body.source_id if body.source_type in ("stop", "event") else None,
+           "source_type": body.source_type if body.source_type in ("stop", "event", "performance") else None,
+           "source_id": body.source_id if body.source_type in ("stop", "event", "performance") else None,
            "created_at": datetime.now(timezone.utc).isoformat()}
     res = await db.website_archive.insert_one(doc)
     doc["_id"] = res.inserted_id
