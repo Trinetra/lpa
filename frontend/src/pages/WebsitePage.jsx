@@ -81,7 +81,7 @@ function ProductionsTab({ initial, onSaved }) {
   const set = (i, k, v) => update(list.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
   const [saving, save] = useSaver(
     "/website/productions",
-    (l) => l.map(({ year, title, subtitle, description, video, video_label }) => ({ year: year || "", title, subtitle, description, video, video_label })),
+    (l) => l.map(({ id, show_on_website, year, title, subtitle, description, video, video_label }) => ({ id, show_on_website, year: year || "", title, subtitle, description, video, video_label })),
     (data) => { onSaved(data); setDirty(false); },
   );
 
@@ -89,20 +89,28 @@ function ProductionsTab({ initial, onSaved }) {
     <div className="space-y-4">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <button type="button" className="btn-ghost text-sm flex items-center gap-1" data-testid="add-production"
-          onClick={() => update([{ year: String(new Date().getFullYear()), title: "", subtitle: "", description: "", video: "", video_label: "" }, ...list])}>
+          onClick={() => update([{ year: String(new Date().getFullYear()), title: "", subtitle: "", description: "", video: "", video_label: "", show_on_website: true }, ...list])}>
           <Plus size={14} /> Add production
         </button>
         <SaveBar dirty={dirty} saving={saving} onSave={() => save(list)} testid="save-productions" />
       </div>
-      <p className="text-xs" style={{ color: "var(--text-muted)" }}>Shown on the website in this order — newest first.</p>
+      <p className="text-xs" style={{ color: "var(--text-muted)" }}>Shown on the website in this order — newest first. Hidden productions stay in the Library.</p>
       <div className="surface">
         {list.map((p, i) => (
           <div key={i} className="px-4 sm:px-6 py-5 space-y-3" style={{ borderTop: i ? "1px solid var(--border)" : "none" }} data-testid={`production-${i}`}>
             <div className="flex justify-between items-center gap-2">
-              <span className="font-serif-display text-lg truncate">{p.title || "New production"}</span>
-              <RowControls i={i} count={list.length} testid="production" onMove={(a, d) => update(move(list, a, d))}
-                onRemove={(a) => window.confirm(`Remove "${list[a].title || "this production"}"?`) && update(list.filter((_, j) => j !== a))} />
+              <span className="font-serif-display text-lg truncate" style={{ opacity: p.show_on_website ? 1 : 0.5 }}>{p.title || "New production"}</span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button type="button" className="btn-ghost text-xs flex items-center gap-1 px-3 py-2" data-testid={`production-hide-${i}`}
+                  onClick={() => set(i, "show_on_website", !p.show_on_website)}
+                  title={p.show_on_website ? "Hide from the website (keeps it in the app)" : "Show on the website"}>
+                  {p.show_on_website ? <><EyeOff size={14} /> Hide</> : <><Eye size={14} /> Show</>}
+                </button>
+                <RowControls i={i} count={list.length} testid="production" onMove={(a, d) => update(move(list, a, d))}
+                  onRemove={(a) => window.confirm(`Delete "${list[a].title || "this production"}"? (Use Hide instead to keep it in the app.)`) && update(list.filter((_, j) => j !== a))} />
+              </div>
             </div>
+            {!p.show_on_website && <span className="uppercase-label" style={{ color: "var(--text-muted)" }}>Hidden from website</span>}
             <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr] gap-3">
               <Field label="Year"><input className={inputCls} value={p.year || ""} placeholder="2026" onChange={(e) => set(i, "year", e.target.value)} /></Field>
               <Field label="Title"><input className={inputCls} value={p.title || ""} placeholder="e.g. Rāvaṇa" onChange={(e) => set(i, "title", e.target.value)} /></Field>

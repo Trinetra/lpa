@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { Plus, X, MapPin, Trash2, Globe, Upload } from "lucide-react";
 import { toast } from "sonner";
+import ProductionSelect from "@/components/ProductionSelect";
 
 // Posters live in the website's media/ folder, served by www.
 const SITE = "https://www.pravaahacfm.com";
@@ -15,6 +16,7 @@ function TourForm({ onClose, onSaved }) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [location, setLocation] = useState("");
+  const [productionId, setProductionId] = useState("");
   const [saving, setSaving] = useState(false);
 
   const submit = async (e) => {
@@ -26,6 +28,7 @@ function TourForm({ onClose, onSaved }) {
         start_date: startDate,
         end_date: endDate,
         location: location || null,
+        production_id: productionId || null,
       });
       toast.success("Tour created");
       onSaved();
@@ -64,11 +67,16 @@ function TourForm({ onClose, onSaved }) {
               className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
           </label>
         </div>
-        <label className="block mb-6">
+        <label className="block mb-3">
           <span className="uppercase-label block mb-1">Location (optional)</span>
           <input value={location} onChange={(e) => setLocation(e.target.value)}
             data-testid="tour-location-input"
             placeholder="e.g. Europe"
+            className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
+        </label>
+        <label className="block mb-6">
+          <span className="uppercase-label block mb-1">Production performed (optional)</span>
+          <ProductionSelect value={productionId} onChange={setProductionId} testid="tour-production-select"
             className="w-full bg-transparent border border-white/10 rounded px-3 py-2" />
         </label>
         <div className="flex justify-end gap-3">
@@ -95,6 +103,7 @@ function PerformanceForm({ perf, onClose, onSaved, onPostersChanged }) {
   const [notes, setNotes] = useState(perf.notes || "");
   const [instagram, setInstagram] = useState(perf.instagram || "");
   const [bookingUrl, setBookingUrl] = useState(perf.booking_url || "");
+  const [productionId, setProductionId] = useState(perf.production_id || "");
   const [posters, setPosters] = useState(perf.posters || []);
   const [pendingFiles, setPendingFiles] = useState([]); // new performance: uploaded after it's created
   const [uploading, setUploading] = useState(0);
@@ -146,7 +155,8 @@ function PerformanceForm({ perf, onClose, onSaved, onPostersChanged }) {
     setSaving(true);
     try {
       const body = { title, city, venue: venue || null, date, time: time || null, notes: notes || null,
-        instagram: instagram.trim(), booking_url: bookingUrl.trim(), show_on_website: showOnWebsite };
+        instagram: instagram.trim(), booking_url: bookingUrl.trim(), show_on_website: showOnWebsite,
+        production_id: productionId || null };
       if (isNew) {
         const r = await api.post("/performances", body);
         for (const file of pendingFiles) {
@@ -191,6 +201,11 @@ function PerformanceForm({ perf, onClose, onSaved, onPostersChanged }) {
           <span className="uppercase-label block mb-1">Title</span>
           <input required value={title} onChange={(e) => setTitle(e.target.value)} data-testid="performance-title-input"
             placeholder="e.g. Margazhi Festival recital" className={input} />
+        </label>
+        <label className="block mb-3">
+          <span className="uppercase-label block mb-1">Production performed (optional)</span>
+          <ProductionSelect value={productionId} onChange={setProductionId} testid="performance-production-select"
+            className={input} />
         </label>
         <div className="grid grid-cols-2 gap-3 mb-3">
           <label className="block">

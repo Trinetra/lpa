@@ -297,6 +297,7 @@ class TourCreate(BaseModel):
     end_date: str
     location: Optional[str] = None
     notes: Optional[str] = None
+    production_id: Optional[str] = None  # the work performed on this tour
 
 class TourUpdate(BaseModel):
     name: Optional[str] = None
@@ -306,6 +307,7 @@ class TourUpdate(BaseModel):
     notes: Optional[str] = None
     custom_slug: Optional[str] = None
     show_on_website: Optional[bool] = None  # lists upcoming stops on www.pravaahacfm.com
+    production_id: Optional[str] = None  # "" clears it
 
 # Top-level app routes a custom tour slug must never collide with (see
 # frontend/src/App.js) — the public site resolves an unknown top-level path
@@ -352,6 +354,7 @@ class PerformanceCreate(BaseModel):
     instagram: Optional[str] = None
     booking_url: Optional[str] = None  # tickets/booking page, shown as a button on the website
     show_on_website: bool = False
+    production_id: Optional[str] = None  # the work performed
 
 class PerformanceUpdate(BaseModel):
     title: Optional[str] = None
@@ -363,6 +366,7 @@ class PerformanceUpdate(BaseModel):
     instagram: Optional[str] = None  # "" clears it
     booking_url: Optional[str] = None  # "" clears it
     show_on_website: Optional[bool] = None
+    production_id: Optional[str] = None  # null clears it
 
 MAX_PERFORMANCE_POSTERS = 3
 
@@ -643,6 +647,7 @@ def ser_tour(doc):
         "share_token": doc.get("share_token"),
         "custom_slug": doc.get("custom_slug"),
         "show_on_website": doc.get("show_on_website", False),
+        "production_id": doc.get("production_id"),
         "created_at": doc.get("created_at"),
     }
 
@@ -915,7 +920,7 @@ def ser_performance(doc):
     return {
         "id": str(doc["_id"]),
         **{k: doc.get(k) for k in ("title", "city", "venue", "date", "time", "notes", "instagram", "booking_url",
-                                    "latitude", "longitude", "formatted_address", "created_at")},
+                                    "latitude", "longitude", "formatted_address", "production_id", "created_at")},
         "show_on_website": doc.get("show_on_website", False),
         "posters": doc.get("posters", []),
     }
@@ -3795,9 +3800,21 @@ async def list_tours(user: dict = Depends(get_current_user)):
     cur = db.tours.find({"owner_id": user["_id"]}).sort("start_date", -1)
     return [ser_tour(d) async for d in cur]
 
+async def _production_id_or_400(value: Optional[str], owner_id: str) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        found = await db.productions.find_one({"_id": ObjectId(value), "owner_id": owner_id})
+    except Exception:
+        found = None
+    if not found:
+        raise HTTPException(status_code=400, detail="Unknown production — please reload the page")
+    return value
+
 @api_router.post("/tours")
 async def create_tour(body: TourCreate, user: dict = Depends(get_current_user)):
     doc = body.model_dump()
+    doc["production_id"] = await _production_id_or_400(doc.get("production_id"), user["_id"])
     doc["owner_id"] = user["_id"]
     doc["share_token"] = secrets.token_urlsafe(24)
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -3815,6 +3832,8 @@ async def update_tour(tour_id: str, body: TourUpdate, user: dict = Depends(get_c
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "production_id" in updates:
+        updates["production_id"] = await _production_id_or_400(updates["production_id"], user["_id"])
     if "custom_slug" in updates:
         slug = updates["custom_slug"].strip().lower()
         if not slug:
@@ -3951,6 +3970,7 @@ async def list_performances(user: dict = Depends(get_current_user)):
 @api_router.post("/performances")
 async def create_performance(body: PerformanceCreate, user: dict = Depends(get_current_user)):
     doc = _clean_performance_fields(body.model_dump())
+    doc["production_id"] = await _production_id_or_400(doc.get("production_id"), user["_id"])
     doc["posters"] = []
     doc["owner_id"] = user["_id"]
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
@@ -3968,6 +3988,8 @@ async def update_performance(perf_id: str, body: PerformanceUpdate, user: dict =
     updates = _clean_performance_fields(body.model_dump(exclude_unset=True))
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "production_id" in updates:
+        updates["production_id"] = await _production_id_or_400(updates["production_id"], user["_id"])
     if ("venue" in updates and updates["venue"] != existing.get("venue")) or \
        ("city" in updates and updates["city"] != existing.get("city")):
         geo = await geocoding_service.geocode_venue(updates.get("venue", existing.get("venue")),
@@ -4600,10 +4622,14 @@ async def public_schedule():
     return items
 
 # --------------- Website content (Website page in the app) -----------------
-# Productions, videos and gallery for www.pravaahacfm.com. Stored as one
-# website_content doc per owner; every save re-renders those sections of the
-# static site (see services/website.py).
+# Productions, videos and gallery for www.pravaahacfm.com. Videos and gallery
+# are stored in one website_content doc per owner; productions have their own
+# collection (the Library files material under them), and only those with
+# show_on_website appear on the site. Every save re-renders those sections of
+# the static site (see services/website.py).
 class WebsiteProduction(BaseModel):
+    id: Optional[str] = None  # absent for new productions (and from older app builds)
+    show_on_website: Optional[bool] = None  # None keeps the current setting (on for new ones)
     year: str = Field(max_length=20)
     title: str = Field(min_length=1, max_length=200)
     subtitle: Optional[str] = Field(default=None, max_length=200)
@@ -4621,15 +4647,27 @@ class WebsitePhoto(BaseModel):
     alt: Optional[str] = Field(default=None, max_length=300)
     hidden: bool = False  # kept in the app, left off the website
 
+def ser_production(doc):
+    return {
+        "id": str(doc["_id"]),
+        **{k: doc.get(k) for k in ("year", "title", "subtitle", "description", "video_id", "video_label")},
+        "show_on_website": doc.get("show_on_website", True),
+    }
+
 async def _website_content(owner_id: str) -> dict:
-    doc = await db.website_content.find_one({"owner_id": owner_id})
-    return doc or {"owner_id": owner_id, "productions": [], "videos": [], "gallery": []}
+    doc = await db.website_content.find_one({"owner_id": owner_id}) or {"owner_id": owner_id, "videos": [], "gallery": []}
+    cur = db.productions.find({"owner_id": owner_id}).sort("sort_order", 1)
+    doc["productions"] = [ser_production(p) async for p in cur]
+    return doc
 
 async def _save_website_content(owner_id: str, field: str, value: list) -> dict:
     await db.website_content.update_one({"owner_id": owner_id}, {"$set": {field: value}}, upsert=True)
+    return await _render_website(owner_id)
+
+async def _render_website(owner_id: str) -> dict:
     content = await _website_content(owner_id)
     try:
-        website_service.write_sections(content)
+        website_service.write_sections({**content, "productions": [p for p in content["productions"] if p["show_on_website"]]})
     except Exception as e:
         logger.error(f"Website re-render failed: {e}")
         raise HTTPException(status_code=500, detail="Saved, but the website couldn't be updated — please tell Prashanth")
@@ -4644,19 +4682,52 @@ def _video_id_or_400(value: str) -> str:
         raise HTTPException(status_code=400, detail=f'"{value}" doesn\'t look like a YouTube link')
     return vid
 
+@api_router.get("/productions")
+async def list_productions(user: dict = Depends(get_current_user)):
+    return (await _website_content(user["_id"]))["productions"]
+
 @api_router.get("/website/content")
 async def get_website_content(user: dict = Depends(get_current_user)):
     return _ser_website_content(await _website_content(user["_id"]))
 
 @api_router.put("/website/productions")
 async def put_website_productions(body: List[WebsiteProduction], user: dict = Depends(get_current_user)):
-    items = []
-    for p in body:
+    """Saves the whole list in order. Productions keep their id across saves
+    (tours and Library files point at it); ones left out are deleted."""
+    owner_id = user["_id"]
+    existing = {str(p["_id"]): p async for p in db.productions.find({"owner_id": owner_id})}
+    by_title = {p["title"]: pid for pid, p in existing.items()}
+    seen, rows = set(), []
+    for i, p in enumerate(body):
         d = p.model_dump()
+        pid, show = d.pop("id"), d.pop("show_on_website")
+        if pid and pid not in existing:
+            raise HTTPException(status_code=400, detail="Unknown production — please reload the page")
+        if not pid:
+            # Older app builds send no ids — match by title so a save doesn't recreate everything.
+            pid = by_title.get(d["title"].strip())
+        if pid in seen:
+            pid = None
         video = d.pop("video", None)
         d["video_id"] = _video_id_or_400(video) if video and video.strip() else None
-        items.append({k: (v.strip() if isinstance(v, str) else v) or None for k, v in d.items()})
-    return await _save_website_content(user["_id"], "productions", items)
+        fields = {k: (v.strip() if isinstance(v, str) else v) or None for k, v in d.items()}
+        fields["sort_order"] = i
+        if show is not None:
+            fields["show_on_website"] = show
+        seen.add(pid)
+        rows.append((pid, fields))
+    for pid, fields in rows:
+        if pid:
+            await db.productions.update_one({"_id": ObjectId(pid)}, {"$set": fields})
+        else:
+            await db.productions.insert_one({"show_on_website": True, **fields, "owner_id": owner_id,
+                                             "created_at": datetime.now(timezone.utc).isoformat()})
+    removed = [pid for pid in existing if pid not in seen]
+    if removed:
+        await db.productions.delete_many({"_id": {"$in": [ObjectId(x) for x in removed]}})
+        for coll in (db.tours, db.performances):
+            await coll.update_many({"owner_id": owner_id, "production_id": {"$in": removed}}, {"$set": {"production_id": None}})
+    return await _render_website(owner_id)
 
 @api_router.put("/website/videos")
 async def put_website_videos(body: List[WebsiteVideo], user: dict = Depends(get_current_user)):
@@ -5853,6 +5924,18 @@ async def on_startup():
     await db.reminders_sent.create_index([("block_id", 1), ("date", 1), ("student_id", 1)], unique=True)
     await db.class_topics.create_index([("owner_id", 1), ("name", 1)], unique=True)
     await db.tour_files.create_index("tour_id")
+    await db.productions.create_index([("owner_id", 1), ("sort_order", 1)])
+    # One-time: productions used to be a list inside website_content. Kept
+    # there under productions_pre_library as a backup copy; nothing reads it.
+    async for wc in db.website_content.find({"productions": {"$exists": True}}):
+        if not await db.productions.count_documents({"owner_id": wc["owner_id"]}):
+            now = datetime.now(timezone.utc).isoformat()
+            docs = [{**p, "show_on_website": True, "sort_order": i, "owner_id": wc["owner_id"], "created_at": now}
+                    for i, p in enumerate(wc["productions"])]
+            if docs:
+                await db.productions.insert_many(docs)
+        await db.website_content.update_one({"_id": wc["_id"]}, {"$rename": {"productions": "productions_pre_library"}})
+        logger.info(f"Moved {len(wc['productions'])} productions into their own collection")
 
     # Student portal
     await db.student_invites.create_index("token", unique=True)

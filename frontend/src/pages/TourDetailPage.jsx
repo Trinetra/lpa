@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { api, formatApiErrorDetail, API } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
+import ProductionSelect from "@/components/ProductionSelect";
 import {
   ArrowLeft, Plus, X, Trash2, MapPin, Download, FileText,
   Navigation, Users, CheckSquare, Square, Link2, Copy, Upload, FolderOpen, ExternalLink,
@@ -1212,6 +1213,30 @@ function WebsiteToggle({ tourId, enabled, onSaved }) {
   );
 }
 
+// The work performed on this tour — its stops become performances to file
+// Library material under.
+function TourProduction({ tourId, productionId, onSaved }) {
+  const [saving, setSaving] = useState(false);
+  const change = async (value) => {
+    setSaving(true);
+    try {
+      await api.patch(`/tours/${tourId}`, { production_id: value });
+      onSaved();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Couldn't update that");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <label className="flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+      Production
+      <ProductionSelect value={productionId} onChange={change} disabled={saving} testid="tour-production-select"
+        className="bg-transparent border border-white/10 rounded px-2 py-1 text-xs" />
+    </label>
+  );
+}
+
 function CustomLinkEditor({ tourId, customSlug, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(customSlug || "");
@@ -1322,6 +1347,7 @@ export default function TourDetailPage() {
           </button>
           <CustomLinkEditor tourId={id} customSlug={tour.custom_slug} onSaved={reloadTour} />
           <WebsiteToggle tourId={id} enabled={tour.show_on_website} onSaved={reloadTour} />
+          <TourProduction tourId={id} productionId={tour.production_id} onSaved={reloadTour} />
         </div>
       </header>
 
