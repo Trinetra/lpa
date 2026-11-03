@@ -53,6 +53,11 @@ services:
       STORAGE_BACKEND: "local"
       LOCAL_UPLOAD_DIR: "/data/uploads"
       WEBSITE_DIR: "/website"
+      # Library files: private Cloudflare R2 bucket (see services/library.py).
+      R2_ENDPOINT: "${R2_ENDPOINT:-}"
+      R2_BUCKET: "${R2_BUCKET:-}"
+      R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-}"
+      R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-}"
       # Email: direct Resend when RESEND_API_KEY is set.
       RESEND_API_KEY: "${RESEND_API_KEY:-}"
       RESEND_FROM: "${RESEND_FROM:-onboarding@resend.dev}"

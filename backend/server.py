@@ -6,6 +6,8 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import io
+import asyncio
+import mimetypes
 import re
 import uuid
 import logging
@@ -42,6 +44,7 @@ from services import push as push_service
 from services import geocoding as geocoding_service
 from services import transcription as transcription_service
 from services import website as website_service
+from services import library as library_service
 
 # --------------- Config -----------------
 JWT_ALGORITHM = "HS256"
@@ -317,7 +320,7 @@ RESERVED_SLUGS = {
     "login", "reset-password", "invoice", "tour", "dashboard", "students",
     "schedule", "classes", "payments", "invoices", "tours", "charts", "settings",
     "portal", "requests", "event", "events", "crm", "announcements", "calendar",
-    "outreach", "privacy", "messages", "website",
+    "outreach", "privacy", "messages", "website", "library",
 }
 
 # Public tour/event links live on the bare root domain, not the app's own
@@ -4716,15 +4719,20 @@ async def put_website_productions(body: List[WebsiteProduction], user: dict = De
             fields["show_on_website"] = show
         seen.add(pid)
         rows.append((pid, fields))
+    removed = [pid for pid in existing if pid not in seen]
+    in_use = await db.library_items.distinct("production_id", {"owner_id": owner_id, "production_id": {"$in": removed}})
+    if in_use:
+        names = ", ".join(existing[pid]["title"] for pid in in_use)
+        raise HTTPException(status_code=400, detail=f"{names} still has files in the Library — move or delete them there first (including Trash)")
     for pid, fields in rows:
         if pid:
             await db.productions.update_one({"_id": ObjectId(pid)}, {"$set": fields})
         else:
             await db.productions.insert_one({"show_on_website": True, **fields, "owner_id": owner_id,
                                              "created_at": datetime.now(timezone.utc).isoformat()})
-    removed = [pid for pid in existing if pid not in seen]
     if removed:
         await db.productions.delete_many({"_id": {"$in": [ObjectId(x) for x in removed]}})
+        await db.library_venues.delete_many({"owner_id": owner_id, "production_id": {"$in": removed}})
         for coll in (db.tours, db.performances):
             await coll.update_many({"owner_id": owner_id, "production_id": {"$in": removed}}, {"$set": {"production_id": None}})
     return await _render_website(owner_id)
@@ -4764,6 +4772,310 @@ async def put_website_gallery(body: List[WebsitePhoto], user: dict = Depends(get
         if p["src"] not in kept:
             website_service.delete_photo_files(p)
     return result
+
+# --------------- Library -----------------
+# Material for each production (music, lighting cues, videos, costumes,
+# expenses…). Files live in a private R2 bucket (services/library.py) and go
+# there straight from the browser; library_items holds what they are. Each
+# item can be tied to one performance of the production — a stop of a tour
+# that performed it, a one-off performance of it, or a venue added here
+# (library_venues) — or to none ("General"). Deleting moves an item to Trash,
+# emptied after LIBRARY_TRASH_DAYS.
+LIBRARY_CATEGORIES = ("music", "lighting", "video", "photos", "costume", "set", "choreography",
+                      "expenses", "contracts", "press", "publicity", "other")
+LIBRARY_TRASH_DAYS = 30
+LIBRARY_PART_BATCH = 50  # presigned part URLs handed out per request
+
+class LibraryMeta(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=200)
+    category: str
+    performance_ref: Optional[str] = None  # "stop:<id>" | "show:<id>" | "venue:<id>"; None = General
+    version: Optional[str] = Field(default=None, max_length=60)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    tags: List[str] = []
+
+class LibraryUploadStart(LibraryMeta):
+    filename: str = Field(min_length=1, max_length=300)
+    size: int = Field(gt=0)
+    content_type: Optional[str] = None
+
+class LibraryLinkCreate(LibraryMeta):
+    url: str = Field(min_length=1, max_length=2000)
+
+class LibraryItemUpdate(BaseModel):
+    production_id: Optional[str] = None
+    title: Optional[str] = Field(default=None, max_length=200)
+    category: Optional[str] = None
+    performance_ref: Optional[str] = None  # "" = General
+    version: Optional[str] = Field(default=None, max_length=60)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    tags: Optional[List[str]] = None
+
+class LibraryPartsRequest(BaseModel):
+    numbers: List[int]
+
+class LibraryPart(BaseModel):
+    part_number: int
+    etag: str
+
+class LibraryUploadComplete(BaseModel):
+    parts: List[LibraryPart]
+
+class LibraryVenueCreate(BaseModel):
+    venue: str = Field(min_length=1, max_length=200)
+    city: Optional[str] = Field(default=None, max_length=100)
+    date: Optional[str] = None
+    label: Optional[str] = Field(default=None, max_length=100)
+
+def ser_library_item(doc):
+    out = {
+        "id": str(doc["_id"]),
+        **{k: doc.get(k) for k in ("production_id", "kind", "title", "category", "performance", "version", "notes",
+                                    "filename", "size", "content_type", "url", "status", "created_at", "deleted_at")},
+        "tags": doc.get("tags", []),
+        "thumb_url": library_service.get_url(doc["thumb_key"]) if doc.get("thumb_key") else None,
+    }
+    return out
+
+async def _get_owned_production(production_id: str, owner_id: str) -> dict:
+    try:
+        doc = await db.productions.find_one({"_id": ObjectId(production_id), "owner_id": owner_id})
+    except Exception:
+        doc = None
+    if not doc:
+        raise HTTPException(status_code=404, detail="Production not found")
+    return doc
+
+async def _get_owned_library_item(item_id: str, owner_id: str) -> dict:
+    try:
+        doc = await db.library_items.find_one({"_id": ObjectId(item_id), "owner_id": owner_id})
+    except Exception:
+        doc = None
+    if not doc:
+        raise HTTPException(status_code=404, detail="File not found")
+    return doc
+
+async def _library_performances(owner_id: str, production_id: str) -> list:
+    """Every performance of this production that material can be filed under, newest first."""
+    out = []
+    tours = {str(t["_id"]): t async for t in db.tours.find({"owner_id": owner_id, "production_id": production_id})}
+    if tours:
+        async for s in db.tour_stops.find({"owner_id": owner_id, "tour_id": {"$in": list(tours)}}):
+            out.append({"ref": f"stop:{s['_id']}", "venue": (s.get("venue") or "").strip() or None, "city": s.get("city"),
+                        "date": s.get("stop_date"), "label": tours[s["tour_id"]].get("name")})
+    async for p in db.performances.find({"owner_id": owner_id, "production_id": production_id}):
+        out.append({"ref": f"show:{p['_id']}", "venue": p.get("venue"), "city": p.get("city"),
+                    "date": p.get("date"), "label": p.get("title")})
+    async for v in db.library_venues.find({"owner_id": owner_id, "production_id": production_id}):
+        out.append({"ref": f"venue:{v['_id']}", "venue": v.get("venue"), "city": v.get("city"),
+                    "date": v.get("date"), "label": v.get("label")})
+    out.sort(key=lambda x: x.get("date") or "", reverse=True)
+    return out
+
+async def _library_performance_or_400(owner_id: str, production_id: str, ref: Optional[str]) -> Optional[dict]:
+    # Stored as a copy so items keep their venue if the tour stop is later deleted.
+    if not ref:
+        return None
+    match = next((p for p in await _library_performances(owner_id, production_id) if p["ref"] == ref), None)
+    if not match:
+        raise HTTPException(status_code=400, detail="That performance isn't one of this production's — please reload the page")
+    return match
+
+def _library_meta_fields(m: dict) -> dict:
+    fields = {}
+    if "category" in m and m["category"] is not None:
+        if m["category"] not in LIBRARY_CATEGORIES:
+            raise HTTPException(status_code=400, detail="Unknown category")
+        fields["category"] = m["category"]
+    for k in ("title", "version", "notes"):
+        if k in m and m[k] is not None:
+            fields[k] = m[k].strip() or None
+    if "tags" in m and m["tags"] is not None:
+        tags = []
+        for t in m["tags"]:
+            t = t.strip()[:40]
+            if t and t.lower() not in [x.lower() for x in tags]:
+                tags.append(t)
+        fields["tags"] = tags[:30]
+    return fields
+
+async def _purge_library(owner_id: str) -> None:
+    """Empties Trash older than LIBRARY_TRASH_DAYS and drops uploads abandoned
+    for a day (browser closed mid-upload). Run when the Library is opened."""
+    now = datetime.now(timezone.utc)
+    trash_cutoff = (now - timedelta(days=LIBRARY_TRASH_DAYS)).isoformat()
+    stale_cutoff = (now - timedelta(days=1)).isoformat()
+    cur = db.library_items.find({"owner_id": owner_id, "$or": [
+        {"deleted_at": {"$ne": None, "$lt": trash_cutoff}},
+        {"status": "uploading", "created_at": {"$lt": stale_cutoff}},
+    ]})
+    async for doc in cur:
+        await _delete_library_item_for_good(doc)
+
+async def _delete_library_item_for_good(doc: dict) -> None:
+    if doc.get("status") == "uploading" and doc.get("upload_id"):
+        await asyncio.to_thread(library_service.abort_upload, doc["key"], doc["upload_id"])
+    if doc.get("kind") == "file":
+        await asyncio.to_thread(library_service.delete, [doc.get("key"), doc.get("thumb_key")])
+    await db.library_items.delete_one({"_id": doc["_id"]})
+
+@api_router.get("/library")
+async def library_home(user: dict = Depends(get_current_user)):
+    owner_id = user["_id"]
+    await _purge_library(owner_id)
+    counts = {r["_id"]: r for r in await db.library_items.aggregate([
+        {"$match": {"owner_id": owner_id, "deleted_at": None, "status": "ready"}},
+        {"$group": {"_id": "$production_id", "count": {"$sum": 1}, "size": {"$sum": {"$ifNull": ["$size", 0]}}}},
+    ]).to_list(None)}
+    productions = (await _website_content(owner_id))["productions"]
+    return {
+        "productions": [{**p, "item_count": counts.get(p["id"], {}).get("count", 0),
+                         "total_size": counts.get(p["id"], {}).get("size", 0)} for p in productions],
+        "trash_count": await db.library_items.count_documents({"owner_id": owner_id, "deleted_at": {"$ne": None}}),
+    }
+
+@api_router.get("/library/productions/{production_id}")
+async def library_production(production_id: str, trash: bool = False, user: dict = Depends(get_current_user)):
+    owner_id = user["_id"]
+    prod = await _get_owned_production(production_id, owner_id)
+    q = {"owner_id": owner_id, "production_id": production_id, "status": "ready",
+         "deleted_at": {"$ne": None} if trash else None}
+    items = [ser_library_item(d) async for d in db.library_items.find(q).sort("created_at", -1)]
+    return {"production": ser_production(prod), "performances": await _library_performances(owner_id, production_id),
+            "items": items}
+
+@api_router.post("/library/productions/{production_id}/venues")
+async def add_library_venue(production_id: str, body: LibraryVenueCreate, user: dict = Depends(get_current_user)):
+    await _get_owned_production(production_id, user["_id"])
+    doc = {"owner_id": user["_id"], "production_id": production_id, "venue": body.venue.strip(),
+           "city": (body.city or "").strip() or None, "date": _valid_iso_date(body.date, "Date"),
+           "label": (body.label or "").strip() or None, "created_at": datetime.now(timezone.utc).isoformat()}
+    res = await db.library_venues.insert_one(doc)
+    return {"ref": f"venue:{res.inserted_id}", **{k: doc[k] for k in ("venue", "city", "date", "label")}}
+
+@api_router.post("/library/productions/{production_id}/uploads")
+async def start_library_upload(production_id: str, body: LibraryUploadStart, user: dict = Depends(get_current_user)):
+    owner_id = user["_id"]
+    await _get_owned_production(production_id, owner_id)
+    m = body.model_dump()
+    fields = _library_meta_fields(m)
+    perf = await _library_performance_or_400(owner_id, production_id, body.performance_ref)
+    oid = ObjectId()
+    key = f"items/{oid}/original"
+    content_type = body.content_type or mimetypes.guess_type(body.filename)[0] or "application/octet-stream"
+    upload_id = await asyncio.to_thread(library_service.start_upload, key, content_type)
+    filename = body.filename.strip()
+    doc = {"_id": oid, "owner_id": owner_id, "production_id": production_id, "kind": "file",
+           "title": fields.pop("title", None) or os.path.splitext(filename)[0], **fields, "performance": perf,
+           "filename": filename, "size": body.size, "content_type": content_type, "key": key,
+           "upload_id": upload_id, "status": "uploading", "deleted_at": None,
+           "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.library_items.insert_one(doc)
+    part_size = library_service.part_size(body.size)
+    return {"item": ser_library_item(doc), "part_size": part_size, "part_count": -(-body.size // part_size)}
+
+@api_router.post("/library/items/{item_id}/parts")
+async def library_upload_part_urls(item_id: str, body: LibraryPartsRequest, user: dict = Depends(get_current_user)):
+    doc = await _get_owned_library_item(item_id, user["_id"])
+    if doc.get("status") != "uploading":
+        raise HTTPException(status_code=400, detail="This upload has already finished")
+    numbers = [n for n in body.numbers if 1 <= n <= library_service.MAX_PARTS][:LIBRARY_PART_BATCH]
+    urls = library_service.part_urls(doc["key"], doc["upload_id"], numbers)
+    return {"urls": {str(n): u for n, u in urls.items()}}
+
+@api_router.post("/library/items/{item_id}/complete")
+async def complete_library_upload(item_id: str, body: LibraryUploadComplete, user: dict = Depends(get_current_user)):
+    doc = await _get_owned_library_item(item_id, user["_id"])
+    if doc.get("status") != "uploading":
+        raise HTTPException(status_code=400, detail="This upload has already finished")
+    parts = sorted((p.model_dump() for p in body.parts), key=lambda p: p["part_number"])
+    try:
+        await asyncio.to_thread(library_service.complete_upload, doc["key"], doc["upload_id"], parts)
+    except Exception as e:
+        logger.error(f"Library upload {item_id} couldn't complete: {e}")
+        raise HTTPException(status_code=502, detail="The upload couldn't be finished — please try that file again")
+    updates = {"status": "ready", "upload_id": None}
+    if (doc.get("content_type") or "").startswith("image/") or doc["filename"].lower().endswith((".heic", ".heif")):
+        thumb = await asyncio.to_thread(library_service.make_thumbnail, doc["key"], doc["size"])
+        if thumb:
+            updates["thumb_key"] = f"items/{doc['_id']}/thumb.jpg"
+            await asyncio.to_thread(library_service.put_bytes, updates["thumb_key"], thumb, "image/jpeg")
+    await db.library_items.update_one({"_id": doc["_id"]}, {"$set": updates})
+    return ser_library_item(await db.library_items.find_one({"_id": doc["_id"]}))
+
+@api_router.post("/library/items/{item_id}/thumbnail")
+async def set_library_thumbnail(item_id: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """A preview frame the browser captured from a video it just uploaded."""
+    doc = await _get_owned_library_item(item_id, user["_id"])
+    data = await file.read()
+    if len(data) > 2 * 1024 * 1024 or not data.startswith(b"\xff\xd8"):
+        raise HTTPException(status_code=400, detail="Thumbnail must be a JPEG under 2 MB")
+    key = f"items/{doc['_id']}/thumb.jpg"
+    await asyncio.to_thread(library_service.put_bytes, key, data, "image/jpeg")
+    await db.library_items.update_one({"_id": doc["_id"]}, {"$set": {"thumb_key": key}})
+    return ser_library_item(await db.library_items.find_one({"_id": doc["_id"]}))
+
+@api_router.post("/library/productions/{production_id}/links")
+async def add_library_link(production_id: str, body: LibraryLinkCreate, user: dict = Depends(get_current_user)):
+    owner_id = user["_id"]
+    await _get_owned_production(production_id, owner_id)
+    url = body.url.strip()
+    if not re.match(r"^https?://", url, re.I):
+        url = "https://" + url
+    if not re.match(r"^https?://[^\s/]+\.[^\s/]+\S*$", url, re.I):
+        raise HTTPException(status_code=400, detail=f'"{body.url}" doesn\'t look like a web link')
+    fields = _library_meta_fields(body.model_dump())
+    doc = {"owner_id": owner_id, "production_id": production_id, "kind": "link",
+           "title": fields.pop("title", None) or re.sub(r"^https?://(www\.)?", "", url).split("/")[0], **fields,
+           "performance": await _library_performance_or_400(owner_id, production_id, body.performance_ref),
+           "url": url, "status": "ready", "deleted_at": None, "created_at": datetime.now(timezone.utc).isoformat()}
+    res = await db.library_items.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return ser_library_item(doc)
+
+@api_router.patch("/library/items/{item_id}")
+async def update_library_item(item_id: str, body: LibraryItemUpdate, user: dict = Depends(get_current_user)):
+    owner_id = user["_id"]
+    doc = await _get_owned_library_item(item_id, owner_id)
+    m = body.model_dump(exclude_unset=True)
+    updates = _library_meta_fields(m)
+    if updates.get("title") is None and "title" in updates:
+        raise HTTPException(status_code=400, detail="Title can't be empty")
+    production_id = doc["production_id"]
+    if m.get("production_id") and m["production_id"] != production_id:
+        await _get_owned_production(m["production_id"], owner_id)
+        production_id = updates["production_id"] = m["production_id"]
+        if "performance_ref" not in m:
+            updates["performance"] = None  # the old production's venue doesn't apply to the new one
+    if "performance_ref" in m:
+        updates["performance"] = await _library_performance_or_400(owner_id, production_id, m["performance_ref"])
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.library_items.update_one({"_id": doc["_id"]}, {"$set": updates})
+    return ser_library_item(await db.library_items.find_one({"_id": doc["_id"]}))
+
+@api_router.get("/library/items/{item_id}/url")
+async def library_item_url(item_id: str, download: bool = False, user: dict = Depends(get_current_user)):
+    doc = await _get_owned_library_item(item_id, user["_id"])
+    if doc.get("kind") != "file" or doc.get("status") != "ready":
+        raise HTTPException(status_code=400, detail="This item has no file")
+    return {"url": library_service.get_url(doc["key"], doc["filename"] if download else None)}
+
+@api_router.delete("/library/items/{item_id}")
+async def delete_library_item(item_id: str, user: dict = Depends(get_current_user)):
+    """Moves to Trash; a cancelled upload, or anything already in Trash, is deleted for good."""
+    doc = await _get_owned_library_item(item_id, user["_id"])
+    if doc.get("status") == "uploading" or doc.get("deleted_at"):
+        await _delete_library_item_for_good(doc)
+        return {"ok": True, "deleted": True}
+    await db.library_items.update_one({"_id": doc["_id"]}, {"$set": {"deleted_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True, "deleted": False}
+
+@api_router.post("/library/items/{item_id}/restore")
+async def restore_library_item(item_id: str, user: dict = Depends(get_current_user)):
+    doc = await _get_owned_library_item(item_id, user["_id"])
+    await db.library_items.update_one({"_id": doc["_id"]}, {"$set": {"deleted_at": None}})
+    return ser_library_item(await db.library_items.find_one({"_id": doc["_id"]}))
 
 # --------------- Website past events (archive) -----------------
 # Past performances/workshops with photos and videos, published on
@@ -5925,6 +6237,8 @@ async def on_startup():
     await db.class_topics.create_index([("owner_id", 1), ("name", 1)], unique=True)
     await db.tour_files.create_index("tour_id")
     await db.productions.create_index([("owner_id", 1), ("sort_order", 1)])
+    await db.library_items.create_index([("owner_id", 1), ("production_id", 1), ("deleted_at", 1), ("created_at", -1)])
+    await db.library_venues.create_index([("owner_id", 1), ("production_id", 1)])
     # One-time: productions used to be a list inside website_content. Kept
     # there under productions_pre_library as a backup copy; nothing reads it.
     async for wc in db.website_content.find({"productions": {"$exists": True}}):

@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import AuthImage from "@/components/AuthImage";
 import {
   LayoutDashboard,
+  Library,
   Users,
   BookOpenCheck,
   Wallet,
@@ -84,6 +85,7 @@ export default function AppLayout() {
     { to: "/payments", label: "Payments", icon: Wallet, tid: "nav-payments" },
     { to: "/invoices", label: "Invoices", icon: FileText, tid: "nav-invoices" },
     { to: "/tours", label: "Tours", icon: Plane, tid: "nav-tours" },
+    { to: "/library", label: "Library", icon: Library, tid: "nav-library" },
     { to: "/events", label: "Events", icon: PartyPopper, tid: "nav-events" },
     { to: "/crm", label: "Contacts", icon: Contact, tid: "nav-crm" },
     { to: "/announcements", label: "Announcements", icon: Megaphone, tid: "nav-announcements" },

@@ -12,6 +12,8 @@ import DashboardPage from "@/pages/DashboardPage";
 import StudentsPage from "@/pages/StudentsPage";
 import StudentDetailPage from "@/pages/StudentDetailPage";
 import SchedulePage from "@/pages/SchedulePage";
+import LibraryPage from "@/pages/LibraryPage";
+import LibraryProductionPage from "@/pages/LibraryProductionPage";
 import CalendarPage from "@/pages/CalendarPage";
 import ClassesPage from "@/pages/ClassesPage";
 import PaymentsPage from "@/pages/PaymentsPage";
@@ -175,6 +177,8 @@ function AppRoutes() {
         <Route path="/invoices" element={<InvoicesPage />} />
         <Route path="/tours" element={<ToursPage />} />
         <Route path="/tours/:id" element={<TourDetailPage />} />
+        <Route path="/library" element={<LibraryPage />} />
+        <Route path="/library/:id" element={<LibraryProductionPage />} />
         <Route path="/events" element={<EventsPage />} />
         <Route path="/events/:id" element={<EventDetailPage />} />
         <Route path="/crm" element={<CrmPage />} />
