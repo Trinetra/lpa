@@ -11,7 +11,7 @@ import {
 // One production's Library: material filed by category and by performance
 // (a tour stop, a one-off performance, or a venue added here), or "General".
 export const CATEGORIES = [
-  ["music", "Music"], ["lighting", "Lighting"], ["video", "Video"], ["photos", "Photos"], ["costume", "Costume"],
+  ["concept", "Concept"], ["music", "Music"], ["lighting", "Lighting"], ["video", "Video"], ["photos", "Photos"], ["costume", "Costume"],
   ["set", "Set & props"], ["choreography", "Choreography notes"], ["expenses", "Expenses"], ["contracts", "Contracts"],
   ["press", "Press"], ["publicity", "Posters & publicity"], ["other", "Other"],
 ];

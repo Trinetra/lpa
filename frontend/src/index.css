@@ -231,3 +231,16 @@ body {
   background: var(--surface) !important;
   color: var(--text);
 }
+/* Tells Safari/Chrome which native control colours to draw — without it,
+   transparent dropdowns get a light system background under our light
+   dark-mode text and are unreadable. */
+:root {
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+select option {
+  background: var(--surface);
+  color: var(--text);
+}

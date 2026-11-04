@@ -4781,7 +4781,7 @@ async def put_website_gallery(body: List[WebsitePhoto], user: dict = Depends(get
 # that performed it, a one-off performance of it, or a venue added here
 # (library_venues) — or to none ("General"). Deleting moves an item to Trash,
 # emptied after LIBRARY_TRASH_DAYS.
-LIBRARY_CATEGORIES = ("music", "lighting", "video", "photos", "costume", "set", "choreography",
+LIBRARY_CATEGORIES = ("concept", "music", "lighting", "video", "photos", "costume", "set", "choreography",
                       "expenses", "contracts", "press", "publicity", "other")
 LIBRARY_TRASH_DAYS = 30
 LIBRARY_PART_BATCH = 50  # presigned part URLs handed out per request
